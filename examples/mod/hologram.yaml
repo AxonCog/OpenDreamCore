@@ -1,0 +1,137 @@
+# 世界全息示例：进服自动出现在玩家前方（/odc world 切换）
+# interact: true 开启世界面板射线交互——鼠标指向元素悬停/左键点击触发 actions 脚本
+# 世界元素动画：与屏幕页面同一套 animations（自动播放/命名/预置特效/path），服务端可 ui_animation 远程触发
+match: world
+display: world
+world:
+  offsetX: 0
+  offsetY: 1.7
+  offsetZ: 3
+  interact: true
+
+# 世界动画演示：招牌呼吸放大、徽章旋转、色块浮动、点击面板抖动
+animations:
+  shop_sign:
+    - preset: breathe
+  badge:
+    - preset: spin
+      duration: 2400
+  glow_bg:
+    - preset: pulse
+  shop_line:
+    - target: shop_line
+      property: y
+      from: -0.1
+      to: -0.35
+      duration: 400
+      easing: quad_out
+
+shop_sign:
+  type: text
+  hologram:
+    x: 0
+    y: 0
+    z: 0
+    scale: 0.03
+  text:
+    content: "=== 欢迎来到服务器 ==="
+    color: "#FFD700"
+
+shop_line:
+  type: text
+  hologram:
+    x: 0
+    y: -0.35
+    z: 0
+    scale: 0.025
+    width: 2.0      # 可点区域（世界单位，默认文本 2x0.25）
+    height: 0.25
+  text:
+    content: "左键点击打开商店菜单"
+    color: "#FFFFFF"
+  actions:
+    click: |-
+      Chat.发送消息("打开商店菜单（示例）")
+      Screen.播放动画("click_bounce")
+    hover: |-
+      Sound.播放音效("minecraft:block.lever.click", 1.0, 2.0)
+
+# 命名动画：点击后世界元素弹一下
+click_bounce:
+  - target: shop_sign
+    preset: slide_up
+    duration: 300
+
+badge:
+  type: text
+  hologram:
+    x: "vars.badge_x"   # 表达式：页面变量驱动位置（服务端 state_patch / Screen.设置变量 即移动）
+    y: 0.3
+    z: 0
+    scale: 0.02
+    draggable: true   # 按住左键拖拽移动徽章（松手提交位置）
+  text:
+    content: "★ 服务器 ★（可拖拽）"
+    color: "#4FC3F7"
+
+badge_move:
+  type: text
+  hologram:
+    x: -1.4
+    y: 0.3
+    z: 0
+    scale: 0.015
+    width: 1.5
+    height: 0.2
+  text:
+    content: "点击移动徽章"
+    color: "#90CAF9"
+  actions:
+    click: |-
+      变量 nx = Str.转小数(Player.获取名字())
+      如果 (nx == null) { nx = Math.随机(0, 1) }
+      Screen.设置变量("badge_x", 1.2 - 2.4 * nx)
+
+hint_line:
+  type: text
+  hologram:
+    x: 0
+    y: -0.7
+    z: 0
+    scale: 0.02
+  text:
+    content: "当前在线: {{global.online}} 人"
+    color: "#9CCC65"
+
+npc:
+  type: entity
+  hologram:
+    x: 0
+    y: -1.1
+    z: 0
+    scale: 0.9
+  entity:
+    type: "minecraft:villager"
+
+npc_name:
+  type: text
+  hologram:
+    x: 0
+    y: -1.6
+    z: 0
+    scale: 0.02
+  text:
+    content: "商店老板"
+    color: "#FFD54F"
+
+# 世界色块（rect billboard 特效，非模型）
+glow_bg:
+  type: rect
+  hologram:
+    x: 0
+    y: -1.05
+    z: 0
+    width: 2.6
+    height: 2.6
+  rect:
+    color: "solid:90,60,180,60"

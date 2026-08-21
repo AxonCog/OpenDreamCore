@@ -1,0 +1,609 @@
+# 欢迎页面示例：首次进入自动出现在 OpenDreamCore/UI/ 目录
+# /odc open welcome 打开
+# 背景音乐（可选）：把 bgm.wav 放进 OpenDreamCore/music/，页面打开自动播放、关闭自动停止
+# music: {file: "bgm.wav", volume: 0.6, loop: true}
+match: welcome
+title: OpenDreamCore 欢迎页
+coin: 100
+sword_item: "minecraft:diamond_sword"
+fruits: [苹果, 香蕉, 橘子, 葡萄, 西瓜]
+bind_var: 开
+
+# 页面生命周期：tick 每秒执行一次（客户端）
+Functions:
+  tick: |-
+    Screen.设置元素("tick_label", "text.content", "在线时长: " + Player.在线时长() + " 秒")
+
+# 页面动画：标题弹跳 + 面板滑入 + 浮动徽章（路径动画）
+animations:
+  title_text:
+    - property: y
+      from: -40
+      to: 10
+      duration: 700
+      easing: bounce
+  panel:
+    - property: scale
+      from: 0.5
+      to: 1
+      duration: 400
+      easing: quad_out
+  logo_badge:
+    - property: path
+      points: [[0, 0], [30, -20], [60, 0], [30, 20], [0, 0]]
+      duration: 3000
+      easing: linear
+      loop: true
+
+title_text:
+  type: text
+  x: 0
+  y: 10
+  width: "window.width"
+  height: 30
+  text:
+    content: "欢迎使用 OpenDreamCore"
+    align: center
+    color: "#FFD700"
+    shadow: true
+
+logo_badge:
+  type: text
+  x: 30
+  y: 40
+  width: 90
+  height: 18
+  text:
+    content: "★ 徽章 ★"
+    color: "#4FC3F7"
+
+panel:
+  type: layout
+  x: "window.width / 2 - 150"
+  y: 60
+  width: 300
+  height: 180
+  background: "solid:30,30,40,200"
+  children:
+    tip:
+      type: text
+      x: 10
+      y: 8
+      width: "parent.width - 20"
+      height: 30
+      text:
+        content: "这是 layout 嵌套示例"
+        color: "#FFFFFF"
+    coin_line:
+      type: text
+      x: 10
+      y: 40
+      width: "parent.width - 20"
+      height: 20
+      text:
+        content: "当前金币: {{vars.coin}}"
+        color: "#9CCC65"
+    buy:
+      type: button
+      x: "parent.width / 2 - 70"
+      y: 100
+      width: 140
+      height: 30
+      button:
+        label: "购买 (100 金币)"
+        background: "#3A7D44"
+      visibleWhen: "vars.coin >= 100"
+      actions:
+        click: |-
+          方法.发送消息("你想买什么？")
+    empty_hint:
+      type: text
+      x: 10
+      y: 100
+      width: "parent.width - 20"
+      height: 20
+      text:
+        content: "金币不足，先去赚点吧"
+        color: "#E57373"
+      visibleWhen: "vars.coin < 100"
+
+slider_demo:
+  type: slider
+  x: "window.width / 2 - 150"
+  y: 260
+  width: 300
+  height: 14
+  slider:
+    min: 0
+    max: 10
+    value: 3
+
+progress_demo:
+  type: progress
+  x: "window.width / 2 - 150"
+  y: 290
+  width: 300
+  height: 12
+  progress:
+    min: 0
+    max: 100
+    value: 42
+    color: "#42A5F5"
+
+name_input:
+  type: input
+  x: "window.width / 2 - 150"
+  y: 320
+  width: 300
+  height: 22
+  input:
+    value: "在这里输入"
+
+shop_row:
+  type: layout
+  x: "window.width / 2 - 150"
+  y: 360
+  width: 300
+  height: 40
+  children:
+    sword_slot:
+      type: item_slot
+      x: 0
+      y: 0
+      width: 40
+      height: 40
+      item: "{{vars.sword_item}}"
+    sword_name:
+      type: text
+      x: 48
+      y: 2
+      width: "parent.width - 48"
+      height: 14
+      text:
+        content: "钻石剑（动态物品演示）"
+        color: "#B0BEC5"
+    sword_price:
+      type: text
+      x: 48
+      y: 18
+      width: "parent.width - 48"
+      height: 14
+      text:
+        content: "售价: 500 金币"
+        color: "#FFD54F"
+
+sound_toggle:
+  type: toggle
+  x: "window.width / 2 - 150"
+  y: 420
+  width: 160
+  height: 18
+  toggle:
+    label: "音效开关"
+    value: true
+
+switch_item:
+  type: button
+  x: "window.width / 2 + 20"
+  y: 420
+  width: 130
+  height: 18
+  button:
+    label: "切换展示物品"
+    background: "#5C6BC0"
+  actions:
+    click: |-
+      Screen.设置变量("sword_item", vars.sword_item == "minecraft:diamond_sword" ? "minecraft:golden_sword" : "minecraft:diamond_sword")
+      Sound.播放音效("minecraft:ui.button.click")
+
+# 快捷栏演示：点击格子切换物品
+hotbar:
+  type: hot_slot
+  x: "window.width / 2 - 100"
+  y: 460
+  width: 200
+  height: 24
+
+# foreach 列表演示：{{fruit}} 预替换逐行展开
+fruit_list:
+  type: foreach
+  x: "window.width / 2 - 150"
+  y: 500
+  width: 300
+  foreach:
+    list: vars.fruits
+    as: fruit
+  children:
+    fruit_row:
+      type: text
+      height: 14
+      text:
+        content: "• {{fruit}}"
+        color: "#B0BEC5"
+
+# 聊天输入框：回车发送聊天
+chat_line:
+  type: chat_input
+  x: "window.width / 2 - 150"
+  y: 590
+  width: 300
+  height: 20
+  chat_input:
+    prefix: "> "
+
+# ========== P1 新组件演示（滚动区：area_input/suggestion/card/flip_card/chart/compass/direction/canvas/boss_bar/embed/import） ==========
+new_components:
+  type: scroll
+  x: "window.width / 2 - 230"
+  y: 630
+  width: 460
+  height: 200
+  scroll:
+    background: "solid:18,22,30,140"
+  children:
+    area_demo:
+      type: area_input
+      x: 10
+      y: 10
+      width: 300
+      height: 70
+      area_input:
+        placeholder: "多行输入：Enter 换行，滚轮滚动"
+    sug_demo:
+      type: suggestion
+      x: 320
+      y: 10
+      width: 130
+      height: 20
+      suggestion:
+        suggestions: [钻石剑, 钻石镐, 钻石斧, 钻石铲, 铁剑, 铁镐, 金剑, 木剑, 石剑]
+        max: 6
+    card_demo:
+      type: card
+      x: 10
+      y: 90
+      width: 200
+      height: 80
+      card:
+        title: "每日任务"
+        subtitle: "普通"
+        content: "击杀 10 只僵尸"
+        footer: "奖励: 100 金币"
+        icon: "minecraft:iron_sword"
+        background: "solid:30,35,46,230"
+    flip_demo:
+      type: flip_card
+      x: 220
+      y: 90
+      width: 120
+      height: 80
+      flip_card:
+        duration: 350
+        front: {title: "正面", content: "点击翻面", background: "solid:58,96,180,230"}
+        back: {title: "背面", content: "★ 宝箱 ★", background: "solid:160,120,40,230"}
+    chart_bar:
+      type: chart
+      x: 10
+      y: 180
+      width: 190
+      height: 90
+      chart:
+        type: bar
+        data: [3, 7, 2, 9, 5]
+        labels: [一, 二, 三, 四, 五]
+        showLabels: true
+        color: "#42A5F5"
+    chart_pie:
+      type: chart
+      x: 210
+      y: 180
+      width: 110
+      height: 90
+      chart:
+        type: pie
+        data: [40, 30, 20, 10]
+        showLabels: true
+        colors: ["#E53935", "#42A5F5", "#66BB6A", "#FFD54F"]
+    compass_demo:
+      type: compass
+      x: 10
+      y: 280
+      width: 300
+      height: 20
+      compass:
+        pixelsPerDegree: 1.0
+        showDegrees: true
+    direction_demo:
+      type: direction
+      x: 320
+      y: 280
+      width: 120
+      height: 20
+      direction:
+        showArrow: true
+        target: [0, 0]
+    canvas_demo:
+      type: canvas
+      x: 10
+      y: 310
+      width: 220
+      height: 90
+      canvas:
+        background: "solid:15,18,24,200"
+        brushes:
+          - {type: gradient, x: 0, y: 0, width: 220, height: 90, from: "#1A237E", to: "#0D1117", vertical: true}
+          - {type: circle, cx: 110, cy: 45, radius: 30, color: "#42A5F5", fill: false}
+          - {type: circle, cx: 110, cy: 45, radius: 20, color: "#66BB6A", fill: true}
+          - {type: line, x1: 10, y1: 80, x2: 210, y2: 20, color: "#FFD54F", width: 2}
+          - {type: triangle, x1: 20, y1: 10, x2: 60, y2: 10, x3: 40, y3: 40, color: "#E53935"}
+          - {type: text, x: 165, y: 72, content: "画布", color: "#FFFFFF"}
+    boss_demo:
+      type: boss_bar
+      x: 240
+      y: 310
+      width: 200
+      height: 10
+      boss_bar:
+        text: "末影龙"
+        progress: 0.65
+        color: "#E53935"
+        overlay: {color: "#7A8BFF", progress: 0.2}
+    embed_demo:
+      type: embed
+      x: 10
+      y: 410
+      width: 200
+      height: 100
+      embed:
+        page: embed_target
+    import_demo:
+      type: import
+      page: card_tpl
+      prefix: tpl_
+      x: 230
+      y: 410
+    method_row:
+      type: layout
+      x: 10
+      y: 520
+      width: 440
+      height: 26
+      children:
+        btn_chat:
+          type: button
+          x: 0
+          y: 0
+          width: 100
+          height: 22
+          button: {label: "打开聊天", background: "#5C6BC0"}
+          actions:
+            click: |-
+              Chat.打开聊天()
+        btn_fps:
+          type: button
+          x: 110
+          y: 0
+          width: 100
+          height: 22
+          button: {label: "显示 FPS", background: "#5C6BC0"}
+          actions:
+            click: |-
+              Chat.添加消息(Str.拼接("当前 FPS: ", Display.获取FPS()))
+        btn_title:
+          type: button
+          x: 220
+          y: 0
+          width: 110
+          height: 22
+          button: {label: "显示标题", background: "#5C6BC0"}
+          actions:
+            click: |-
+              Title.显示标题("§a欢迎", "OpenDreamCore", 10, 40, 10)
+        btn_scale:
+          type: button
+          x: 340
+          y: 0
+          width: 100
+          height: 22
+          button: {label: "界面缩放 2x", background: "#5C6BC0"}
+          actions:
+            click: |-
+              Display.设置界面缩放(2)
+    # 数据绑定演示：bind 映射（变量一变 → 属性自动更新）
+    bind_label:
+      type: text
+      x: 10
+      y: 556
+      width: 300
+      height: 14
+      bind:
+        text.content: "'绑定演示: ' + vars.bind_var"
+        text.color: "vars.bind_var == '开' ? '#66BB6A' : '#E57373'"
+    bind_btn:
+      type: button
+      x: 320
+      y: 552
+      width: 130
+      height: 22
+      button: {label: "切换绑定变量", background: "#5C6BC0"}
+      ripple: {color: "#66FFFFFF", duration: 500}   # 点击涟漪波纹
+      actions:
+        click: |-
+          Screen.设置变量("bind_var", vars.bind_var == "开" ? "关" : "开")
+    # 焦点路由演示：Tab 循环焦点，↑↓ 选择，Enter 确认
+    kb_dropdown:
+      type: dropdown
+      x: 10
+      y: 580
+      width: 150
+      height: 20
+      dropdown:
+        options: [选项一, 选项二, 选项三, 选项四]
+        value: 选项一
+    kb_hint:
+      type: text
+      x: 170
+      y: 582
+      width: 280
+      height: 12
+      text:
+        content: "Tab 切焦点 · ↑↓ 选择 · Enter 确认 · ESC 收起"
+        color: "#6B7280"
+    tick_label:
+      type: text
+      x: 10
+      y: 610
+      width: 300
+      height: 12
+      text:
+        content: "在线时长: -"
+        color: "#9CCC65"
+    # 占位符演示：{player.name} / {query.fps} / {system.time} / {color.primary}
+    ph_label:
+      type: text
+      x: 10
+      y: 632
+      width: 440
+      height: 24
+      text:
+        content: "玩家: {player.name} | FPS: {query.fps} | 时间: {system.time}"
+        color: "{color.primary}"
+    ph_btn:
+      type: button
+      x: 10
+      y: 656
+      width: 200
+      height: 22
+      button: {label: "震动+闪屏演示", background: "#C62828"}
+      actions:
+        click: |-
+          Screen.屏幕震动(6, 400)
+          Screen.闪屏("#FFD54F", 150)
+    trans_btn:
+      type: button
+      x: 220
+      y: 656
+      width: 200
+      height: 22
+      button: {label: "过渡演示", background: "#5C6BC0"}
+      actions:
+        click: |-
+          Screen.过渡("#000000", 500)
+    # 音频演示：循环音效 + 停止
+    loop_snd:
+      type: button
+      x: 10
+      y: 688
+      width: 200
+      height: 22
+      button: {label: "循环音效", background: "#5C6BC0"}
+      actions:
+        click: |-
+          Sound.循环播放("demo", "minecraft:block.note_block.pling", 1, 1)
+    stop_snd:
+      type: button
+      x: 220
+      y: 688
+      width: 200
+      height: 22
+      button: {label: "停止循环音效", background: "#37474F"}
+      actions:
+        click: |-
+          Sound.停止("demo")
+    # adaptive 自适应布局：容器尺寸按子元素内容自动撑开
+    adaptive_box:
+      type: adaptive
+      x: 10
+      y: 720
+      adaptive: {spacing: 4}
+      children:
+        ad_1:
+          type: button
+          width: 240
+          height: 22
+          button: {label: "自适应行一", background: "#3A7D44"}
+        ad_2:
+          type: button
+          width: 180
+          height: 22
+          button: {label: "自适应行二", background: "#5C6BC0"}
+
+# ===== 新组件演示区（round 13）：圆角面板 / 复选框 / 仪表盘 / 环形滑块 / 事件总线 =====
+rounded_panel:
+  type: rect
+  x: 10
+  y: 752
+  width: 300
+  height: 86
+  color: "solid:30,35,46,220"
+  radius: 12
+  border: "#5C6BC0"
+  borderWidth: 2
+
+agree_box:
+  type: checkbox
+  x: 24
+  y: 758
+  width: 150
+  height: 14
+  checkbox:
+    label: "我已阅读协议"
+    value: true
+    color: "#7A8BFF"
+
+volume_gauge:
+  type: gauge
+  x: 220
+  y: 758
+  width: 60
+  height: 60
+  gauge:
+    min: 0
+    max: 100
+    value: 66
+    radius: 26
+    thickness: 4
+    startAngle: -90
+    sweepAngle: 300
+    trackColor: "#303540"
+    color: "#4CAF50"
+
+volume_dial:
+  type: arc_slider
+  x: 290
+  y: 758
+  width: 60
+  height: 60
+  arc_slider:
+    min: 0
+    max: 100
+    value: 30
+    radius: 26
+    thickness: 4
+    color: "#7A8BFF"
+  actions:
+    input: |-
+      Screen.设置元素("dial_value", "text.content", "音量: " + vars.input)
+
+dial_value:
+  type: text
+  x: 24
+  y: 796
+  width: 200
+  height: 12
+  text:
+    content: "拖动环形滑块调音量"
+    color: "#90CAF9"
+
+event_btn:
+  type: button
+  x: 24
+  y: 814
+  width: 200
+  height: 20
+  button: {label: "事件总线：订阅并发布", background: "#3A7D44"}
+  actions:
+    click: |-
+      Event.订阅("demo_event", (msg) => { Screen.设置元素("dial_value", "text.content", "事件: " + msg) })
+      Event.发布("demo_event", "你好事件总线")
+

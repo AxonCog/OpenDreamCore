@@ -1,0 +1,62 @@
+# 嵌入目标页：被其他页面 embed 运行时嵌入（自身不自动打开）
+# 用法：
+#   mini_stats:
+#     type: embed
+#     x: 10
+#     y: 10
+#     width: 200
+#     height: 100
+#     embed:
+#       page: embed_target
+embed_title:
+  type: text
+  x: 0
+  y: 0
+  width: "window.width"
+  height: 14
+  text:
+    content: "嵌入面板"
+    align: center
+    color: "#4FC3F7"
+    shadow: true
+
+embed_bars:
+  type: layout
+  x: 10
+  y: 18
+  width: "window.width - 20"
+  height: 60
+  children:
+    hp_bar:
+      type: progress
+      x: 0
+      y: 0
+      width: "parent.width"
+      height: 10
+      progress:
+        min: 0
+        max: 100
+        value: 80
+        color: "#E53935"
+    mp_bar:
+      type: progress
+      x: 0
+      y: 14
+      width: "parent.width"
+      height: 10
+      progress:
+        min: 0
+        max: 100
+        value: 55
+        color: "#42A5F5"
+    exp_bar:
+      type: progress
+      x: 0
+      y: 28
+      width: "parent.width"
+      height: 10
+      progress:
+        min: 0
+        max: 100
+        value: 30
+        color: "#66BB6A"

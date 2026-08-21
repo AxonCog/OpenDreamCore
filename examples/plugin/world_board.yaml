@@ -1,0 +1,162 @@
+# 服务端世界面板示例（match: world → 进服自动打开世界 3D 面板）
+# 特性：扁平语法 / 射线交互 / 拖拽（多玩家同步 + world_positions.json 持久化）/ 坐标表达式（vars 驱动）/ 动画 / 生命周期
+# 重置位置：/odc world reset world_board move_btn
+match: world
+display: world
+title: 世界公告板
+options:
+  world:
+    offsetX: 0
+    offsetY: 1.8
+    offsetZ: 3
+    interact: true
+    drag: true
+    offScreenArrows: true
+    hoverColor: "#66FFD700"
+    hoverSound: {sound: "minecraft:block.lever.click", volume: 0.5, pitch: 2.0}
+    background: {color: "#10151FCC", gradient: "#1E2A3E", radius: 0.15, border: "#3A4A66"}
+variables:
+  title_text: 服务器公告板
+  body_text: "欢迎来到服务器！\n左键点击按钮，拖拽面板试试"
+functions:
+  open: |-
+    Chat.发送消息("§a[公告板] §f世界面板已打开", player.name)
+  onTabChange: |-
+    Chat.发送消息("§a[公告板] §f页签切换: " + vars.prevTab + " → " + vars.tab, player.name)
+elements:
+  - id: title_el
+    type: text
+    hologram: {x: 0, y: 0, z: 0, scale: 0.03, width: 3, height: 0.3}
+    text: {content: "{vars.title_text}", color: "#FFD700"}
+  - id: body_el
+    type: text
+    hologram: {x: 0, y: -0.4, z: 0, scale: 0.02, width: 4, height: 0.5, wrap: 4}
+    text: {content: "{vars.body_text}", color: "#FFFFFF"}
+  - id: clock_text
+    type: text
+    hologram: {x: 0, y: -0.8, z: 0, scale: 0.015}
+    text: {content: "坐标表达式：标题 y = vars.title_y（服务端 state_patch 可驱动）", color: "#90CAF9"}
+  - id: drag_hint
+    type: text
+    hologram: {x: 0, y: -1.1, z: 0, scale: 0.015, width: 2.5, height: 0.2}
+    text: {content: "拖拽下方按钮（位置全服同步并持久化）", color: "#9CCC65"}
+  - id: move_btn
+    type: text
+    hologram: {x: 0, y: -1.5, z: 0, scale: 0.02, width: 2, height: 0.3, draggable: true, border: {color: "#4FC3F7", width: 0.02, flow: true, flowColor: "#FFFFFF"}, tooltip: {text: "§e按住左键拖动\n§7Shift 锁轴 · 编辑模式 Ctrl 拖拽复制 / Ctrl+C/V · [ ] 调层级\n§a当前玩家: {player.name}", width: 280, border: "#FFD700", background: "#E610151F"}}
+    text: {content: "◈ 可拖拽按钮 ◈", color: "#4FC3F7"}
+    actions:
+      click: |-
+        Chat.发送消息("§a[公告板] §f你点击了按钮！", player.name)
+        Screen.播放动画(player.name, "btn_bounce")
+  - id: reset_btn
+    type: text
+    hologram: {x: 0, y: -1.9, z: 0, scale: 0.015, width: 2.5, height: 0.2}
+    text: {content: "点击复位按钮位置", color: "#6B7280"}
+    actions:
+      click: |-
+        Screen.设置世界元素位置("world_board", "move_btn", 0, -1.5, 0)
+  - id: lamp_toggle
+    type: toggle
+    hologram: {x: -0.5, y: -2.3, z: 0, width: 1.6, height: 0.18}
+    toggle:
+      value: false
+    actions:
+      input: |-
+        如果 (vars.input == "true") {
+          Chat.发送消息("§a[公告板] §f世界开关：开", player.name)
+        } 否则 {
+          Chat.发送消息("§a[公告板] §f世界开关：关", player.name)
+        }
+  - id: lamp_label
+    type: text
+    hologram: {x: 0.6, y: -2.3, z: 0, scale: 0.015}
+    text: {content: "世界开关（点击）", color: "#90CAF9"}
+  - id: volume_slider
+    type: slider
+    hologram: {x: -0.55, y: -2.8, z: 0, width: 1.8, height: 0.16, cursor: "move"}
+    slider:
+      min: 0
+      max: 100
+      value: 30
+    actions:
+      input: |-
+        Chat.发送消息("§a[公告板] §f音量: " + vars.input, player.name)
+  - id: volume_label
+    type: text
+    hologram: {x: 0.7, y: -2.8, z: 0, scale: 0.015}
+    text: {content: "音量（拖动）", color: "#90CAF9"}
+  - id: item_demo
+    type: item_slot
+    hologram: {x: -0.7, y: -3.4, z: 0, height: 0.35, group: demo_group, border: "#FFD700", breathe: {amplitude: 0.08, speed: 1.2}}
+    item_slot:
+      item: "minecraft:diamond"
+      count: 64
+  - id: item_label
+    type: text
+    hologram: {x: 0.6, y: -3.4, z: 0, scale: 0.015, group: demo_group}
+    text: {content: "世界物品展示（拖物品，标签跟随 = 面板组）", color: "#90CAF9"}
+  # ---- 多页签：tab_bar 始终显示；带 tab: 属性的元素只在对应页签显示 ----
+  - id: tab_bar
+    type: tabs
+    hologram: {x: 0, y: 0.45, z: 0, width: 3, height: 0.22}
+    tabs:
+      options: ["概览", "商店"]
+      active: "概览"
+      color: "#2A3A52"
+      activeColor: "#42A5F5"
+    actions:
+      input: |-
+        Chat.发送消息("§a[公告板] §f页签: " + vars.input, player.name)
+  - id: shop_panel
+    type: rect
+    tab: "商店"
+    hologram: {x: 0, y: -4.85, z: 0, width: 3.2, height: 2.2, border: {color: "#3A4A66", width: 0.02}, shadow: {offset: 1.2, size: 1.05}}
+    rect: {color: "#15202F", gradient: "#1E2A3E", radius: 0.2}
+  - id: shop_title
+    type: text
+    tab: "商店"
+    hologram: {x: 0, y: -4.0, z: 0, scale: 0.02, locked: true, tooltip: "锁定元素：防误拖（点击仍可用）", statusIcon: {icon: "●", color: "#E53935"}}
+    text: {content: "{lang.shop.title}", color: "#FFD54F"}
+  - id: shop_item
+    type: item_slot
+    tab: "商店"
+    hologram: {x: -0.7, y: -4.5, z: 0, height: 0.35, badge: {count: 3, color: "#E53935"}, glow: "#33FFD700"}
+    item_slot:
+      item: "minecraft:emerald"
+      count: 32
+  - id: shop_label
+    type: text
+    tab: "商店"
+    hologram: {x: 0.6, y: -4.5, z: 0, scale: 0.015}
+    text: {content: "商店物品（仅商店页签可见）", color: "#90CAF9"}
+  - id: shop_sword
+    type: item_slot
+    tab: "商店"
+    hologram: {x: -0.7, y: -5.1, z: 0, height: 0.35}
+    item_slot:
+      item: "minecraft:diamond_sword"
+      count: 1
+      nbt: "{minecraft:custom_name:'\"§b§l传说之刃\"',minecraft:enchantments:{levels:{minecraft:sharpness:5,minecraft:unbreaking:3}}}"
+  - id: shop_sword_label
+    type: text
+    tab: "商店"
+    hologram: {x: 0.6, y: -5.1, z: 0, scale: 0.015}
+    text: {content: "NBT 组件物品（命名 + 附魔）", color: "#90CAF9"}
+  - id: shop_back_btn
+    type: text
+    tab: "商店"
+    hologram: {x: 0, y: -5.7, z: 0, scale: 0.015, width: 2.5, height: 0.2, clickSound: {sound: "minecraft:block.note_block.pling", volume: 0.6, pitch: 1.6}}
+    text: {content: "◈ 服务端广播切回概览页签 ◈", color: "#4FC3F7"}
+    actions:
+      click: |-
+        Screen.广播世界页签("world_board", "概览")
+animations:
+  title_el:
+    - preset: breathe
+  btn_bounce:
+    - target: move_btn
+      property: scale
+      from: 0.8
+      to: 1
+      duration: 300
+      easing: bounce

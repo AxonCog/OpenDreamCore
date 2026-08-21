@@ -1,0 +1,5 @@
+// 根工程：聚合子模块，编排构建
+subprojects {
+    group = 'com.opendreamcore'
+    version = '0.1.0'
+}

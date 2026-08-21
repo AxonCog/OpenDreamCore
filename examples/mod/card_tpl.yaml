@@ -1,0 +1,25 @@
+# 卡片模板：供其他页面 import 复用（模板页自身不自动打开）
+# 用法：
+#   my_card:
+#     type: import
+#     page: card_tpl
+#     prefix: mc_
+#     x: 10
+#     y: 20
+#     vars: {tpl_name: 我的卡片}
+tpl_name: 模板卡片
+tpl_desc: 这是一个可复用的卡片模板
+
+card_body:
+  type: card
+  x: 0
+  y: 0
+  width: 200
+  height: 60
+  card:
+    title: "{{vars.tpl_name}}"
+    subtitle: "模板卡片"
+    content: "{{vars.tpl_desc}}"
+    icon: "minecraft:book"
+    background: "solid:36,42,56,230"
+    border: "#5C6BC0"

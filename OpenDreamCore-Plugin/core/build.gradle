@@ -1,0 +1,37 @@
+// core：纯逻辑（协议/页面/裁决），零 Bukkit 运行时依赖，可单测。
+// 合并 OpenDreamCore/common 源码（零 MC 依赖部分），服务端与客户端共用同一份协议实现。
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+sourceSets {
+    main {
+        java.srcDir '../../OpenDreamCore/common/src/main/java'
+    }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+    // common 源码的运行时依赖（协议/配置/脚本）
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.yaml:snakeyaml:2.2'
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

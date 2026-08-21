@@ -1,0 +1,85 @@
+// OpenDreamCore 根工程：编排各 target 的独立 Gradle 构建。
+// common/ 共享源码树 + targets/<loader>-<mc> 独立工程。
+
+def targetBuilds = [
+        'neoforge-1.21.1': [directory: 'targets/neoforge-1.21.1', task: 'buildNeoForge1211'],
+        'fabric-1.21.1':   [directory: 'targets/fabric-1.21.1',   task: 'buildFabric1211'],
+        'forge-1.20.1':    [directory: 'targets/forge-1.20.1',    task: 'buildForge1201'],
+        'fabric-1.20.1':   [directory: 'targets/fabric-1.20.1',   task: 'buildFabric1201'],
+        'fabric-1.21.4':   [directory: 'targets/fabric-1.21.4',   task: 'buildFabric1214'],
+        'neoforge-1.21.4': [directory: 'targets/neoforge-1.21.4', task: 'buildNeoForge1214'],
+        'fabric-1.21.8':   [directory: 'targets/fabric-1.21.8',   task: 'buildFabric1218'],
+        'neoforge-1.21.8': [directory: 'targets/neoforge-1.21.8', task: 'buildNeoForge1218'],
+        'neoforge-26.1.2': [directory: 'targets/neoforge-26.1.2', task: 'buildNeoForge2612'],
+        'fabric-26.1.2':   [directory: 'targets/fabric-26.1.2',   task: 'buildFabric2612'],
+        'forge-1.6.4':     [directory: 'targets/forge-1.6.4',     task: 'buildForge164'],
+]
+
+// 只对已初始化（存在 build.gradle）的 target 注册构建任务
+def activeTargets = targetBuilds.findAll { name, tb -> file("${tb.directory}/build.gradle").exists() }
+
+activeTargets.each { targetName, tb ->
+    tasks.register(tb.task, Exec) {
+        group = 'build'
+        description = "Builds ${targetName} in its independent Gradle project."
+        workingDir rootDir
+        commandLine 'cmd', '/c', "${rootDir.absolutePath}\\gradlew.bat", '-p', tb.directory.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
+    }
+}
+
+def selectedTarget = providers.gradleProperty('target').orNull
+def buildAllTargets = providers.gradleProperty('allTargets').map { it.toBoolean() }.orElse(false)
+
+if (selectedTarget != null && !activeTargets.containsKey(selectedTarget)) {
+    def available = activeTargets.keySet().join(', ')
+    throw new GradleException("Unknown or uninitialized target '${selectedTarget}'. Active targets: ${available}")
+}
+
+tasks.register('build') {
+    group = 'build'
+    description = 'Builds the selected target (defaults to the first active one); use -Ptarget=xxx or -PallTargets=true.'
+    def effectiveTarget = selectedTarget ?: activeTargets.keySet().first()
+    dependsOn tasks.named(activeTargets[effectiveTarget].task)
+    if (buildAllTargets.get()) {
+        activeTargets.values().each { tb -> dependsOn tasks.named(tb.task) }
+    }
+}
+
+tasks.register('listTargets') {
+    group = 'help'
+    description = 'Lists all configured targets and their initialization status.'
+    doLast {
+        targetBuilds.each { name, tb ->
+            def status = activeTargets.containsKey(name) ? 'ACTIVE' : 'placeholder'
+            println "${name}: ${tb.directory} [${status}]"
+        }
+    }
+}
+
+def outputDir = file('../output')
+
+// 各 target 自己的 build.gradle 里有 collectOutput（finalizedBy build），编译完自动复制到 ../../../output。
+// 根 collectOutput 只负责收集插件 fat jar（插件不在 target 列表里）。
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Collects plugin fat jar into ../output. Target jars are handled by their own collectOutput.'
+    doLast {
+        outputDir.mkdirs()
+        file('../OpenDreamCore-Plugin/plugin/build/libs').listFiles()?.each { f ->
+            if (f.name.startsWith('OpenDreamCore-Plugin-') && f.name.endsWith('.jar') && !f.name.startsWith('plugin-')) {
+                copy { from f; into outputDir }
+                println "collected ${f.name} -> ${outputDir.absolutePath}"
+            }
+        }
+        println "output -> ${outputDir.absolutePath}: ${outputDir.listFiles()?.findAll { it.name.endsWith('.jar') }?.collect { it.name }}"
+    }
+}
+tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
+
+tasks.register('buildPlugin', Exec) {
+    group = 'build'
+    description = 'Builds the Paper plugin (fat jar) in OpenDreamCore-Plugin.'
+    workingDir file('../OpenDreamCore-Plugin')
+    commandLine 'cmd', '/c', "${rootDir.absolutePath}\\..\\OpenDreamCore-Plugin\\gradlew.bat", 'build', '--offline', '-x', 'test', '--console', 'plain', '--no-daemon'
+}
+tasks.named('buildPlugin').configure { finalizedBy tasks.named('collectOutput') }

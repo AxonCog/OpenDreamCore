@@ -1,0 +1,56 @@
+// plugin：主插件，依赖 core + nms 适配，打 fat jar（含 kotlin-stdlib 与 common 逻辑）。
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '8.3.0'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    maven { url = 'https://repo.dmulloy2.net/repository/public/' }
+}
+
+dependencies {
+    implementation project(':core')
+    implementation project(':nms-v1_21_R1')
+    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+}
+
+tasks.named('shadowJar') {
+    archiveBaseName = 'OpenDreamCore-Plugin'
+    archiveClassifier = ''
+    // ProtocolLib / Paper API 不打进 jar（服务器已有）
+    relocate 'com.opendreamcore.protocol', 'com.opendreamcore.plugin.protocol'
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('shadowJar')
+    finalizedBy tasks.named('collectOutput')
+}
+
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Collects the plugin fat jar into ../../output.'
+    doLast {
+        def out = file('../../output')
+        out.mkdirs()
+        file('build/libs').listFiles()?.each { f ->
+            if (f.name.startsWith('OpenDreamCore-Plugin-') && f.name.endsWith('.jar') && !f.name.startsWith('plugin-')) {
+                copy { from f; into out }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+    }
+}
+
+tasks.named('processResources') {
+    filesMatching('plugin.yml') {
+        expand 'version': project.version
+    }
+}

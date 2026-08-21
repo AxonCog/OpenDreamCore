@@ -1,0 +1,67 @@
+# hideVanilla 演示：隐藏原版血条/饥饿/护甲/物品栏/准星，用自定义 HUD 替换
+# 挂载：Hud.挂载个人("hud_hide", player.name)（或脚本 Hud.挂载个人）
+# 说明：NeoForge 侧逐层精确隐藏；Fabric 侧 hideVanilla: true/all 整层隐藏（原版层无命名）
+# 取消挂载：Hud.卸载(玩家)（脚本方法）；HUD 关闭后原版 HUD 自动恢复
+title: 自定义 HUD（替换原版）
+display: hud
+hideVanilla:
+  - health
+  - food
+  - armor
+  - hotbar
+  - crosshair
+elements:
+  - type: text
+    x: 10
+    y: 8
+    width: 400
+    height: 14
+    text:
+      content: "自定义 HUD 已启用：原版血条/饥饿/护甲/物品栏/准星被隐藏"
+      color: "#FFFFFF"
+      shadow: true
+  - type: text
+    x: 10
+    y: 26
+    width: 300
+    height: 12
+    text:
+      content: "生命 {player.health}/{player.max_health} · 饥饿 {player.hunger}/20"
+      color: "#FF8A80"
+      shadow: true
+  - type: text
+    x: 10
+    y: 40
+    width: 300
+    height: 12
+    text:
+      content: "等级 {player.level} · 经验 {player.exp} · 手持 {player.held_item}"
+      color: "#FFD54F"
+      shadow: true
+  - type: text
+    x: 10
+    y: 54
+    width: 400
+    height: 12
+    text:
+      content: "坐标 {player.x}, {player.y}, {player.z} · {player.biome}"
+      color: "#A5D6A7"
+      shadow: true
+  - type: text
+    x: 10
+    y: 78
+    width: 400
+    height: 12
+    text:
+      content: "右下角：原版 HUD 恢复演示按钮（点击关闭本页 → hideVanilla 自动失效）"
+      color: "#B0BEC5"
+      shadow: true
+  - type: button
+    x: "window.width - 130"
+    y: "window.height - 34"
+    width: 120
+    height: 24
+    button: {label: "恢复原版 HUD", color: "#1E2A38", hoverColor: "#2A3A52", textColor: "#FFFFFF"}
+    actions:
+      click: |-
+        Hud.卸载个人(player.name)

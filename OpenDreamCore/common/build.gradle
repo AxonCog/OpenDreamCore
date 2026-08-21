@@ -1,0 +1,40 @@
+// OpenDreamCore common 共享源码树。
+// 硬约束：零 Minecraft / 加载器依赖（只用 JDK + Gson），可独立编译与单测：
+//   gradlew -p common test
+// 平台绑定能力一律通过 com.opendreamcore.spi 下沉，由各 target 实现注册。
+
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// Windows 中文路径下测试 worker 的 classpath URL 类加载会失败（Gradle 已知问题），
+// 构建产物统一放到用户目录（英文路径），测试与打包都不受影响。
+if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+    layout.buildDirectory = file("${System.getProperty('user.home')}/.gradle/odc-builds/common")
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api 'com.google.code.gson:gson:2.10.1'
+    api 'org.yaml:snakeyaml:2.2'
+    api 'org.antlr:antlr4-runtime:4.13.1'
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // 中文路径下测试 worker 的 classpath URL 编码依赖 file.encoding，必须显式 UTF-8
+    jvmArgs('-Dfile.encoding=UTF-8', '-Dsun.jnu.encoding=UTF-8')
+}

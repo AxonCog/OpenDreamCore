@@ -1,0 +1,111 @@
+# 容器界面演示（服务端）：打开箱子自动替换成自定义 UI
+# 服务端绑定真实容器 → container_sync 推送槽位内容 → chest_slot 实时显示
+# 点击槽位：服务端裁决脚本（vars.slot = 槽位号，vars.container.sessionId = 容器会话）
+match: "minecraft:chest"
+title: 容器演示
+allowEscClose: true
+
+header:
+  type: text
+  x: "window.width / 2 - 120"
+  y: 18
+  width: 240
+  height: 16
+  text:
+    content: "自定义箱子界面"
+    align: center
+    color: "#FFD54F"
+    shadow: true
+
+hint:
+  type: text
+  x: "window.width / 2 - 180"
+  y: 38
+  width: 360
+  height: 12
+  text:
+    content: "左键拿起/放置 | 右键半组/放一 | Shift+左键快捷移动 | ESC 关闭"
+    align: center
+    color: "#9AA3B2"
+
+# container：3x9 自动生成 27 个 chest_slot，点击脚本里用 vars.slot 区分
+grid:
+  type: container
+  x: "window.width / 2 - 178"
+  y: 56
+  width: 356
+  height: 162
+  container:
+    rows: 3
+    cols: 9
+    spacing: 2
+    cellSize: 18
+  actions:
+    click: |-
+      Chat.发送消息("槽位 " + vars.slot + "：" + Container.获取物品(vars.container.sessionId, vars.slot) + " x" + Container.获取数量(vars.container.sessionId, vars.slot))
+      Container.刷新(vars.container.sessionId)
+
+# 点击把物品放进真实容器（改完自动重同步）
+fill_btn:
+  type: button
+  x: "window.width / 2 - 150"
+  y: 236
+  width: 140
+  height: 24
+  button: {label: "放入钻石", background: "#3A7D44"}
+  actions:
+    click: |-
+      Container.设置物品(vars.container.sessionId, 0, "minecraft:diamond", 5)
+      Container.设置物品(vars.container.sessionId, 1, "minecraft:iron_ingot", 3)
+      Chat.发送消息("已在槽位 0/1 放入物品（真实容器已修改）")
+
+clear_btn:
+  type: button
+  x: "window.width / 2 + 10"
+  y: 236
+  width: 140
+  height: 24
+  button: {label: "清空槽位 0", background: "#C62828"}
+  actions:
+    click: |-
+      Container.设置物品(vars.container.sessionId, 0, "")
+      Chat.发送消息("槽位 0 已清空")
+
+# 快捷栏：容器打开时可与箱子互相搬运（左键拿起/放置、右键半组/放一、Shift 快捷移动）
+hotbar:
+  type: hot_slot
+  x: "window.width / 2 - 178"
+  y: 276
+  width: 356
+  height: 26
+  hot_slot:
+    slotColor: "#10151F"
+    selectedColor: "#1E2A3E"
+    accent: "#66BB6A"
+    radius: 3
+
+# 聊天通道演示：消息带颜色码进"系统"通道（chat_display channel: 系统 显示）
+channel_btn:
+  type: button
+  x: "window.width / 2 - 100"
+  y: 270
+  width: 200
+  height: 24
+  button: {label: "发通道消息（颜色）", background: "#5C6BC0"}
+  actions:
+    click: |-
+      ChatChannel.发送("系统", "&#55FF55[系统] §f{player.name} 点击了箱子里的物品")
+      ChatChannel.发送("系统", "§e在线 {system.online} 人，TPS {query.tps}")
+
+# 屏幕特效演示：服务端远程触发客户端震动/闪屏/过渡
+effect_btn:
+  type: button
+  x: "window.width / 2 - 100"
+  y: 304
+  width: 200
+  height: 24
+  button: {label: "服务端震动+过渡", background: "#C62828"}
+  actions:
+    click: |-
+      Screen.屏幕震动(player.name, 8, 400)
+      Screen.过渡(player.name, "#000000", 500)

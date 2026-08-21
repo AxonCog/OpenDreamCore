@@ -1,0 +1,289 @@
+# 主菜单演示（扁平语法）：服务端按玩家编译 + 加密下发
+# - condition: 服务端编译期条件（不满足的元素整体剔除，不可见）
+# - {player.xxx} / {system.xxx}: 编译期占位符（按接收玩家解析）
+# - %xxx%: PlaceholderAPI 令牌（服务器装了 PAPI 才替换）
+# - functions: 生命周期脚本
+# /odc open menu 打开
+title: 主菜单
+display: screen
+options:
+  allowEscClose: true
+  keybinds:                    # 页面打开期间：按 F 上报 OdcKeyEvent（服务端 Bukkit 事件）
+    快捷传送: "key.keyboard.f"
+  mousebinds:                  # 页面打开期间：右键上报 OdcMouseEvent
+    快捷操作: 1
+variables:
+  menu_name: OpenDreamCore 主菜单
+functions:
+  open: |-
+    Sound.播放音效("minecraft:block.chest.open", player.name, 1.0, 1.0)
+elements:
+  - id: header
+    type: text
+    x: "window.width / 2 - 150"
+    y: 20
+    width: 300
+    height: 18
+    text:
+      content: "{menu_name}（{system.server_name}）"
+      align: center
+      color: "#FFD54F"
+      shadow: true
+  - type: text
+    x: "window.width / 2 - 200"
+    y: 46
+    width: 400
+    height: 14
+    text:
+      content: "欢迎 {player.display_name}（等级 {player.level}，PAPI: %player_name%）"
+      align: center
+      color: "#9AA3B2"
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 72
+    width: 200
+    height: 24
+    button: {label: "传送至出生点", background: "#3A7D44"}
+    actions:
+      click: |-
+        Teleport.传送到出生点(player.name)
+        Sound.播放音效(player.name, "minecraft:entity.enderman.teleport", 1.0, 1.0)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 104
+    width: 200
+    height: 24
+    condition: "player.level >= 10"
+    button: {label: "VIP 传送门（10 级以上可见）", background: "#5C6BC0"}
+    actions:
+      click: |-
+        Chat.发送消息("你是 VIP！", player.name)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 104
+    width: 200
+    height: 24
+    condition: "player.level < 10"
+    button: {label: "升级提示（10 级以下可见）", background: "#C62828"}
+    actions:
+      click: |-
+        Chat.发送消息("升到 10 级解锁 VIP 传送门", player.name)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 136
+    width: 200
+    height: 24
+    button: {label: "打开商店", background: "#3A7D44"}
+    actions:
+      click: |-
+        Screen.打开页面("shop", player.name)
+  # 世界 UI 演示：Boss 条 / 名牌 / 物品提示
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 176
+    width: 200
+    height: 24
+    button: {label: "Boss 条 60%", background: "#C62828"}
+    actions:
+      click: |-
+        BossBar.创建("boss_demo", "世界 Boss", 60, "#E53935", player.name)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 208
+    width: 200
+    height: 24
+    button: {label: "移除 Boss 条", background: "#37474F"}
+    actions:
+      click: |-
+        BossBar.移除("boss_demo", player.name)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 240
+    width: 200
+    height: 24
+    button: {label: "名牌开关", background: "#5C6BC0"}
+    actions:
+      click: |-
+        NameTag.设置(player.name, "§e★ 玩家 ★", "#FFD54F")
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 272
+    width: 200
+    height: 24
+    button: {label: "物品提示", background: "#3A7D44"}
+    actions:
+      click: |-
+        ItemTip.显示(player.name, "minecraft:diamond", 5, 2500)
+  # HUD 三型演示
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 304
+    width: 200
+    height: 24
+    button: {label: "挂载全局 HUD", background: "#5C6BC0"}
+    actions:
+      click: |-
+        Hud.挂载全局("hud_global")
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 336
+    width: 200
+    height: 24
+    button: {label: "卸载全局 HUD", background: "#37474F"}
+    actions:
+      click: |-
+        Hud.卸载全局()
+  # 音频演示：背景音乐（文件放客户端 OpenDreamCore/music/）
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 368
+    width: 200
+    height: 24
+    button: {label: "播放音乐", background: "#3A7D44"}
+    actions:
+      click: |-
+        Music.播放(player.name, "bgm.wav", 0.6, 1)
+  - type: button
+    x: "window.width / 2 - 100"
+    y: 400
+    width: 200
+    height: 24
+    button: {label: "停止音乐", background: "#37474F"}
+    actions:
+      click: |-
+        Music.停止(player.name)
+  # ---- 视觉样式演示：渐变圆角面板 / 圆角描边按钮 / 禁用按钮（enabledWhen: false） ----
+  - type: rect
+    x: "window.width / 2 + 130"
+    y: 60
+    width: 250
+    height: 190
+    rect:
+      color: "#1E2A3E"        # 顶色（渐变起点）
+      gradient: "#0F1620"     # 底色（渐变终点，垂直渐变 + 圆角同步）
+      radius: 12
+      border: {color: "#3A4A66", width: 2, flow: true, flowColor: "#FFD54F"}  # 描边流光（1.2s 一圈）
+  - type: text
+    x: "window.width / 2 + 145"
+    y: 70
+    width: 220
+    height: 14
+    text:
+      content: "样式演示（渐变 + 描边流光）"
+      color: "#FFD54F"
+      shadow: true
+  - type: button
+    x: "window.width / 2 + 145"
+    y: 92
+    width: 220
+    height: 26
+    glow: {color: "#33FFD700", size: 1.0}   # 元素发光（四层辉光，与世界面板 hologram.glow 同参数）
+    shadow: {color: "#66000000", offset: 1.2, size: 1.0}   # 元素阴影（三层下移暗影，同 hologram.shadow）
+    tooltip:                            # 悬停提示（对象形式：§ 颜色码 + 可配样式，屏幕/世界同管线）
+      text: "§e圆角描边按钮\n§7背景 / 悬停色 / 圆角 / 描边 / 发光 / 阴影 全演示\n§a当前玩家: {player.name}"
+      background: "#E610151F"
+      border: "#FFD700"
+      width: 240
+    button:
+      label: "圆角描边按钮（radius/border/glow/shadow）"
+      background: "#2A3A52"
+      hoverColor: "#33475F"
+      radius: 8
+      border: "#66BB6A"
+      borderWidth: 2
+    actions:
+      click: |-
+        Chat.发送消息("圆角描边按钮被点击", player.name)
+  - type: button
+    x: "window.width / 2 + 145"
+    y: 126
+    width: 220
+    height: 26
+    enabledWhen: "false"       # 禁用态：置灰 + disabled 贴图优先（无贴图用纯色回退）
+    button:
+      label: "禁用按钮（enabledWhen: false）"
+      background: "#2A3A52"
+      radius: 8
+  - type: text
+    x: "window.width / 2 + 145"
+    y: 160
+    width: 220
+    height: 80
+    text:
+      content: "按钮支持四态贴图：\nbutton.normal / hover / pressed / disabled\n（本地 assets/、mod 纹理或 HTTP 远程图）"
+      color: "#9AA3B2"
+  # 自动高度演示：wrap 折行 + autoHeight 高度随内容（命中区域/布局自适应）
+  - type: text
+    x: "window.width / 2 + 145"
+    y: 242
+    width: 220
+    autoHeight: true
+    wrap: 220
+    text:
+      content: "自动高度文本：wrap 按宽度折行，高度随行数自适应（不写 height，行距 12px）"
+      color: "#80CBC4"
+      lineHeight: 12
+  # ---- 输入框/快捷栏样式演示（右下区域） ----
+  - type: input
+    x: "window.width / 2 + 130"
+    y: 262
+    width: 240
+    height: 22
+    input:
+      placeholder: "圆角描边输入框（点击聚焦）…"
+      background: "#10151F"
+      accent: "#66BB6A"
+      radius: 6
+      border: "#3A4A66"
+      borderWidth: 1
+    actions:
+      input: |-
+        Chat.发送消息("输入: " + vars.input, player.name)
+  - type: hot_slot
+    x: "window.width / 2 + 130"
+    y: 292
+    width: 240
+    height: 26
+    hot_slot:
+      slotColor: "#10151F"
+      selectedColor: "#1E2A3E"
+      accent: "#66BB6A"
+      radius: 4
+  - type: text
+    x: "window.width / 2 + 130"
+    y: 326
+    width: 240
+    height: 60
+    text:
+      content: "输入框：background/accent/radius/border/placeholder/textColor + 光标闪烁\n快捷栏：slotColor/selectedColor/accent/radius/slots"
+      color: "#9AA3B2"
+  # ---- 输入建议键盘导航演示（↑/↓ 移动光标，Enter 选中，ESC 收起） ----
+  - type: suggestion
+    x: "window.width / 2 + 130"
+    y: 396
+    width: 240
+    height: 20
+    suggestion:
+      suggestions: [钻石剑, 钻石镐, 钻石铲, 铁剑, 铁镐, 铁铲, 金剑, 木剑]
+      max: 6
+    actions:
+      input: |-
+        Chat.发送消息("选择: " + vars.input, player.name)
+  # ---- 滑块键盘演示（聚焦后 ←/→ 按 step 步进） ----
+  - type: slider
+    x: "window.width / 2 + 130"
+    y: 424
+    width: 240
+    height: 16
+    slider: {min: 0, max: 100, value: 50, step: 5}
+    actions:
+      input: |-
+        Chat.发送消息("滑块: " + vars.input, player.name)
+  - type: text
+    x: "window.width / 2 + 130"
+    y: 442
+    width: 240
+    height: 12
+    text:
+      content: "Tab 聚焦滑块 → ←/→ 步进（step: 5）；Enter 提交按钮/开关"
+      color: "#9AA3B2"

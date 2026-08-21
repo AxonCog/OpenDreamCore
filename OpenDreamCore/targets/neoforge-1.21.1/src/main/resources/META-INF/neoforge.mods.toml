@@ -1,0 +1,27 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "${mod_license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "OpenDreamCore"
+authors = "${mod_authors}"
+description = '''${mod_description}
+GitHub: https://github.com/AxonCog/OpenDreamCore'''
+# 客户端 mod：不要求服务端也安装本 mod
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.${mod_id}]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,21.2)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.${mod_id}]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.21.2)"
+ordering = "NONE"
+side = "CLIENT"

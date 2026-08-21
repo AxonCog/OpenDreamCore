@@ -1,0 +1,22 @@
+// nms-v1_21_R1：MC 1.21.1（Paper v1_21_R1）版本适配。
+// 放需要 NMS/版本特定 API 的代码（发包、槽位、自定义 payload 拦截等）。
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    maven { url = 'https://repo.dmulloy2.net/repository/public/' }
+}
+
+dependencies {
+    compileOnly project(':core')
+    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+}

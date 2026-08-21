@@ -1,0 +1,61 @@
+# 世界全息示例：进服自动出现在玩家前方（/odc world 切换）
+match: world
+display: world
+world:
+  offsetX: 0
+  offsetY: 1.7
+  offsetZ: 3
+
+shop_sign:
+  type: text
+  hologram:
+    x: 0
+    y: 0
+    z: 0
+    scale: 0.03
+  text:
+    content: "=== 欢迎来到服务器 ==="
+    color: "#FFD700"
+
+shop_line:
+  type: text
+  hologram:
+    x: 0
+    y: -0.35
+    z: 0
+    scale: 0.025
+  text:
+    content: "右键打开商店菜单"
+    color: "#FFFFFF"
+
+hint_line:
+  type: text
+  hologram:
+    x: 0
+    y: -0.7
+    z: 0
+    scale: 0.02
+  text:
+    content: "当前在线: {{global.online}} 人"
+    color: "#9CCC65"
+
+npc:
+  type: entity
+  hologram:
+    x: 0
+    y: -1.1
+    z: 0
+    scale: 0.9
+  entity:
+    type: "minecraft:villager"
+
+npc_name:
+  type: text
+  hologram:
+    x: 0
+    y: -1.6
+    z: 0
+    scale: 0.02
+  text:
+    content: "商店老板"
+    color: "#FFD54F"

@@ -1,0 +1,33 @@
+# 世界面板锚点演示：world.anchor 绝对坐标固定 + world.smooth 平滑跟随
+# 用法：/odc page open world_fixed（坐标按服务器实际场景修改）
+# 锚点模式：
+#   - 默认：相对玩家跟随（offsetX/Y/Z 相对偏移，随玩家移动）
+#   - world.anchor: {x, y, z} → 绝对世界坐标，面板固定不随玩家移动（billboard 始终面向相机）
+#   - world.follow: false → 打开瞬间的位置固定（pin 住）
+#   - world.smooth: 0~1 → 平滑跟随（每帧向目标插值，漂浮感；默认 0 = 刚性跟随）
+title: 固定公告牌
+display: world
+options:
+  world:
+    anchor: {x: 100, y: 64, z: 0}   # 绝对锚点（按需修改；offsetX/Y/Z 仍作为相对微调叠加）
+    interact: true
+    hoverColor: "#66FFD700"
+    background: {color: "#10151FCC", gradient: "#1E2A3E", radius: 0.15, border: "#3A4A66"}
+variables:
+  title_text: 固定公告牌（绝对锚点）
+elements:
+  - id: f_title
+    type: text
+    hologram: {x: 0, y: 0, z: 0, scale: 0.03, width: 4, height: 0.3}
+    text: {content: "{vars.title_text}", color: "#FFD54F"}
+  - id: f_body
+    type: text
+    hologram: {x: 0, y: -0.4, z: 0, scale: 0.018, width: 4, height: 0.4, wrap: 4}
+    text: {content: "面板固定在 world.anchor 坐标\n玩家走动也不会跟随", color: "#E0E0E0"}
+  - id: f_btn
+    type: text
+    hologram: {x: 0, y: -0.8, z: 0, scale: 0.02, width: 2.5, height: 0.3, border: "#FFD700"}
+    text: {content: "◈ 远处点击测试 ◈", color: "#FFD700"}
+    actions:
+      click: |-
+        Chat.发送消息("§6[固定公告牌] §f点击有效（面板不在身边也能交互）", player.name)

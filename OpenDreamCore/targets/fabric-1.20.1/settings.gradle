@@ -1,0 +1,8 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.fabricmc.net/' }
+    }
+}
+
+rootProject.name = 'opendreamcore-fabric-1.20.1'

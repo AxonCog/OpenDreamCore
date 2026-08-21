@@ -1,0 +1,16 @@
+# OpenDreamCore 服务端配置
+# 改完本文件不会热重载（重启生效）；页面/tooltips/云资源目录的文件变化会自动热重载。
+
+# 文件监听自动热重载
+file-watcher:
+  enabled: true      # 监听 UI/resources/tooltips 目录，文件变化自动重载并广播
+  debounce-ms: 300   # 去抖时间（连续保存时合并触发）
+
+# 是否允许客户端加载本地 UI（OpenDreamCore/UI/ 目录的页面）
+# false = 连接服务器时客户端不加载本地 UI，全部由服务端下发（默认）
+# true  = 客户端可以加载本地 UI 页面（单机模式或开发调试用）
+allow-local-ui: false
+
+# 下发到客户端的配置（key=value，进服握手后自动写入客户端 config/opendreamcore/odc.properties）
+client:
+  versionCheck.enforce: false   # true = 版本不匹配强制断开

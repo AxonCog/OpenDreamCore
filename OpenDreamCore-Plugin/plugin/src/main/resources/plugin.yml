@@ -1,0 +1,15 @@
+name: OpenDreamCore
+version: '${version}'
+main: com.opendreamcore.plugin.OpenDreamCorePlugin
+api-version: '1.21'
+authors: [梦幻]
+website: https://github.com/AxonCog/OpenDreamCore
+description: 'OpenDreamCore 服务端核心 | 作者: 梦幻 QQ:2496599413 | GitHub: AxonCog/OpenDreamCore'
+softdepend: [PlaceholderAPI, ProtocolLib]
+
+commands:
+  odc:
+    description: OpenDreamCore 页面管理
+    usage: /odc open <页面id> | close | list | reload
+    permission: opendreamcore.admin
+    permission-message: 你没有权限使用 OpenDreamCore 命令
