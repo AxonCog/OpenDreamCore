@@ -1,0 +1,66 @@
+# 容器界面示例：打开箱子时自动替换（match: minecraft:chest）
+match: "minecraft:chest"
+display: container
+title: 自定义箱子
+
+panel:
+  type: layout
+  x: "window.width / 2 - 100"
+  y: "window.height / 2 - 60"
+  width: 200
+  height: 120
+  background: "solid:25,25,35,220"
+  children:
+    header:
+      type: text
+      x: 0
+      y: 6
+      width: "parent.width"
+      height: 16
+      text:
+        content: "箱子内容"
+        align: center
+        color: "#FFD700"
+    slot_row:
+      type: layout
+      x: 12
+      y: 30
+      width: "parent.width - 24"
+      height: 40
+      children:
+        slot1:
+          type: item_slot
+          x: 0
+          y: 0
+          width: 36
+          height: 36
+          item: "minecraft:diamond"
+        slot2:
+          type: item_slot
+          x: 44
+          y: 0
+          width: 36
+          height: 36
+          item: "minecraft:emerald x3"
+        slot3:
+          type: item_slot
+          x: 88
+          y: 0
+          width: 36
+          height: 36
+          item: "minecraft:gold_ingot x2"
+        slot4:
+          type: item_slot
+          x: 132
+          y: 0
+          width: 36
+          height: 36
+    take_all:
+      type: button
+      x: "parent.width / 2 - 60"
+      y: 82
+      width: 120
+      height: 26
+      button:
+        label: "全部拿走"
+        background: "#3A7D44"

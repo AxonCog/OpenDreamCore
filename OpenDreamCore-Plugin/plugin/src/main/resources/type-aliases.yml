@@ -1,0 +1,14 @@
+# type 别名映射（热加载）
+# 写了 type: texture 或 _texture 后缀的元素会映射到 image
+# 自定义别名直接在这里加，保存后自动热重载
+#
+# 格式：别名: 标准type
+# 作者：梦幻 QQ:2496599413
+
+texture: image
+pic: image
+label: text
+field: input
+combo: dropdown
+switch: toggle
+bar: progress

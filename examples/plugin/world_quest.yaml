@@ -1,0 +1,132 @@
+# 服务端世界面板示例 ②（多面板同屏：与 world_board 同时打开并排显示）
+# 打开方式：/odc page open world_quest（world_board 进服自动开，两块面板并排）
+# 特性：独立锚点（offsetX 左移并排）/ 独立页签与交互状态 / 下拉 / 复选框 / 进度条
+title: 任务面板
+display: world
+options:
+  world:
+    offsetX: -3.8
+    offsetY: 1.8
+    offsetZ: 3
+    interact: true
+    drag: true
+    offScreenArrows: true
+    hoverColor: "#6666BB6A"
+    background: {color: "#0F1A12CC", gradient: "#16281C", radius: 0.15, border: "#2E5D3A"}
+variables:
+  quest_title: 每日任务
+  quest_body: "完成 3 个任务领取奖励！\n（本面板与公告板状态互不影响）"
+functions:
+  open: |-
+    Chat.发送消息("§2[任务面板] §f已打开（与公告板同屏）", player.name)
+  onTabChange: |-
+    Chat.发送消息("§2[任务面板] §f页签切换: " + vars.prevTab + " → " + vars.tab, player.name)
+elements:
+  - id: q_title
+    type: text
+    hologram: {x: 0, y: 0, z: 0, scale: 0.028, width: 2.8, height: 0.28}
+    text: {content: "{vars.quest_title}", color: "#66BB6A"}
+  - id: q_body
+    type: text
+    hologram: {x: 0, y: -0.38, z: 0, scale: 0.017, width: 4, height: 0.5, wrap: 4}
+    text: {content: "{vars.quest_body}", color: "#E0E0E0"}
+  # ---- 独立页签（与公告板页签各自独立切换） ----
+  - id: q_tab_bar
+    type: tabs
+    hologram: {x: 0, y: 0.42, z: 0, width: 2.8, height: 0.2}
+    tabs:
+      options: ["日常", "副本"]
+      active: "日常"
+      color: "#1C2A20"
+      activeColor: "#66BB6A"
+    actions:
+      input: |-
+        Chat.发送消息("§2[任务面板] §f页签: " + vars.input, player.name)
+        Screen.播放动画(player.name, "q_title_wave")
+  - id: q_daily_1
+    type: checkbox
+    tab: "日常"
+    hologram: {x: -0.9, y: -0.9, z: 0, width: 0.2, height: 0.2}
+    checkbox: {value: false, color: "#66BB6A"}
+    actions:
+      input: |-
+        Chat.发送消息("§2[任务面板] §f日常-采集: " + vars.input, player.name)
+  - id: q_daily_1_label
+    type: text
+    tab: "日常"
+    hologram: {x: -0.55, y: -0.9, z: 0, scale: 0.016}
+    text: {content: "采集 10 个原木", color: "#C8E6C9"}
+  - id: q_daily_2
+    type: checkbox
+    tab: "日常"
+    hologram: {x: -0.9, y: -1.3, z: 0, width: 0.2, height: 0.2}
+    checkbox: {value: true, color: "#66BB6A"}
+    actions:
+      input: |-
+        Chat.发送消息("§2[任务面板] §f日常-击杀: " + vars.input, player.name)
+  - id: q_daily_2_label
+    type: text
+    tab: "日常"
+    hologram: {x: -0.55, y: -1.3, z: 0, scale: 0.016}
+    text: {content: "击杀 5 只僵尸", color: "#C8E6C9"}
+  - id: q_daily_progress
+    type: progress
+    tab: "日常"
+    hologram: {x: -0.9, y: -1.75, z: 0, width: 2.4, height: 0.22}
+    progress: {value: 40, max: 100, color: "#66BB6A", background: "#1C2A20"}
+  - id: q_daily_progress_label
+    type: text
+    tab: "日常"
+    hologram: {x: 1.05, y: -1.75, z: 0, scale: 0.015}
+    text: {content: "进度 40%", color: "#A5D6A7"}
+  - id: q_dungeon_dropdown
+    type: dropdown
+    tab: "副本"
+    hologram: {x: -0.85, y: -0.9, z: 0, width: 1.7, height: 0.2}
+    dropdown:
+      options: ["简单", "普通", "困难"]
+      value: "普通"
+      color: "#1C2A20"
+      textColor: "#E0E0E0"
+    actions:
+      input: |-
+        Chat.发送消息("§2[任务面板] §f副本难度: " + vars.input, player.name)
+  - id: q_dungeon_slider
+    type: slider
+    tab: "副本"
+    hologram: {x: -0.85, y: -1.35, z: 0, width: 1.8, height: 0.15, cursor: "move"}
+    slider:
+      min: 1
+      max: 10
+      value: 3
+    actions:
+      input: |-
+        Chat.发送消息("§2[任务面板] §f组队人数: " + vars.input, player.name)
+  - id: q_dungeon_slider_label
+    type: text
+    tab: "副本"
+    hologram: {x: 0.85, y: -1.35, z: 0, scale: 0.015}
+    text: {content: "组队人数（独立滑块）", color: "#A5D6A7"}
+  - id: q_reward
+    type: item_slot
+    hologram: {x: 0, y: -2.4, z: 0, height: 0.35, glow: "#3366BB6A"}
+    item_slot:
+      item: "minecraft:experience_bottle"
+      count: 5
+    actions:
+      click: |-
+        Chat.发送消息("§2[任务面板] §f领取奖励！", player.name)
+        Screen.播放动画(player.name, "q_reward_pop")
+  - id: q_reward_label
+    type: text
+    hologram: {x: 0.7, y: -2.4, z: 0, scale: 0.015}
+    text: {content: "点击领取奖励（pop 特效）", color: "#A5D6A7"}
+animations:
+  q_reward_pop:
+    - target: q_reward
+      preset: pop
+      duration: 500
+  q_title_wave:
+    - target: q_title
+      preset: wave
+      duration: 900

@@ -1,0 +1,18 @@
+# 全服公告 HUD（GHUD/HUDStatic 演示）：Hud.挂载全局("hud_global") 全体广播
+# 静态公告建议页面不用变量/占位符（内容对所有玩家一致）
+title: 全服公告
+display: hud
+# 全局热键（HUD 页面声明 → 常驻生效，页面外也响应）：按 H 上报 OdcKeyEvent（Bukkit 事件）
+keybinds:
+  全局公告键: "key.keyboard.h"
+elements:
+  - type: text
+    x: "window.width - 310"
+    y: 4
+    width: 300
+    height: 12
+    text:
+      content: "【全服公告】23:00 停机维护，请提前下线"
+      align: right
+      color: "#FFD54F"
+      shadow: true

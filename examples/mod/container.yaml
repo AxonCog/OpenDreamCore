@@ -1,0 +1,67 @@
+# 容器界面示例：打开箱子时自动替换（match: minecraft:chest）
+# 多人模式：服务端插件绑定真实容器，container_sync 推送槽位内容；
+# 单机模式：槽位为空（无服务端数据源）。
+match: "minecraft:chest"
+display: container
+title: 自定义箱子
+
+header:
+  type: text
+  x: "window.width / 2 - 120"
+  y: 18
+  width: 240
+  height: 16
+  text:
+    content: "箱子内容"
+    align: center
+    color: "#FFD700"
+    shadow: true
+
+hint:
+  type: text
+  x: "window.width / 2 - 180"
+  y: 38
+  width: 360
+  height: 12
+  text:
+    content: "点击槽位查看物品 | ESC 关闭"
+    align: center
+    color: "#9AA3B2"
+
+# container 组件：按 rows/cols 自动生成 chest_slot（点击事件带槽位号）
+grid:
+  type: container
+  x: "window.width / 2 - 178"
+  y: 56
+  width: 356
+  height: 162
+  container:
+    rows: 3
+    cols: 9
+    spacing: 2
+    cellSize: 18
+  actions:
+    click: |-
+      Chat.发送消息("点击了槽位 " + vars.slot)
+
+# 单槽演示：chest_slot 直接绑定指定槽位号
+special_slot:
+  type: chest_slot
+  x: "window.width / 2 - 24"
+  y: 230
+  width: 48
+  height: 48
+  chest_slot:
+    slot: 0
+    showSlot: true
+
+special_hint:
+  type: text
+  x: "window.width / 2 - 80"
+  y: 284
+  width: 160
+  height: 12
+  text:
+    content: "槽位 0（大图标演示）"
+    align: center
+    color: "#6B7280"

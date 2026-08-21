@@ -1,0 +1,141 @@
+# 欢迎页面示例：首次进入自动出现在 OpenDreamCore/UI/ 目录
+# /odc open welcome 打开
+match: welcome
+title: OpenDreamCore 欢迎页
+coin: 100
+
+title_text:
+  type: text
+  x: 0
+  y: 10
+  width: "window.width"
+  height: 30
+  text:
+    content: "欢迎使用 OpenDreamCore"
+    align: center
+    color: "#FFD700"
+
+panel:
+  type: layout
+  x: "window.width / 2 - 150"
+  y: 60
+  width: 300
+  height: 180
+  background: "solid:30,30,40,200"
+  children:
+    tip:
+      type: text
+      x: 10
+      y: 8
+      width: "parent.width - 20"
+      height: 30
+      text:
+        content: "这是 layout 嵌套示例"
+        color: "#FFFFFF"
+    coin_line:
+      type: text
+      x: 10
+      y: 40
+      width: "parent.width - 20"
+      height: 20
+      text:
+        content: "当前金币: {{vars.coin}}"
+        color: "#9CCC65"
+    buy:
+      type: button
+      x: "parent.width / 2 - 70"
+      y: 100
+      width: 140
+      height: 30
+      button:
+        label: "购买 (100 金币)"
+        background: "#3A7D44"
+      visibleWhen: "vars.coin >= 100"
+      actions:
+        click: |-
+          方法.发送消息("你想买什么？")
+    empty_hint:
+      type: text
+      x: 10
+      y: 100
+      width: "parent.width - 20"
+      height: 20
+      text:
+        content: "金币不足，先去赚点吧"
+        color: "#E57373"
+      visibleWhen: "vars.coin < 100"
+
+slider_demo:
+  type: slider
+  x: "window.width / 2 - 150"
+  y: 260
+  width: 300
+  height: 14
+  slider:
+    min: 0
+    max: 10
+    value: 3
+
+progress_demo:
+  type: progress
+  x: "window.width / 2 - 150"
+  y: 290
+  width: 300
+  height: 12
+  progress:
+    min: 0
+    max: 100
+    value: 42
+    color: "#42A5F5"
+
+name_input:
+  type: input
+  x: "window.width / 2 - 150"
+  y: 320
+  width: 300
+  height: 22
+  input:
+    value: "在这里输入"
+
+shop_row:
+  type: layout
+  x: "window.width / 2 - 150"
+  y: 360
+  width: 300
+  height: 40
+  children:
+    sword_slot:
+      type: item_slot
+      x: 0
+      y: 0
+      width: 40
+      height: 40
+      item: "minecraft:diamond_sword"
+    sword_name:
+      type: text
+      x: 48
+      y: 2
+      width: "parent.width - 48"
+      height: 14
+      text:
+        content: "钻石剑"
+        color: "#B0BEC5"
+    sword_price:
+      type: text
+      x: 48
+      y: 18
+      width: "parent.width - 48"
+      height: 14
+      text:
+        content: "售价: 500 金币"
+        color: "#FFD54F"
+
+sound_toggle:
+  type: toggle
+  x: "window.width / 2 - 150"
+  y: 420
+  width: 160
+  height: 18
+  toggle:
+    label: "音效开关"
+    value: true

@@ -1,0 +1,133 @@
+// OpenDreamCore target: fabric-1.20.1
+// common/ 共享源码树由本 target 编译期合并；平台网络/渲染/入口在本 target 内。
+// 与 fabric-1.21.1 共用同一套 client 渲染代码（1.20.1 无 payload API，走旧版 channel）。
+
+plugins {
+    id 'fabric-loom' version '1.3.1'
+    id 'java'
+    id 'com.gradleup.shadow' version '8.3.6'
+}
+
+// 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
+def properties = new Properties()
+file('../../gradle.properties').withInputStream { properties.load(it) }
+file('gradle.properties').withInputStream { properties.load(it) }
+properties.each { key, value -> ext.set(key.toString(), value.toString()) }
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = "${mod_name}-fabric-1.20.1"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+// common/ 是共享源码树（零 MC 依赖），编译期合并进本 target。
+sourceSets {
+    main {
+        java.srcDir "$buildDir/generated/common-main"
+        resources.srcDir '../../common/src/main/resources'
+    }
+}
+
+// common/ 源码原样复制；antlr4-runtime 的包路径重定向由 shadow 插件在打包阶段完成。
+tasks.register('prepareCommonSources', Sync) {
+    from('../../common/src/main/java')
+    into "$buildDir/generated/common-main"
+}
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources' }
+
+// 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+loom {
+    runs {
+        client {
+            client()
+            ideConfigGenerated = true
+        }
+        server {
+            server()
+            ideConfigGenerated = true
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    // 官方映射（与 1.21.1 target 同一套 API 名）
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+
+    // common 源码的运行时依赖（antlr4-runtime 需要随 mod 打包）
+    // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    // gson/snakeyaml MC 运行时自带，编译期声明即可
+    compileOnly 'org.yaml:snakeyaml:2.2'
+    compileOnly 'com.google.code.gson:gson:2.10.1'
+}
+
+// 专用于 shadow 的 configuration：只包含 antlr4-runtime，不传递 MC/fabric 的任何类
+configurations {
+    shadeOnly
+}
+dependencies {
+    shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+}
+
+// ---- shadow 配置 ----
+// 仅把 antlr4-runtime 重定向并打平进主 jar，不再使用 include/jarinjar。
+shadowJar {
+    archiveClassifier = 'shadow'
+    configurations = [project.configurations.shadeOnly]
+    // 包路径重定向
+    relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
+    // 合并 META-INF 服务文件
+    mergeServiceFiles()
+}
+
+// fabric-loom 的 remapJar 需要消费 shadowJar 的输出。
+tasks.named('remapJar').configure {
+    inputFile = tasks.named('shadowJar').get().archiveFile
+    dependsOn tasks.named('shadowJar')
+}
+
+tasks.named('processResources') {
+    inputs.property 'mod_id', mod_id
+    inputs.property 'mod_version', mod_version
+    inputs.property 'mod_name', mod_name
+    inputs.property 'mod_description', mod_description
+    filesMatching('fabric.mod.json') {
+        expand(
+                'mod_id': mod_id,
+                'mod_version': mod_version,
+                'mod_name': mod_name,
+                'mod_description': mod_description
+        )
+    }
+}
+
+// build 完自动复制 jar 到 ../../../output
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Copy built jar to ../../../output'
+    doLast {
+        def out = file('../../../output')
+        out.mkdirs()
+        tasks.named('remapJar').get().archiveFile.get().asFile.parentFile.listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-shadow')) {
+                copy { from f; into out }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+    }
+}
+tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }

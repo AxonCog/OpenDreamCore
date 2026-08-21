@@ -1,0 +1,48 @@
+# 服务端个人 HUD（自动挂载）：进服按 match: hud + display: hud 挂为常驻 HUD
+# 占位符按接收玩家解析（{player.display_name} 各人看到自己）
+match: hud
+display: hud
+title: 服务器 HUD
+functions:
+  join: |-                                # 进服触发器（服务端）
+    Chat.发送消息("§a[服务器] §f欢迎 " + player.name + " 进服！", player.name)
+  chat: |-                                # 聊天触发器（消息含 odc 时演示）
+    如果 (Str.包含(message, "odc")) {
+      Chat.发送消息("§e[演示] §f聊天触发器：你说了 odc", player.name)
+    }
+elements:
+  - type: text
+    x: 6
+    y: 4
+    width: 300
+    height: 12
+    text:
+      content: "{system.server_name} | 在线 {system.online} 人"
+      color: "#FFFFFF"
+      shadow: true
+  - type: text
+    x: 6
+    y: 16
+    width: 300
+    height: 12
+    text:
+      content: "玩家 {player.display_name} | 等级 {player.level}"
+      color: "#9CCC65"
+      shadow: true
+  - type: text
+    x: 6
+    y: 28
+    width: 300
+    height: 12
+    text:
+      content: "TPS {query.tps} | 延迟 {query.ping}ms"
+      color: "#4FC3F7"
+      shadow: true
+  - type: chat_display          # 聊天通道显示（服务端 ChatChannel.发送("global", ...) 的消息）
+    x: 6
+    y: 42
+    width: 300
+    height: 44
+    chat_display:
+      channel: global
+      background: "solid:10,12,16,120"

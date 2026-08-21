@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.ipr
+*.iws
+
+# 运行目录
+run/
+
+# 系统
+Thumbs.db
+.DS_Store
+
+# 本地临时
+_mdk_tmp/
+
+# output 供本地/CI 收集产物（不入库，按需生成）
+output/
+
+# 参考模组（内部资料，不上传）
+参考模组/
+
+# 内部规划/分析文档（不上传）
+OpenDreamCore跨版本规划.md
+OpenDreamCore开发分析.md
+.commandcode/
+
+# docs 只上传 YAML语法.md 和 协议.md，其余排除
+docs/*
+!docs/YAML语法.md
+!docs/协议.md
