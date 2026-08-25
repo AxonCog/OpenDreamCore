@@ -131,11 +131,12 @@ OpenDreamCore 不是一个单纯的 UI 模组。
 
 | 版本 | 平台 | 状态 |
 |---|---|---|
-| 1.21.1 | NeoForge + Fabric | ✅ 测试中 |
-| 1.20.1 | Fabric | 🔄 迁移中 |
-| 1.21.4 | NeoForge + Fabric | 🔄 迁移中 |
-| 1.21.8 | NeoForge + Fabric | 🔄 迁移中 |
-| 26.1.2 | NeoForge + Fabric | 🔄 迁移中 |
+| 1.21.1 | NeoForge + Fabric | ✅ 迁移完成 |
+| 1.20.1 | Fabric + Forge | ✅  迁移完成 |
+| 1.21.4 | NeoForge + Fabric | ✅ 迁移完成 |
+| 1.21.8 | NeoForge + Fabric | ✅ 迁移完成 |
+| 1.21.11 | NeoForge + Fabric | ✅ 迁移完成 |
+| 26.1.2 | NeoForge + Fabric | ✅ 迁移完成 |
 | 1.16.5 | Forge | 🔄 迁移中 |
 | 1.12.2 | Forge | 🔄 迁移中 |
 | 1.7.10 | Forge | 🔄 迁移中 |
