@@ -1,7 +1,6 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
-import net.minecraft.client.Minecraft;
 
 import java.nio.file.Path;
 
@@ -19,7 +18,7 @@ public final class YamlLegacy {
         LegacyMethods.register("Yaml文件存在", a -> {
             String f = LegacyMethods.argStr(a, 0);
             return f != null && java.nio.file.Files.isRegularFile(
-                    Minecraft.getInstance().gameDirectory.toPath()
+                    GameDir.get().toPath()
                             .resolve("OpenDreamCore").resolve(f + ".yaml"));
         });
     }
@@ -29,7 +28,7 @@ public final class YamlLegacy {
         String key = LegacyMethods.argStr(a, 1);
         if (file == null || key == null) return null;
         try {
-            Path p = Minecraft.getInstance().gameDirectory.toPath()
+            Path p = GameDir.get().toPath()
                     .resolve("OpenDreamCore").resolve(file + ".yaml");
             if (!java.nio.file.Files.isRegularFile(p)) return null;
             var data = new org.yaml.snakeyaml.Yaml().load(java.nio.file.Files.readString(p));

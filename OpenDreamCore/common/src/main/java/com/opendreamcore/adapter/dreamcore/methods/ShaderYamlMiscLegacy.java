@@ -1,7 +1,6 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
-import net.minecraft.client.Minecraft;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -41,7 +40,7 @@ public final class ShaderYamlMiscLegacy {
         LegacyMethods.register("yaml_file_exists", a -> {
             String f = str(a, 0);
             return f != null && java.nio.file.Files.isRegularFile(
-                    mc().gameDirectory.toPath().resolve("OpenDreamCore").resolve(f + ".yaml"));
+                    GameDir.get().toPath().resolve("OpenDreamCore").resolve(f + ".yaml"));
         });
         LegacyMethods.register("get_yaml_value", a -> get(a));
         LegacyMethods.register("get_yaml_keys", a -> keys(a));
@@ -106,7 +105,7 @@ public final class ShaderYamlMiscLegacy {
         String key = str(a, 1);
         if (file == null || key == null) return null;
         try {
-            Path p = mc().gameDirectory.toPath()
+            Path p = GameDir.get().toPath()
                     .resolve("OpenDreamCore").resolve(file + ".yaml");
             if (!java.nio.file.Files.isRegularFile(p)) return null;
             var data = new org.yaml.snakeyaml.Yaml().load(java.nio.file.Files.readString(p));
@@ -125,10 +124,6 @@ public final class ShaderYamlMiscLegacy {
         Object v = get(a);
         if (v instanceof Map) return new java.util.ArrayList<>(((Map<Object, Object>) v).keySet());
         return new java.util.ArrayList<>();
-    }
-
-    private static Minecraft mc() {
-        return Minecraft.getInstance();
     }
 
     private static String str(Object[] a, int i) {
