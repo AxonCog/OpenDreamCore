@@ -1,8 +1,15 @@
-# neoforge-1.21.8
+# neoforge-1.21.1
 
-排着队呢。
+- NeoForge 21.1.x · MC 1.21.1 · Java 21
+- 状态：**测试中**
 
-- NeoForge 21.8.x · MC 1.21.8 · Java 21
-- 状态：**待迁移**
+主 target，和 fabric-1.21.1 共用 common + client 渲染代码。
+平台差异只在事件挂接（`ClientEvents`）和网络注册（`UiChannel` PayloadRegistrar）。
 
-等 1.21.4 落地后跟上。改动不大，主要是 API 版本对齐。
+## 构建
+
+```
+gradlew.bat build
+```
+
+产物自动收集到 `../../output/`。

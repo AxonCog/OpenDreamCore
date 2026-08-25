@@ -1,11 +1,22 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.elements.BadgeIconDraws;
+import com.opendreamcore.client.elements.ButtonDraws;
+import com.opendreamcore.client.elements.CardDraws;
+import com.opendreamcore.client.elements.ChartDraws;
+import com.opendreamcore.client.elements.ElementTextUtil;
+import com.opendreamcore.client.elements.InputDraws;
+import com.opendreamcore.client.elements.MediaItemDraws;
+import com.opendreamcore.client.elements.TextElements;
+import com.opendreamcore.client.elements.WorldMiscDraws;
+
 import com.opendreamcore.ui.RenderNode;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -23,6 +34,26 @@ import java.util.regex.Pattern;
  * chart/compass/direction/canvas/boss_bar/embed，其余类型画占位框。
  */
 public final class UiRenderer {
+
+    public static SoundEvent soundEvent(ResourceLocation id) {
+        return unwrap(BuiltInRegistries.SOUND_EVENT.get(id));
+    }
+    public static net.minecraft.world.entity.EntityType<?> entityType(ResourceLocation id) {
+        return unwrap(BuiltInRegistries.ENTITY_TYPE.get(id));
+    }
+    public static Item item(ResourceLocation id) {
+        return unwrap(BuiltInRegistries.ITEM.get(id));
+    }
+    @SuppressWarnings("unchecked")
+    private static <T> T unwrap(Object result) {
+        if (result == null) return null;
+        if (result instanceof java.util.Optional<?> opt) {
+            Object ref = opt.orElse(null);
+            if (ref == null) return null;
+            try { return (T) ref.getClass().getMethod("value").invoke(ref); } catch (Exception e) { return null; }
+        }
+        return (T) result;
+    }
 
     /** 绘制时的运行时状态（输入框文本/滑块值由交互层提供）。 */
     public interface State {
@@ -101,6 +132,19 @@ public final class UiRenderer {
         }
     }
 
+    /**
+     * 根层按 z 升序稳定排序（与 RenderNode 子节点排序同规则）：z 大画在上面，同 z 保持声明顺序。
+     * layoutPage 出口统一调用 —— 全息/页面各元素层迭确定（"像刻上去一样"），不受 YAML 书写顺序影响。
+     */
+    public static List<RenderNode> zSorted(List<RenderNode> nodes) {
+        if (nodes == null || nodes.size() < 2) {
+            return nodes;
+        }
+        List<RenderNode> copy = new java.util.ArrayList<>(nodes);
+        copy.sort(java.util.Comparator.comparingInt(RenderNode::z));
+        return List.copyOf(copy);
+    }
+
     /** 当前绘制透明度（动画 opacity 用，渲染单线程）。 */
     private static float currentAlpha = 1.0F;
 
@@ -132,20 +176,20 @@ public final class UiRenderer {
         if (usePose || useAlpha) {
             currentAlpha = (float) alpha;
             if (usePose) {
-                g.pose().pushPose();
+                CompatRender.posePush(g.pose());
                 if (anim != null) {
-                    g.pose().translate(anim[0], anim[1], 0);
+                    CompatRender.poseTranslate(g.pose(), anim[0], anim[1]);
                 }
                 // 缩放/旋转绕元素中心
                 double cx = node.x() + Math.max(node.width(), 0) / 2.0;
                 double cy = node.y() + Math.max(node.height(), 0) / 2.0;
                 if (scale != 1.0 || rotation != 0.0) {
-                    g.pose().translate(cx, cy, 0);
+                    CompatRender.poseTranslate(g.pose(), cx, cy);
                     if (rotation != 0.0) {
-                        g.pose().mulPose(com.mojang.math.Axis.ZP.rotationDegrees((float) rotation));
+                        CompatRender.poseRotateZDegrees(g.pose(), rotation);
                     }
-                    g.pose().scale((float) scale, (float) scale, 1.0F);
-                    g.pose().translate(-cx, -cy, 0);
+                    CompatRender.poseScale(g.pose(), scale, scale);
+                    CompatRender.poseTranslate(g.pose(), -cx, -cy);
                 }
             }
         }
@@ -163,54 +207,63 @@ public final class UiRenderer {
                 && !"container".equals(node.type()) && !"foreach".equals(node.type())) {
             drawGlow(g, node, glowProp);
         }
+        // 附属模组自定义渲染器优先
+        var customRenderer = ElementRenderRegistry.get(node.type());
+        if (customRenderer != null) {
+            customRenderer.render(g, font, node, mouseX, mouseY, state, pageVars);
+            for (RenderNode child : node.children()) {
+                drawNode(g, font, child, mouseX, mouseY, state, pageVars, scope);
+            }
+            return;
+        }
         switch (node.type()) {
             case "layout" -> drawLayout(g, font, node);
             case "container", "foreach" -> drawLayout(g, font, node);
             case "rect" -> drawRect(g, font, node, node.contains(mouseX, mouseY));
-            case "text" -> ScreenElements.drawText(g, font, node, pageVars, scope);
-            case "button" -> ScreenElements.drawButton(g, font, node, mouseX, mouseY, pageVars);
-            case "input" -> ScreenElements.drawInput(g, font, node, state);
-            case "slider" -> ScreenElements.drawSlider(g, font, node, state);
-            case "progress" -> ScreenElements.drawProgress(g, font, node);
-            case "gauge" -> ScreenElements.drawGauge(g, font, node);
-            case "arc_slider" -> ScreenElements.drawArcSlider(g, font, node, state);
-            case "image" -> ScreenElements.drawImage(g, font, node);
-            case "video" -> ScreenElements.drawVideo(g, font, node);
-            case "item_slot" -> ScreenElements.drawItemSlot(g, font, node, pageVars);
-            case "item_display" -> ScreenElements.drawItemDisplay(g, font, node, pageVars);
-            case "chest_slot" -> ScreenElements.drawChestSlot(g, font, node);
-            case "hot_slot" -> ScreenElements.drawHotSlot(g, font, node);
-            case "chat_input" -> ScreenElements.drawChatInput(g, font, node, state);
-            case "chat_display" -> ScreenElements.drawChatDisplay(g, font, node);
-            case "toggle" -> ScreenElements.drawToggle(g, font, node, state);
-            case "checkbox" -> ScreenElements.drawCheckbox(g, font, node, state);
-            case "dropdown" -> ScreenElements.drawDropdown(g, font, node, state, mouseX, mouseY);
+            case "text" -> TextElements.drawText(g, font, node, pageVars, scope);
+            case "button" -> ButtonDraws.drawButton(g, font, node, mouseX, mouseY, pageVars);
+            case "input" -> InputDraws.drawInput(g, font, node, state);
+            case "slider" -> InputDraws.drawSlider(g, font, node, state);
+            case "progress" -> InputDraws.drawProgress(g, font, node);
+            case "gauge" -> InputDraws.drawGauge(g, font, node);
+            case "arc_slider" -> InputDraws.drawArcSlider(g, font, node, state);
+            case "image" -> MediaItemDraws.drawImage(g, font, node, node.contains(mouseX, mouseY));
+            case "video" -> MediaItemDraws.drawVideo(g, font, node);
+            case "item_slot" -> MediaItemDraws.drawItemSlot(g, font, node, pageVars);
+            case "item_display" -> MediaItemDraws.drawItemDisplay(g, font, node, pageVars);
+            case "chest_slot" -> MediaItemDraws.drawChestSlot(g, font, node);
+            case "hot_slot" -> MediaItemDraws.drawHotSlot(g, font, node);
+            case "chat_input" -> MediaItemDraws.drawChatInput(g, font, node, state);
+            case "chat_display" -> MediaItemDraws.drawChatDisplay(g, font, node);
+            case "toggle" -> ButtonDraws.drawToggle(g, font, node, state);
+            case "checkbox" -> ButtonDraws.drawCheckbox(g, font, node, state);
+            case "dropdown" -> InputDraws.drawDropdown(g, font, node, state, mouseX, mouseY);
             case "scroll" -> drawScroll(g, font, node, state, pageVars, mouseX, mouseY, scope);
-            case "area_input" -> ScreenElements.drawAreaInput(g, font, node, state);
-            case "suggestion" -> ScreenElements.drawSuggestion(g, font, node, state, mouseX, mouseY);
-            case "card" -> ScreenElements.drawCard(g, font, node, pageVars);
-            case "flip_card" -> ScreenElements.drawFlipCard(g, font, node, state, pageVars);
-            case "chart" -> ScreenElements.drawChart(g, font, node);
-            case "compass" -> ScreenElements.drawCompass(g, font, node, pageVars);
-            case "direction" -> ScreenElements.drawDirection(g, font, node);
-            case "canvas" -> ScreenElements.drawCanvas(g, font, node, pageVars);
-            case "boss_bar" -> ScreenElements.drawBossBar(g, font, node);
-            case "embed" -> ScreenElements.drawEmbed(g, font, node, pageVars, mouseX, mouseY);
-            case "tabs" -> ScreenElements.drawScreenTabs(g, font, node, state, pageVars);
-            case "table" -> ScreenElements.drawTable(g, font, node, pageVars);
-            default -> ScreenElements.drawPlaceholder(g, font, node);
+            case "area_input" -> InputDraws.drawAreaInput(g, font, node, state);
+            case "suggestion" -> InputDraws.drawSuggestion(g, font, node, state, mouseX, mouseY);
+            case "card" -> CardDraws.drawCard(g, font, node, pageVars);
+            case "flip_card" -> CardDraws.drawFlipCard(g, font, node, state, pageVars);
+            case "chart" -> ChartDraws.drawChart(g, font, node);
+            case "compass" -> WorldMiscDraws.drawCompass(g, font, node, pageVars);
+            case "direction" -> WorldMiscDraws.drawDirection(g, font, node);
+            case "canvas" -> WorldMiscDraws.drawCanvas(g, font, node, pageVars);
+            case "boss_bar" -> WorldMiscDraws.drawBossBar(g, font, node);
+            case "embed" -> WorldMiscDraws.drawEmbed(g, font, node, pageVars, mouseX, mouseY);
+            case "tabs" -> WorldMiscDraws.drawScreenTabs(g, font, node, state, pageVars);
+            case "table" -> WorldMiscDraws.drawTable(g, font, node, pageVars);
+            default -> WorldMiscDraws.drawPlaceholder(g, font, node);
         }
         // 元素角标（badge: true 红点 / 数字数量 / {count, color}，右上角）——与世界面板 hologram.badge 同语义
         Object badgeProp = node.props().get("badge");
         if (badgeProp != null && !"layout".equals(node.type()) && !"scroll".equals(node.type())
                 && !"container".equals(node.type()) && !"foreach".equals(node.type())) {
-            ScreenElements.drawScreenBadge(g, font, node, badgeProp);
+            BadgeIconDraws.drawScreenBadge(g, font, node, badgeProp);
         }
         // 元素状态图标（statusIcon: 文本或 {icon, color}，左上角）——与世界面板同语义
         Object statusProp = node.props().get("statusIcon");
         if (statusProp != null && !"layout".equals(node.type()) && !"scroll".equals(node.type())
                 && !"container".equals(node.type()) && !"foreach".equals(node.type())) {
-            ScreenElements.drawScreenStatusIcon(g, font, node, statusProp);
+            BadgeIconDraws.drawScreenStatusIcon(g, font, node, statusProp);
         }
         for (RenderNode child : node.children()) {
             if (!"scroll".equals(node.type())) {
@@ -220,7 +273,7 @@ public final class UiRenderer {
         if (usePose || useAlpha) {
             currentAlpha = prevAlpha;
             if (usePose) {
-                g.pose().popPose();
+                CompatRender.posePop(g.pose());
             }
         }
     }
@@ -242,12 +295,12 @@ public final class UiRenderer {
         // 裁剪 + 平移内容
         int[] r = rect(node);
         g.enableScissor(r[0], r[1], r[2], r[3]);
-        g.pose().pushPose();
-        g.pose().translate(0, -offset, 0);
+        CompatRender.posePush(g.pose());
+        CompatRender.poseTranslate(g.pose(), 0, -offset);
         for (RenderNode child : node.children()) {
             drawNode(g, font, child, mouseX, mouseY, state, pageVars, scope);
         }
-        g.pose().popPose();
+        CompatRender.posePop(g.pose());
         g.disableScissor();
         // 滚动条（内容超出才显示）
         if (maxOffset > 0) {
@@ -261,7 +314,7 @@ public final class UiRenderer {
     }
 
     /** 颜色乘当前透明度（元素 opacity 动画）。 */
-    static int alphaColor(int color) {
+    public static int alphaColor(int color) {
         if (currentAlpha >= 1.0F) {
             return color;
         }
@@ -388,10 +441,10 @@ public final class UiRenderer {
     }
 
     /** 描边解析：颜色字符串 或 {color, width, flow, flowColor} 对象。 */
-    record BorderSpec(int color, int width, boolean flow, int flowColor) {
+    public record BorderSpec(int color, int width, boolean flow, int flowColor) {
     }
 
-    static BorderSpec parseBorder(Object raw, int widthDefault) {
+    public static BorderSpec parseBorder(Object raw, int widthDefault) {
         if (raw instanceof Map<?, ?> bm) {
             return new BorderSpec(UiStyle.color(bm.get("color"), 0),
                     (int) num(bm.get("width"), widthDefault),
@@ -404,7 +457,7 @@ public final class UiRenderer {
     // ---------- 圆角/描边矩形（三角剖分） ----------
 
     /** 圆角矩形：外圈 border 层 + 内缩 fill 层；radius=0 且 border=0 走普通 fillRect。 */
-    static void drawRoundedRect(GuiGraphics g, RenderNode node, double radius,
+    public static void drawRoundedRect(GuiGraphics g, RenderNode node, double radius,
                                         int fill, int border, int borderW) {
         double x = node.x();
         double y = node.y();
@@ -500,13 +553,12 @@ public final class UiRenderer {
         float cb = (color & 0xFF) / 255F;
         float ca = ((color >>> 24) & 0xFF) / 255F;
         if (ca <= 0) return;
-        var mat = g.pose().last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var b = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var mat = CompatRender.guiMatrix(g);
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var b = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         double lEdge = Math.max(0, w - 2 * r);
         double lArc = Math.PI * r / 2;
         for (int i = 0; i < segs; i++) {
@@ -522,13 +574,13 @@ public final class UiRenderer {
             double ny = dx / len * bw / 2;
             quadV(b, mat, p0[0] + nx, p0[1] + ny, p1[0] + nx, p1[1] + ny, p1[0] - nx, p1[1] - ny, p0[0] - nx, p0[1] - ny, cr, cg, cb, ca);
         }
-        com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(b.buildOrThrow());
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        b.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 圆角描边流光：border 外圈 + 亮色段沿周长匀速流动（1.2s 一圈，段长 15% 周长）+ 内缩 fill。 */
-    static void drawRoundedRectFlow(GuiGraphics g, RenderNode node, double radius,
+    public static void drawRoundedRectFlow(GuiGraphics g, RenderNode node, double radius,
                                             int fill, int border, int borderW, int flowColor,
                                             boolean hovered) {
         double x = node.x();
@@ -578,14 +630,12 @@ public final class UiRenderer {
         float fg = ((flowColor >> 8) & 0xFF) / 255.0F;
         float fb = (flowColor & 0xFF) / 255.0F;
         float fa = Math.min(1.0F, ac / 255.0F * (hovered ? 1.6F : 1.0F));
-        var matrix = g.pose().last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+        var matrix = CompatRender.guiMatrix(g);
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         double[] prev = null;
         for (int i = 0; i <= samples; i++) {
@@ -609,9 +659,9 @@ public final class UiRenderer {
                     p[0] - nx, p[1] - ny, prev[0] - nx, prev[1] - ny, fr, fg, fb, fa);
             prev = p;
         }
-        com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(builder.buildOrThrow());
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 圆角矩形周长参数 s(0..perimeter) → 轮廓点（起点：左下角直边左端，顺时针）。 */
@@ -655,7 +705,7 @@ public final class UiRenderer {
     }
 
     /** 四边形（4 点，2 三角形）。 */
-    private static void quadV(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void quadV(CompatBuffer builder, Object matrix,
                               double x0, double y0, double x1, double y1, double x2, double y2,
                               double x3, double y3, float r, float g, float b, float a) {
         builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(r, g, b, a);
@@ -667,7 +717,7 @@ public final class UiRenderer {
     }
 
     /** 屏幕空间圆角矩形填充（TRIANGLES：中矩形 + 四角扇形）。 */
-    static void fillRounded(GuiGraphics g, double x, double y, double w, double h,
+    public static void fillRounded(GuiGraphics g, double x, double y, double w, double h,
                                     double r, int color) {
         if (w <= 0 || h <= 0) {
             return;
@@ -680,14 +730,12 @@ public final class UiRenderer {
             return;
         }
         r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-        var matrix = g.pose().last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+        var matrix = CompatRender.guiMatrix(g);
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         // 中间矩形（2 三角形）
         double cx0 = x + r;
@@ -703,12 +751,12 @@ public final class UiRenderer {
             cornerFan(builder, matrix, cx1, cy1, r, 0, Math.PI / 2, segments, red, green, blue, alpha);
             cornerFan(builder, matrix, cx0, cy1, r, Math.PI / 2, Math.PI, segments, red, green, blue, alpha);
         }
-        com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(builder.buildOrThrow());
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
-    private static void quad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void quad(CompatBuffer builder, Object matrix,
                              double x0, double y0, double x1, double y1,
                              float r, float g, float b, float a) {
         builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(r, g, b, a);
@@ -736,14 +784,12 @@ public final class UiRenderer {
             return;
         }
         r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-        var matrix = g.pose().last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+        var matrix = CompatRender.guiMatrix(g);
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         double cx0 = x + r;
         double cy0 = y + r;
@@ -757,9 +803,9 @@ public final class UiRenderer {
             cornerFanGrad(builder, matrix, cx1, cy1, r, 0, Math.PI / 2, segments, top, bottom, y, h);
             cornerFanGrad(builder, matrix, cx0, cy1, r, Math.PI / 2, Math.PI, segments, top, bottom, y, h);
         }
-        com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(builder.buildOrThrow());
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 渐变插值色：top → bottom 按 t(0~1)。 */
@@ -772,7 +818,7 @@ public final class UiRenderer {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
-    private static void addV(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void addV(CompatBuffer builder, Object matrix,
                              double x, double y, int color) {
         builder.addVertex(matrix, (float) x, (float) y, 0)
                 .setColor(((color >> 16) & 0xFF) / 255.0F, ((color >> 8) & 0xFF) / 255.0F,
@@ -780,7 +826,7 @@ public final class UiRenderer {
     }
 
     /** 渐变矩形（2 三角形，顶点色按 y 插值）。 */
-    private static void quadGrad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void quadGrad(CompatBuffer builder, Object matrix,
                                  double x0, double y0, double x1, double y1,
                                  int top, int bottom, double baseY, double h) {
         int c00 = gradColor(top, bottom, (y0 - baseY) / h);
@@ -796,7 +842,7 @@ public final class UiRenderer {
     }
 
     /** 渐变角扇形：顶点色按 y 插值。 */
-    private static void cornerFanGrad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void cornerFanGrad(CompatBuffer builder, Object matrix,
                                       double cx, double cy, double r, double from, double to, int segments,
                                       int top, int bottom, double baseY, double h) {
         for (int i = 0; i < segments; i++) {
@@ -813,7 +859,7 @@ public final class UiRenderer {
     }
 
     /** 角落扇形（圆心 + 弧段，TRIANGLES 逐段）。 */
-    private static void cornerFan(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void cornerFan(CompatBuffer builder, Object matrix,
                                   double cx, double cy, double r, double from, double to, int segments,
                                   float red, float green, float blue, float alpha) {
         for (int i = 0; i < segments; i++) {
@@ -829,8 +875,8 @@ public final class UiRenderer {
 
     // ---------- 逐字揭示（text.reveal） ----------
     /** 逐字动画状态（scope+元素 id → 首次渲染毫秒 + 内容快照，内容变化重触发）。 */
-    static final java.util.Map<String, ScreenElements.RevealState> textRevealState = new java.util.concurrent.ConcurrentHashMap<>();
-    static final int REVEAL_PRUNE_THRESHOLD = 800;
+    public static final java.util.Map<String, TextElements.RevealState> textRevealState = new java.util.concurrent.ConcurrentHashMap<>();
+    public static final int REVEAL_PRUNE_THRESHOLD = 800;
     public static void clearRevealScope(String scope) {
         if (scope == null) { textRevealState.clear(); return; }
         String prefix = scope + "\u0001";
@@ -842,7 +888,7 @@ public final class UiRenderer {
     // ---------- 仪表盘 / 环形滑块（弧形渲染） ----------
 
     /** 槽位里的物品图标（item: "minecraft:diamond_sword"，可带数量 "id x64"；支持 {{vars.xxx}} 插值）。 */
-    static void drawItemIcon(GuiGraphics g, Font font, RenderNode node, Object raw, boolean big,
+    public static void drawItemIcon(GuiGraphics g, Font font, RenderNode node, Object raw, boolean big,
                                      java.util.Map<String, Object> pageVars) {
         double size = big ? Math.max(16, node.width() * 0.7) : Math.min(16, Math.min(node.width(), node.height()));
         double ix = node.x() + (node.width() - size) / 2;
@@ -879,18 +925,18 @@ public final class UiRenderer {
         int ix = (int) (x + (size - icon) / 2);
         int iy = (int) (y + (size - icon) / 2);
         var pose = g.pose();
-        pose.pushPose();
-        pose.translate(ix, iy, 0);
+        CompatRender.posePush(pose);
+        CompatRender.poseTranslate(pose, ix, iy);
         float scale = icon / 16.0F;
-        pose.scale(scale, scale, 1.0F);
+        CompatRender.poseScale(pose, scale, scale);
         g.renderItem(stack, 0, 0);
         if (count > 1) {
             g.renderItemDecorations(font, stack, 0, 0);
         }
-        pose.popPose();
+        CompatRender.posePop(pose);
     }
 
-    static void drawItemAtRot(GuiGraphics g, Font font, double x, double y, double size, Object raw,
+    public static void drawItemAtRot(GuiGraphics g, Font font, double x, double y, double size, Object raw,
                                       java.util.Map<String, Object> pageVars, Map<?, ?> rotSpec) {
         String id = raw == null ? null : String.valueOf(raw).trim();
         if (id == null || id.isEmpty()) return;
@@ -909,22 +955,20 @@ public final class UiRenderer {
         int ix = (int) (x + (size - icon) / 2);
         int iy = (int) (y + (size - icon) / 2);
         var pose = g.pose();
-        pose.pushPose();
-        pose.translate(ix + icon / 2.0, iy + icon / 2.0, 0);
+        CompatRender.posePush(pose);
+        CompatRender.poseTranslate(pose, ix + icon / 2.0, iy + icon / 2.0);
         if (rotSpec != null) {
             double rx = num(rotSpec.get("x"), num(rotSpec.get("rx"), 0));
             double ry = num(rotSpec.get("y"), num(rotSpec.get("ry"), 0));
             double rz = num(rotSpec.get("z"), num(rotSpec.get("rz"), 0));
-            if (rx != 0) pose.mulPose(com.mojang.math.Axis.XP.rotationDegrees((float) rx));
-            if (ry != 0) pose.mulPose(com.mojang.math.Axis.YP.rotationDegrees((float) ry));
-            if (rz != 0) pose.mulPose(com.mojang.math.Axis.ZP.rotationDegrees((float) rz));
+            CompatRender.poseRotateXYZDegrees(pose, rx, ry, rz);
         }
         float scale = icon / 16.0F;
-        pose.scale(scale, scale, 1.0F);
-        pose.translate(-icon / 2.0, -icon / 2.0, 0);
+        CompatRender.poseScale(pose, scale, scale);
+        CompatRender.poseTranslate(pose, -icon / 2.0, -icon / 2.0);
         g.renderItem(stack, 0, 0);
         if (count > 1) g.renderItemDecorations(font, stack, 0, 0);
-        pose.popPose();
+        CompatRender.posePop(pose);
     }
 
     // ========== 输入类：area_input / suggestion ==========
@@ -948,7 +992,7 @@ public final class UiRenderer {
     // ========== 运行时嵌入：embed ==========
 
     /** 嵌入深度防护（嵌入页再嵌入 → 死循环）。 */
-    static final ThreadLocal<Integer> EMBED_DEPTH = ThreadLocal.withInitial(() -> 0);
+    public static final ThreadLocal<Integer> EMBED_DEPTH = ThreadLocal.withInitial(() -> 0);
 
     public static boolean bool(Object v, boolean fallback) {
         if (v instanceof Boolean b) {
@@ -965,7 +1009,7 @@ public final class UiRenderer {
         if (rl == null) {
             return ItemStack.EMPTY;
         }
-        Item item = BuiltInRegistries.ITEM.get(rl);
+        Item item = UiRenderer.item(rl);
         return item == null ? ItemStack.EMPTY : new ItemStack(item);
     }
 
@@ -1046,16 +1090,16 @@ public final class UiRenderer {
         g.fill(r[0], r[1], r[2], r[3], color);
     }
 
-    // ---- 公共 API 转发（实现移至 ScreenElements，round 6）----
+    // ---- 公共 API 转发（实现移至 ScreenElements → elements/ 组件族，round 6 / C2）----
     public static String suggestionValue(Object s) {
-        return ScreenElements.suggestionValue(s);
+        return InputDraws.suggestionValue(s);
     }
 
     public static java.util.List<Object> filterSuggestions(java.util.Map<?, ?> spec, String text) {
-        return ScreenElements.filterSuggestions(spec, text);
+        return InputDraws.filterSuggestions(spec, text);
     }
 
     public static String[] wrapLinesFlat(net.minecraft.client.gui.Font font, String text, int maxWidth) {
-        return ScreenElements.wrapLinesFlat(font, text, maxWidth);
+        return ElementTextUtil.wrapLinesFlat(font, text, maxWidth);
     }
 }

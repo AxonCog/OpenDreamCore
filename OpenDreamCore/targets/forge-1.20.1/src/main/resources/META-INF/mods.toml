@@ -1,0 +1,27 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="梦幻"
+description='''Minecraft engine and UI framework
+GitHub: https://github.com/AxonCog/OpenDreamCore'''
+# 客户端 mod：不要求服务端也安装本 mod
+displayTest="IGNORE_SERVER_VERSION"
+
+[[dependencies.${mod_id}]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.${mod_id}]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="CLIENT"

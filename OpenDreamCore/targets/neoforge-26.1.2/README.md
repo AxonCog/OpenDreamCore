@@ -1,9 +1,15 @@
-# neoforge-26.1.2
+# neoforge-1.21.1
 
-新版本线，排着队呢。
+- NeoForge 21.1.x · MC 1.21.1 · Java 21
+- 状态：**测试中**
 
-- NeoForge 26.1.2.84 · MC 26.1.2 · Java 25
-- 状态：**待迁移**
+主 target，和 fabric-1.21.1 共用 common + client 渲染代码。
+平台差异只在事件挂接（`ClientEvents`）和网络注册（`UiChannel` PayloadRegistrar）。
 
-这个版本线比较新，需要 JDK 25 toolchain。
-common 零 MC 依赖可以直接复用，平台层换一下 payload API 版本。
+## 构建
+
+```
+gradlew.bat build
+```
+
+产物自动收集到 `../../output/`。

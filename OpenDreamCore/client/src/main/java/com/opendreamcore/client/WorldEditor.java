@@ -547,19 +547,7 @@ final class WorldEditor {
 
     static double worldHitDepth(RenderNode node, net.minecraft.client.Camera camera,
                                         net.minecraft.world.phys.Vec3 anchor) {
-        try {
-            Map<?, ?> holo = node.props().get("hologram") instanceof Map<?, ?> h ? h : Map.of();
-            double x = WorldHologram.holoNum(holo, "x", 0, Map.of());
-            double y = WorldHologram.holoNum(holo, "y", 0, Map.of());
-            double z = WorldHologram.holoNum(holo, "z", 0, Map.of());
-            net.minecraft.world.phys.Vec3 cam = camera.getPosition();
-            double dx = anchor.x + x - cam.x;
-            double dy = anchor.y + y - cam.y;
-            double dz = anchor.z + z - cam.z;
-            return dx * dx + dy * dy + dz * dz;
-        } catch (Exception e) {
-            return Double.MAX_VALUE;
-        }
+        return com.opendreamcore.client.world.edit.EditCollectors.hitDepth(node, camera, anchor);
     }
 
     /**
@@ -2127,62 +2115,13 @@ final class WorldEditor {
     static void collectWorldCenters(List<RenderNode> nodes, String activeTab,
                                             java.util.Map<String, Object> vars, double[] parentOffset,
                                             java.util.Set<String> skip, List<double[]> out) {
-        if (nodes == null) {
-            return;
-        }
-        for (RenderNode node : nodes) {
-            if (!WorldHologram.tabVisible(node, activeTab)) {
-                continue;
-            }
-            Object raw = node.props().get("hologram");
-            double bx = parentOffset == null ? 0 : parentOffset[0];
-            double by = parentOffset == null ? 0 : parentOffset[1];
-            double bz = parentOffset == null ? 0 : parentOffset[2];
-            double[] childOffset = parentOffset;
-            if (raw instanceof Map<?, ?> holo) {
-                double x = bx + WorldHologram.holoNum(holo, "x", 0, vars);
-                double y = by + WorldHologram.holoNum(holo, "y", 0, vars);
-                if (!skip.contains(node.id())) {
-                    out.add(new double[]{x, y});
-                }
-                childOffset = new double[]{x, y, bz + WorldHologram.holoNum(holo, "z", 0, vars)};
-            }
-            collectWorldCenters(node.children(), activeTab, vars, childOffset, skip, out);
-        }
+        com.opendreamcore.client.world.edit.EditCollectors.collectCenters(nodes, activeTab, vars, parentOffset, skip, out);
     }
 
     static void collectWorldEdges(List<RenderNode> nodes, String activeTab,
                                           java.util.Map<String, Object> vars, double[] parentOffset,
                                           java.util.Set<String> skip, List<double[]> out) {
-        if (nodes == null) {
-            return;
-        }
-        for (RenderNode node : nodes) {
-            if (!WorldHologram.tabVisible(node, activeTab)) {
-                continue;
-            }
-            Object raw = node.props().get("hologram");
-            double bx = parentOffset == null ? 0 : parentOffset[0];
-            double by = parentOffset == null ? 0 : parentOffset[1];
-            double bz = parentOffset == null ? 0 : parentOffset[2];
-            double[] childOffset = parentOffset;
-            if (raw instanceof Map<?, ?> holo) {
-                double x = bx + WorldHologram.holoNum(holo, "x", 0, vars);
-                double y = by + WorldHologram.holoNum(holo, "y", 0, vars);
-                if (!skip.contains(node.id())) {
-                    double w = WorldHologram.holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, vars);
-                    double h = WorldHologram.holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, vars);
-                    out.add(new double[]{0, x - w / 2});
-                    out.add(new double[]{0, x});
-                    out.add(new double[]{0, x + w / 2});
-                    out.add(new double[]{1, y - h / 2});
-                    out.add(new double[]{1, y});
-                    out.add(new double[]{1, y + h / 2});
-                }
-                childOffset = new double[]{x, y, bz + WorldHologram.holoNum(holo, "z", 0, vars)};
-            }
-            collectWorldEdges(node.children(), activeTab, vars, childOffset, skip, out);
-        }
+        com.opendreamcore.client.world.edit.EditCollectors.collectEdges(nodes, activeTab, vars, parentOffset, skip, out);
     }
 
     void commitWorldDrag() {
@@ -3712,19 +3651,13 @@ final class WorldEditor {
         String type = String.valueOf(element.props().get("type"));
         double w = WorldHologram.holoNum(holo, "width", "text".equals(type) ? 2.0 : 1.0, vars);
         double hh = WorldHologram.holoNum(holo, "height", "text".equals(type) ? 0.25 : 1.0, vars);
-        double x = WorldHologram.holoNum(holo, "x", 0, vars);
-        double y = WorldHologram.holoNum(holo, "y", 0, vars);
-        switch (mode) {
-            case "left" -> x = bounds[0] + w / 2;
-            case "right" -> x = bounds[2] - w / 2;
-            case "hcenter" -> x = (bounds[0] + bounds[2]) / 2;
-            case "top" -> y = bounds[1] + hh / 2;
-            case "bottom" -> y = bounds[3] - hh / 2;
-            case "vcenter" -> y = (bounds[1] + bounds[3]) / 2;
-            default -> {
-                return;
-            }
+        double[] target = com.opendreamcore.client.world.edit.EditGeometry.alignTarget(mode, bounds, w, hh,
+                WorldHologram.holoNum(holo, "x", 0, vars), WorldHologram.holoNum(holo, "y", 0, vars));
+        if (target == null) {
+            return;
         }
+        double x = target[0];
+        double y = target[1];
         pushWorldUndo("对齐", "align:" + mode, List.of(elementId)); // 单元素对齐可撤消（同模式连续合并）
         holo.put("x", x);
         holo.put("y", y);
@@ -3776,18 +3709,11 @@ final class WorldEditor {
         if (els.isEmpty()) {
             return;
         }
-        double dx = 0, dy = 0;
-        switch (mode) {
-            case "left" -> dx = bounds[0] - minX;
-            case "right" -> dx = bounds[2] - maxX;
-            case "hcenter" -> dx = (bounds[0] + bounds[2]) / 2 - (minX + maxX) / 2;
-            case "top" -> dy = bounds[1] - minY;
-            case "bottom" -> dy = bounds[3] - maxY;
-            case "vcenter" -> dy = (bounds[1] + bounds[3]) / 2 - (minY + maxY) / 2;
-            default -> {
-                return;
-            }
+        double[] delta = com.opendreamcore.client.world.edit.EditGeometry.alignDelta(mode, bounds, minX, maxX, minY, maxY);
+        if (delta == null) {
+            return;
         }
+        double dx = delta[0], dy = delta[1];
         for (Element el : els) {
             Object raw = el.props().get("hologram");
             if (!(raw instanceof Map<?, ?> holo)) {
@@ -3912,13 +3838,15 @@ final class WorldEditor {
             }
             Map<Object, Object> copy = new java.util.LinkedHashMap<>(holo);
             if (horizontal) {
-                copy.put("x", Math.round((2 * center - WorldHologram.holoNum(holo, "x", 0, vars)) * 100) / 100.0);
+                copy.put("x", com.opendreamcore.client.world.edit.EditGeometry.mirrorCoord(center,
+                        WorldHologram.holoNum(holo, "x", 0, vars)));
             } else {
-                copy.put("y", Math.round((2 * center - WorldHologram.holoNum(holo, "y", 0, vars)) * 100) / 100.0);
+                copy.put("y", com.opendreamcore.client.world.edit.EditGeometry.mirrorCoord(center,
+                        WorldHologram.holoNum(holo, "y", 0, vars)));
             }
             Object yaw = holo.get("yaw");
             if (yaw instanceof Number n) {
-                copy.put("yaw", Math.round(-n.doubleValue() * 10) / 10.0);
+                copy.put("yaw", com.opendreamcore.client.world.edit.EditGeometry.mirrorYaw(n.doubleValue()));
             }
             el.props().put("hologram", copy);
             worldEditDirty.put(memberId, new double[]{
@@ -3996,13 +3924,15 @@ final class WorldEditor {
             }
             Map<Object, Object> copy = new java.util.LinkedHashMap<>(holo);
             if (horizontal) {
-                copy.put("x", Math.round((2 * center - WorldHologram.holoNum(holo, "x", 0, vars)) * 100) / 100.0);
+                copy.put("x", com.opendreamcore.client.world.edit.EditGeometry.mirrorCoord(center,
+                        WorldHologram.holoNum(holo, "x", 0, vars)));
             } else {
-                copy.put("y", Math.round((2 * center - WorldHologram.holoNum(holo, "y", 0, vars)) * 100) / 100.0);
+                copy.put("y", com.opendreamcore.client.world.edit.EditGeometry.mirrorCoord(center,
+                        WorldHologram.holoNum(holo, "y", 0, vars)));
             }
             Object yaw = holo.get("yaw");
             if (yaw instanceof Number n) {
-                copy.put("yaw", Math.round(-n.doubleValue() * 10) / 10.0);
+                copy.put("yaw", com.opendreamcore.client.world.edit.EditGeometry.mirrorYaw(n.doubleValue()));
             }
             el.props().put("hologram", copy);
             worldEditDirty.put(memberId, new double[]{
@@ -4077,15 +4007,18 @@ final class WorldEditor {
         sorted.sort(java.util.Comparator.comparingDouble(o -> (double) o[2]));
         double lo = horizontal ? bounds[0] : bounds[1];
         double hi = horizontal ? bounds[2] : bounds[3];
-        double totalSize = 0;
-        for (Object[] o : sorted) {
-            totalSize += (double) o[3];
+        double[] sizes = new double[sorted.size()];
+        for (int i = 0; i < sorted.size(); i++) {
+            sizes[i] = (double) sorted.get(i)[3];
         }
-        double gap = (hi - lo - totalSize) / (sorted.size() - 1);
-        double cursor = lo;
+        double[] targets = com.opendreamcore.client.world.edit.EditGeometry.distributeCenters(lo, hi, sizes);
+        if (targets == null) {
+            return;
+        }
         double moved = 0;
-        for (Object[] o : sorted) {
-            double center = cursor + (double) o[3] / 2;
+        for (int i = 0; i < sorted.size(); i++) {
+            Object[] o = sorted.get(i);
+            double center = targets[i];
             moved += Math.abs(center - (double) o[2]);
             Map<?, ?> holo = (Map<?, ?>) o[1];
             Element el = (Element) o[0];
@@ -4101,7 +4034,6 @@ final class WorldEditor {
                     horizontal ? WorldHologram.holoNum(holo, "y", 0, vars) : center,
                     WorldHologram.holoNum(holo, "z", 0, vars)});
             cc.refreshCreateBlock(el.id());
-            cursor += (double) o[3] + gap;
         }
         cc.invalidateLayout(cc.worldPage);
         cc.worldNodes = cc.layoutPage(cc.worldPage, 800, 600);

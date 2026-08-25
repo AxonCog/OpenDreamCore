@@ -24,7 +24,7 @@ public final class FabricChannel {
     }
 
     private static ResourceLocation channel(String path) {
-        return ResourceLocation.fromNamespaceAndPath(Protocol.NAMESPACE, path);
+        return new ResourceLocation(Protocol.NAMESPACE, path); // 1.20.1 无 fromNamespaceAndPath
     }
 
     /** 客户端侧注册所有接收通道。 */
@@ -68,6 +68,9 @@ public final class FabricChannel {
         register(Protocol.EDITOR_LEASE, data ->
                 ClientController.get().handleLease(
                         com.opendreamcore.protocol.message.EditorLease.decode(reader(data))));
+        register(Protocol.WINDOW_TITLE, data ->
+                ClientController.get().handleWindowTitle(
+                        com.opendreamcore.protocol.message.WindowTitlePush.decode(reader(data))));
     }
 
     /** 注册一个接收通道：缓冲必须同步读完（netty 线程），处理丢到渲染线程。 */
@@ -92,8 +95,16 @@ public final class FabricChannel {
     /** 发送协议消息（ClientController.UiSender 实现）。 */
     public static void send(String channelPath, byte[] bytes) {
         if (net.minecraft.client.Minecraft.getInstance().getConnection() != null) {
+            // 通道名可能带完整命名空间（如 minecraft:register），必须拆分，否则整串塞进 path 会因非法字符抛异常
+            ResourceLocation id;
+            int i = channelPath.indexOf(':');
+            if (i >= 0) {
+                id = new ResourceLocation(channelPath.substring(0, i), channelPath.substring(i + 1));
+            } else {
+                id = new ResourceLocation(Protocol.NAMESPACE, channelPath);
+            }
             FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
-            ClientPlayNetworking.send(channel(channelPath), buf);
+            ClientPlayNetworking.send(id, buf);
         }
     }
 }

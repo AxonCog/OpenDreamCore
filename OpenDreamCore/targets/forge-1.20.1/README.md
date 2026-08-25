@@ -1,9 +1,18 @@
-# forge-1.20.1
+# fabric-1.21.1
 
-排着队呢。
+- Fabric Loader 0.16 + Fabric API · MC 1.21.1 · Java 21
+- 状态：**测试中**
 
-- Forge · MC 1.20.1 · Java 17
-- 状态：**待迁移**
+和 neoforge-1.21.1 共用 common + client 渲染代码，平台差异只在事件挂接和网络发送。
+- NeoForge：`ClientEvents` + `UiChannel`（PayloadRegistrar）
+- Fabric：`FabricEvents` + `FabricChannel`（ClientPlayNetworking）
 
-1.20.1 的 Forge target，工具链用 legacyforge。
-等现代版本搞完就来。
+网络发送统一走 `ClientController.UiSender`，入口注入。
+
+## 构建
+
+```
+gradlew.bat build
+```
+
+产物自动收集到 `output/`。

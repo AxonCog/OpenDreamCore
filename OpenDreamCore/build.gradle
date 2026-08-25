@@ -10,6 +10,8 @@ def targetBuilds = [
         'neoforge-1.21.4': [directory: 'targets/neoforge-1.21.4', task: 'buildNeoForge1214'],
         'fabric-1.21.8':   [directory: 'targets/fabric-1.21.8',   task: 'buildFabric1218'],
         'neoforge-1.21.8': [directory: 'targets/neoforge-1.21.8', task: 'buildNeoForge1218'],
+        'fabric-1.21.11':  [directory: 'targets/fabric-1.21.11',  task: 'buildFabric1211x'],
+        'neoforge-1.21.11':[directory: 'targets/neoforge-1.21.11',task: 'buildNeoForge1211x'],
         'neoforge-26.1.2': [directory: 'targets/neoforge-26.1.2', task: 'buildNeoForge2612'],
         'fabric-26.1.2':   [directory: 'targets/fabric-26.1.2',   task: 'buildFabric2612'],
         'forge-1.6.4':     [directory: 'targets/forge-1.6.4',     task: 'buildForge164'],
@@ -52,6 +54,45 @@ tasks.register('listTargets') {
         targetBuilds.each { name, tb ->
             def status = activeTargets.containsKey(name) ? 'ACTIVE' : 'placeholder'
             println "${name}: ${tb.directory} [${status}]"
+        }
+    }
+}
+
+// ---- verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总（提交前门禁）----
+// 用法：gradlew.bat verifyMatrix                       （全矩阵，任一红则任务失败）
+//       gradlew.bat verifyMatrix -PmatrixContinue=true （汇总但不失败，用于漂移盘点）
+tasks.register('verifyMatrix') {
+    group = 'verification'
+    description = "Runs compileJava in every active target and prints a green/red summary."
+    doLast {
+        def continueOnFail = providers.gradleProperty('matrixContinue').map { it.toBoolean() }.orElse(false)
+        def results = [:]
+        activeTargets.each { name, tb ->
+            def logFile = file("${rootDir}/../_verify_${name}.log")
+            if (logFile.exists()) { logFile.delete() }
+            // target 自带 wrapper（如 fabric-1.21.8 的 Gradle 8.14）优先于根 wrapper
+            def ownWrapper = file("${rootDir}/${tb.directory}/gradlew.bat")
+            def gradlewPath = (ownWrapper.exists() ? ownWrapper.absolutePath
+                    : "${rootDir.absolutePath}\\gradlew.bat").toString()
+            def pb = new ProcessBuilder(['cmd', '/c', gradlewPath,
+                                         '-p', tb.directory.replace('/', '\\').toString(),
+                                         'compileJava', '--console', 'plain', '--no-daemon'])
+            pb.directory(rootDir)
+            pb.redirectErrorStream(true)
+            def proc = pb.start()
+            // 先排空并落盘子进程输出（读到 EOF 即进程结束，避免缓冲区塞满死锁）
+            proc.inputStream.eachLine { line -> logFile.append(line + '\n') }
+            results[name] = (proc.exitValue() == 0)
+        }
+        println '---- compile matrix ----'
+        def failed = []
+        results.each { name, ok ->
+            println "${ok ? 'GREEN' : 'RED  '}  ${name}"
+            if (!ok) failed << name
+        }
+        println "------------------------ ${results.values().count(true)}/${results.size()} green"
+        if (failed && !continueOnFail) {
+            throw new GradleException("compile matrix RED: ${failed.join(', ')}")
         }
     }
 }

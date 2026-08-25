@@ -23,6 +23,10 @@ import java.nio.file.Path;
 @EventBusSubscriber(modid = OpenDreamCore.MODID, value = Dist.CLIENT)
 public final class ClientEvents {
 
+    static {
+        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
+    }
+
     private ClientEvents() {
     }
 
@@ -63,6 +67,7 @@ public final class ClientEvents {
                     }
                 });
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLoggingIn);
+        NeoForge.EVENT_BUS.addListener(ClientEvents::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onRenderGui);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onRenderGuiLayer);
@@ -73,12 +78,15 @@ public final class ClientEvents {
         // 本地文件监听：UI/fonts 目录自动热重载
         new UiFileWatcher().start();
         // 窗口 branding：OpenDreamCore/branding/title.txt + icon.png
+        // 材质包注入 SPI：/odc pack 使用
+        com.opendreamcore.client.spi.ResourcePackInjector.register(new NeoForgePackInjector());
         WindowBranding.apply();
     }
 
     /** 客户端 tick：键鼠绑定边沿检测（按下上报 KEY 事件给服务端）。 */
     public static void onClientTick(net.neoforged.neoforge.client.event.ClientTickEvent.Pre event) {
         ClientController.get().tickBindings();
+        WindowBranding.tick(); // title.json 打字机/轮播推进
     }
 
     /** 收到聊天消息：转 legacy 格式串进 chat_display 缓存（颜色码保留，服务端聊天也能显示在自定义界面）。 */
@@ -141,6 +149,7 @@ public final class ClientEvents {
         ClientController.get().renderHud(event.getGuiGraphics());
         ClientController.get().renderWorldArrows(event.getGuiGraphics(),
                 Minecraft.getInstance().gameRenderer.getMainCamera());
+        HudLogo.render(event.getGuiGraphics()); // D2 logo_hud
     }
 
     /** hideVanilla 页面选项：逐层取消原版 HUD 渲染（RenderGuiLayerEvent，层名 = VanillaGuiLayers）。 */
@@ -194,229 +203,22 @@ public final class ClientEvents {
         ClientController.get().loadPositions();
         ClientController.get().elementEdits().load();
         ClientController.get().markLogin();
+        // 服务端标题缓存预载（首包前生效，消除空窗）
+        ClientController.get().preloadServerTitle();
         ClientController.get().sendReady();
         ClientController.get().requestTooltips();
         // 本地 UI 加载延迟到 handleReadyAck（根据服务端 allow-local-ui 配置决定）
     }
 
+    /** 断线/退出服务器：解除服务端标题覆盖，还原本地 branding。 */
+    public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        ClientController.get().clearServerTitle();
+    }
+
     public static void onRegisterCommands(RegisterClientCommandsEvent event) {
         // 客户端 /odc 命令：单人世界执行本地操作；连接服务器时转发给服务端执行
-        event.getDispatcher().register(Commands.literal("odc")
-                .then(Commands.literal("open")
-                        .then(Commands.argument("page", StringArgumentType.greedyString())
-                                .executes(ctx -> {
-                                    if (forwardToServerIfConnected(ctx, "open " + StringArgumentType.getString(ctx, "page"))) {
-                                        return Command.SINGLE_SUCCESS;
-                                    }
-                                    String id = StringArgumentType.getString(ctx, "page");
-                                    Page page = ClientController.get().localPages().get(id);
-                                    if (page == null) {
-                                        ctx.getSource().sendFailure(Component.literal("没有这个页面: " + id));
-                                        return 0;
-                                    }
-                                    ClientController.get().open(page);
-                                    return Command.SINGLE_SUCCESS;
-                                })))
-                .then(Commands.literal("close")
-                        .executes(ctx -> {
-                            if (forwardToServerIfConnected(ctx, "close")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
-                            ClientController.get().close();
-                            return Command.SINGLE_SUCCESS;
-                        }))
-                .then(Commands.literal("hud")
-                        .executes(ctx -> {
-                            if (forwardToServerIfConnected(ctx, "hud")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
-                            var controller = ClientController.get();
-                            if (controller.isHudOpen()) {
-                                controller.closeHud();
-                                ctx.getSource().sendSuccess(() -> Component.literal("HUD 已关闭"), false);
-                            } else {
-                                controller.autoMountHud();
-                                ctx.getSource().sendSuccess(() -> Component.literal(
-                                        controller.isHudOpen() ? "HUD 已挂载" : "没有 match: hud 的本地页面"), false);
-                            }
-                            return Command.SINGLE_SUCCESS;
-                        }))
-                .then(Commands.literal("edit")
-                        // /odc edit <pageId> — 打开页面 + 进入游戏内编辑模式（文件不存在则创建 .yaml）
-                        // pageId 支持子路径：hud/help → OpenDreamCore/UI/hud/help.yaml
-                        .then(Commands.argument("page", StringArgumentType.string())
-                                .executes(ctx -> {
-                                    String pageId = StringArgumentType.getString(ctx, "page");
-                                    return handleEditPage(ctx, pageId, false, null);
-                                })
-                                // /odc edit <pageId> external — 外置编辑器打开
-                                .then(Commands.literal("external")
-                                        .executes(ctx -> {
-                                            String pageId = StringArgumentType.getString(ctx, "page");
-                                            return handleEditPage(ctx, pageId, true, null);
-                                        }))
-                                // /odc edit <pageId> with <editor> — 指定编辑器打开
-                                .then(Commands.literal("with")
-                                        .then(Commands.argument("editor", StringArgumentType.string())
-                                                .executes(ctx -> {
-                                                    String pageId = StringArgumentType.getString(ctx, "page");
-                                                    String editor = StringArgumentType.getString(ctx, "editor");
-                                                    return handleEditPage(ctx, pageId, true, editor);
-                                                }))))
-                        // /odc edit on [pageId] — 进入编辑模式（可带页面 id）
-                        .then(Commands.literal("on")
-                                .executes(ctx -> {
-                                    // /odc edit on — 当前页面进入编辑
-                                    ClientController.get().toggleEdit(true);
-                                    ctx.getSource().sendSuccess(() -> Component.literal("§a编辑模式已开启§f（拖动元素改位置 | Del删除 | Ctrl+C复制 | [ ]调Z | Ctrl+E导出YAML）"), false);
-                                    return Command.SINGLE_SUCCESS;
-                                })
-                                .then(Commands.argument("page", StringArgumentType.string())
-                                        .executes(ctx -> {
-                                            // /odc edit on <pageId> — 打开指定页面 + 进入编辑
-                                            String pageId = StringArgumentType.getString(ctx, "page");
-                                            return handleEditPage(ctx, pageId, false, null);
-                                        })
-                                        .then(Commands.literal("external")
-                                                .executes(ctx -> {
-                                                    String pageId = StringArgumentType.getString(ctx, "page");
-                                                    return handleEditPage(ctx, pageId, true, null);
-                                                }))
-                                        .then(Commands.literal("with")
-                                                .then(Commands.argument("editor", StringArgumentType.string())
-                                                        .executes(ctx -> {
-                                                            String pageId = StringArgumentType.getString(ctx, "page");
-                                                            String editor = StringArgumentType.getString(ctx, "editor");
-                                                            return handleEditPage(ctx, pageId, true, editor);
-                                                        })))))
-                        // /odc edit off [pageId] — 退出编辑模式（可带页面 id 先打开再关闭编辑）
-                        .then(Commands.literal("off")
-                                .executes(ctx -> {
-                                    ClientController.get().toggleEdit(false);
-                                    ctx.getSource().sendSuccess(() -> Component.literal("编辑模式已关闭"), false);
-                                    return Command.SINGLE_SUCCESS;
-                                })
-                                .then(Commands.argument("page", StringArgumentType.string())
-                                        .executes(ctx -> {
-                                            // /odc edit off <pageId> — 打开指定页面（不进入编辑）
-                                            String pageId = StringArgumentType.getString(ctx, "page");
-                                            return handleEditPage(ctx, pageId, false, null);
-                                        })))
-                        // /odc edit hud — HUD 编辑模式
-                        .then(Commands.literal("hud")
-                                .executes(ctx -> {
-                                    var controller = ClientController.get();
-                                    if (controller.isHudEditMode()) {
-                                        controller.setHudEditMode(false);
-                                        ctx.getSource().sendSuccess(() -> Component.literal("HUD 编辑模式已关闭"), false);
-                                    } else {
-                                        if (!controller.isHudOpen()) {
-                                            controller.autoMountHud();
-                                        }
-                                        if (controller.isHudOpen()) {
-                                            controller.setHudEditMode(true);
-                                            ctx.getSource().sendSuccess(() -> Component.literal(
-                                                    "§aHUD 编辑模式已开启§f（拖动元素改位置 | ESC退出）"), false);
-                                        } else {
-                                            ctx.getSource().sendFailure(Component.literal("没有挂载的 HUD 页面（先 /odc hud）"));
-                                            return 0;
-                                        }
-                                    }
-                                    return Command.SINGLE_SUCCESS;
-                                }))
-                        // /odc edit save — 保存编辑
-                        .then(Commands.literal("save")
-                                .executes(ctx -> {
-                                    ClientController.get().saveEdits();
-                                    return Command.SINGLE_SUCCESS;
-                                }))
-                        // /odc edit lease <page> — 服务端编辑租约
-                        .then(Commands.literal("lease")
-                                .then(Commands.argument("page", StringArgumentType.greedyString())
-                                        .executes(ctx -> {
-                                            String page = StringArgumentType.getString(ctx, "page");
-                                            ClientController.get().requestLease(page);
-                                            return Command.SINGLE_SUCCESS;
-                                        })))
-                        // /odc edit release <page> — 释放服务端编辑租约
-                        .then(Commands.literal("release")
-                                .then(Commands.argument("page", StringArgumentType.greedyString())
-                                        .executes(ctx -> {
-                                            String page = StringArgumentType.getString(ctx, "page");
-                                            ClientController.get().releaseLease(page);
-                                            return Command.SINGLE_SUCCESS;
-                                        })))
-                        // /odc edit export — 导出当前页面 YAML
-                        .then(Commands.literal("export")
-                                .executes(ctx -> {
-                                    var controller = ClientController.get();
-                                    Page current = controller.currentPage();
-                                    if (current == null) {
-                                        ctx.getSource().sendFailure(Component.literal("没有打开的页面"));
-                                        return 0;
-                                    }
-                                    try {
-                                        String yaml = com.opendreamcore.page.PageExporter.toYaml(current);
-                                        String id = current.id() == null ? "page" : current.id();
-                                        Path file = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
-                                                .resolve("OpenDreamCore").resolve("UI").resolve(id + "_export.yaml");
-                                        java.nio.file.Files.createDirectories(file.getParent());
-                                        java.nio.file.Files.writeString(file, yaml);
-                                        ctx.getSource().sendSuccess(() -> Component.literal(
-                                                "§a页面已导出: §f" + file), false);
-                                    } catch (Exception e) {
-                                        ctx.getSource().sendFailure(Component.literal("导出失败: " + e));
-                                    }
-                                    return Command.SINGLE_SUCCESS;
-                                }))
-                        // /odc edit（无参数）— 显示帮助
-                        .executes(ctx -> {
-                            ctx.getSource().sendSuccess(() -> Component.literal(
-                                    "§e=== OpenDreamCore 编辑器 ===\n" +
-                                    "§f/odc edit <页面id> §7→ 打开页面 + 进入游戏内编辑\n" +
-                                    "§f/odc edit <页面id> external §7→ 外置编辑器打开 YAML\n" +
-                                    "§f/odc edit <页面id> with <编辑器> §7→ 指定编辑器(如 code, notepad++)\n" +
-                                    "§f/odc edit hud §7→ HUD 编辑模式\n" +
-                                    "§f/odc edit on/off §7→ 切换当前页面编辑模式\n" +
-                                    "§f/odc edit save §7→ 保存编辑\n" +
-                                    "§f/odc edit export §7→ 导出当前页面 YAML\n" +
-                                    "§f/odc edit lease/release <页面> §7→ 服务端编辑租约\n" +
-                                    "§7保存 YAML 后游戏自动热重载"), false);
-                            return Command.SINGLE_SUCCESS;
-                        }))
-                .then(Commands.literal("reload")
-                        .executes(ctx -> {
-                            if (forwardToServerIfConnected(ctx, "reload")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
-                            var controller = ClientController.get();
-                            Path uiDir = Minecraft.getInstance().gameDirectory.toPath().resolve("OpenDreamCore").resolve("UI");
-                            controller.localPages().load(uiDir);
-                            if (controller.isOpen()) {
-                                controller.refreshCurrent();
-                            }
-                            WindowBranding.reload(); // 窗口标题/图标热重载
-                            ctx.getSource().sendSuccess(() -> Component.literal("本地页面已重载"), false);
-                            return Command.SINGLE_SUCCESS;
-                        }))
-                .then(Commands.literal("list")
-                        .executes(ctx -> {
-                            if (forwardToServerIfConnected(ctx, "list")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
-                            var ids = ClientController.get().localPages().ids();
-                            ctx.getSource().sendSuccess(() -> Component.literal(
-                                    "本地页面 (" + ids.size() + "): " + String.join(", ", ids)), false);
-                            return Command.SINGLE_SUCCESS;
-                        }))
-                .executes(ctx -> {
-                    if (forwardToServerIfConnected(ctx, "")) {
-                        return Command.SINGLE_SUCCESS;
-                    }
-                    ctx.getSource().sendSuccess(() -> Component.literal(
-                            "用法: /odc open <页面id> | close | list"), false);
-                    return Command.SINGLE_SUCCESS;
-                }));
+        event.getDispatcher().register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.minecraft.commands.CommandSourceStack>)
+                com.opendreamcore.client.OdcCommands.buildRoot());
     }
 
     /**
@@ -493,14 +295,8 @@ public final class ClientEvents {
      * 直接发送 ServerboundChatCommandPacket 绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
      */
     private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> ctx,
-                                                       String subCommand) {
-        var conn = Minecraft.getInstance().getConnection();
-        if (conn == null) {
-            return false; // 单人世界：走本地命令
-        }
-        // 直接发送命令协议包到服务端（绕过客户端命令调度器，避免 /odc 自匹配递归）
-        String cmd = subCommand.isEmpty() ? "odc" : "odc " + subCommand;
-        conn.send(new net.minecraft.network.protocol.game.ServerboundChatCommandPacket(cmd));
-        return true;
+                                                       String subCommand)  {
+        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
+        return ClientController.get().tryForwardOdcCommand(subCommand);
     }
 }

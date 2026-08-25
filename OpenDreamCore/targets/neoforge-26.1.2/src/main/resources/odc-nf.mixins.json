@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.opendreamcore.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "MixinNetworkFilters"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

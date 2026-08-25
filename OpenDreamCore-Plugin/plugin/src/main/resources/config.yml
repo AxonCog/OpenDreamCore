@@ -11,6 +11,22 @@ file-watcher:
 # true  = 客户端可以加载本地 UI 页面（单机模式或开发调试用）
 allow-local-ui: false
 
+# 页面下发模式：open = 只推已开启会话的页面（默认）；all = 进服全量推送所有页面
+push-pages: all
+
 # 下发到客户端的配置（key=value，进服握手后自动写入客户端 config/opendreamcore/odc.properties）
 client:
   versionCheck.enforce: false   # true = 版本不匹配强制断开
+
+# 客户端窗口标题（进服自动接管，无需任何指令；断线或 TitleAPI.reset 后客户端还原本地 branding）
+# 未装模组的原版客户端自动忽略本通道；enabled=false 或 text/titles 全空则不下发
+client-title:
+  enabled: false
+  text: ""            # 兜底文本（titles 为空时显示它）
+  titles: []          # 轮播序列，如: ["欢迎来到梦幻小屋", "QQ群 1105028422"]
+  typewriter: false   # 打字机逐字显现
+  random: false       # 随机轮换（多句时随机选句，优先于打字机效果）
+  speed: 120          # 打字机每字符毫秒
+  interval: 3000      # 每句展示时长基准毫秒
+  hold-ms: -1         # 打完停留毫秒（-1 = 取 interval）
+  loop: true          # 播完是否循环

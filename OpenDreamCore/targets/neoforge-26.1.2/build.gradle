@@ -1,0 +1,249 @@
+// OpenDreamCore target: neoforge-26.1.2
+// common/ 共享源码树由本 target 编译期合并，平台网络/渲染/入口在本 target 内。
+// MC 26.1.2 = Java 25：编译工具链与 NFRT（neoform-runtime）都用 JDK 25 GA。
+// 消歧：compileClasspath 钉 java-runtime —— universalJar(jvm25,le=jar,runtime) 完全匹配唯一胜出，
+// modDevApiElements(usage=java-api) 被 usage 失配排除（Gradle 8.8 下双变体并列会硬错误）。
+
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.144'
+    id 'com.gradleup.shadow' version '9.0.0'
+}
+
+import org.gradle.api.attributes.Usage
+
+// 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
+def properties = new Properties()
+file('../../gradle.properties').withInputStream { properties.load(it) }
+file('gradle.properties').withInputStream { properties.load(it) }
+properties.each { key, value -> ext.set(key.toString(), value.toString()) }
+
+group = mod_group_id
+version = mod_version
+
+base {
+    archivesName = "${mod_name}-neoforge-26.1.2"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// NFRT 的 recompile 步骤用进程内 JavaCompiler：必须跑在 JDK 25 正式版上
+// （MC 26.1.2 源码使用 ScopedValue——JDK 25 EA 中仍是预览 API，GA 已定稿无需 --enable-preview）。
+tasks.withType(net.neoforged.nfrtgradle.CreateMinecraftArtifacts).configureEach {
+    toolsJavaExecutable.set('C:/Users/24965/.jdks/jdk-25.0.4.1+1/bin/java.exe')
+}
+
+configurations.compileClasspath {
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+    }
+}
+
+// common/ 是共享源码树（零 MC 依赖），编译期合并进本 target。
+sourceSets {
+    main {
+        java.srcDir "$buildDir/generated/common-main"
+        java.srcDir "$buildDir/generated/client-main"
+        resources.srcDir '../../common/src/main/resources'
+    }
+}
+
+tasks.register('prepareCommonSources', Sync) {
+    from('../../common/src/main/java')
+    into "$buildDir/generated/common-main"
+}
+tasks.register('prepareClientSources', Sync) {
+    from('../../client/src/main/java')
+    into "$buildDir/generated/client-main"
+}
+tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
+tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift' }
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xmaxerrs', '10000', '-Xmaxwarns', '10000']
+}
+
+neoForge {
+    version = neoforge_version
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    compileOnly 'org.yaml:snakeyaml:2.2'
+    compileOnly 'com.google.code.gson:gson:2.10.1'
+}
+
+configurations {
+    shadeOnly
+}
+dependencies {
+    shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.yaml:snakeyaml:2.2'
+}
+
+shadowJar {
+    archiveClassifier = ''
+    configurations = [project.configurations.shadeOnly]
+    relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.shaded.snakeyaml'
+    mergeServiceFiles()
+    exclude 'META-INF/maven/org.yaml/**'
+    exclude 'META-INF/versions/*/org.yaml/**'
+    exclude 'META-INF/versions/*/module-info.class'
+}
+tasks.named('jar').configure {
+    enabled = false
+}
+tasks.named('assemble').configure {
+    dependsOn tasks.named('shadowJar')
+}
+
+tasks.named('processResources') {
+    inputs.property 'mod_id', mod_id
+    inputs.property 'mod_version', mod_version
+    inputs.property 'mod_license', mod_license
+    inputs.property 'mod_authors', mod_authors
+    inputs.property 'mod_description', mod_description
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand(
+                'mod_id': mod_id,
+                'mod_version': mod_version,
+                'mod_license': mod_license,
+                'mod_authors': mod_authors,
+                'mod_description': mod_description
+        )
+    }
+}
+
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Copy built jar to ../../../output'
+    doLast {
+        def out = file('../../../output')
+        out.mkdirs()
+        // 只收集当前版本产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
+        file('build/libs').listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && f.name.contains("-${mod_version}-")
+                    && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-javadoc')) {
+                copy { from f; into out }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar") && f.name != "OpenDreamCore-Plugin-${mod_version}.jar") {
+                delete f
+                println "removed stale ${f.name}"
+            }
+        }
+    }
+}
+tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
+
+// ---- 26.x mojmap 漂移机械重映射（只作用于本 target 的一次性生成副本）----
+// 家族：Identifier 改名 / GuiGraphics→GuiGraphicsExtractor / drawString→text / renderItem→item /
+//       displayClientMessage→sendSystem/OverlayMessage / 输入事件记录 / Window.handle() / Camera.position()
+tasks.register('remapDrift') {
+    dependsOn 'prepareCommonSources', 'prepareClientSources'
+    doLast {
+        def BS_NL = System.lineSeparator()
+        def INPUT_FILES = ['OdcScreen.java', 'WorldEditAlignScreen.java', 'WorldEditFindScreen.java',
+                           'WorldEditPropQuickScreen.java', 'WorldEditPropScreen.java', 'WorldEditRenameScreen.java']
+        [file("$buildDir/generated/common-main"), file("$buildDir/generated/client-main")].each { dir ->
+            if (!dir.exists()) return
+            dir.eachFileRecurse { f ->
+                if (!f.name.endsWith('.java') || f.name == 'CompatInput.java' || f.name == 'CompatPlayer.java') return
+                def text = f.getText('UTF-8')
+                def r = text
+                        .replaceAll(/\bResourceLocation\b/, 'Identifier')
+                        .replaceAll(/\bGuiGraphics\b/, 'GuiGraphicsExtractor')
+                        .replaceAll(/net[.]minecraft[.]client[.]gui[.]GuiGraphicsExtractor/, 'net.minecraft.client.gui.GuiGraphicsExtractor')
+                        .replaceAll(/\.drawString\(/, '.text(')
+                        .replaceAll(/\.renderItemDecorations\(/, '.itemDecorations(')
+                        // 26.x 降级：renderStatic 已移除且新提交管线在独立 BufferSource 上下文不可用——保留变换，跳过世界物品图标渲染
+                        .replace('mc.getItemRenderer().renderStatic(stack,' + BS_NL + '                    net.minecraft.world.item.ItemDisplayContext.FIXED,' + BS_NL + '                    0xF000F0, 0, pose, buffers, mc.level, 0);', '// [26.x 降级] 世界物品图标渲染跳过')
+                        .replaceAll(/\.renderItem\((\w+), (\d+), (\d+)\)/, '.item($1, $2, $3)')
+                        .replaceAll(/(?s)displayClientMessage[(](.+?[)])\s*,\s*false[)]/, 'sendSystemMessage($1)')
+                        .replaceAll(/(?s)displayClientMessage[(](.+?[)])\s*,\s*true[)]/, 'sendOverlayMessage($1)')
+                        .replaceAll(/\.getWindow\(\)\.getWindow\(\)/, '.getWindow().handle()')
+                        .replaceAll(/(?<!CompatInput[.])(?:net[.]minecraft[.]client[.]gui[.]screens[.])?(?:Screen[.])?hasShiftDown[(][)]/, 'com.opendreamcore.client.CompatInput.hasShiftDown()')
+                        .replaceAll(/(?<!CompatInput[.])(?:net[.]minecraft[.]client[.]gui[.]screens[.])?(?:Screen[.])?hasControlDown[(][)]/, 'com.opendreamcore.client.CompatInput.hasControlDown()')
+                        .replaceAll(/(?<!CompatInput[.])(?:net[.]minecraft[.]client[.]gui[.]screens[.])?(?:Screen[.])?hasAltDown[(][)]/, 'com.opendreamcore.client.CompatInput.hasAltDown()')
+                        .replaceAll(/\bviewHeight\b/, 'height')
+                        // 26.x DynamicTexture 构造器需标签参数（贴图调试名）
+                        .replaceAll(/new DynamicTexture\(img\)/, 'new DynamicTexture(() -> "opendreamcore_loose", img)')
+                        // 26.x Identifier 构造器私有化，改走工厂
+                        .replaceAll(/new Identifier\(/, 'Identifier.fromNamespaceAndPath(')
+                        .replaceAll(/\.getDayTime\(\)/, '.getOverworldClockTime()')
+                        .replaceAll(/mc\.gameRenderer\.getProjectionMatrix\(/, 'com.opendreamcore.client.CompatRender.projectionMatrix(mc.gameRenderer, ')
+                        .replace('g.text(String.valueOf(c), 0, metrics.getAscent());', 'g.drawString(String.valueOf(c), 0, metrics.getAscent());')
+                        .replaceAll(/\.getPosition\(\)/, '.position()')
+                        .replaceAll(/[.]dimension[(][)][.]location[(][)]/, '.dimension().identifier()')
+                        .replace('ChatScreen(initialText == null ? "" : initialText) {', 'ChatScreen(initialText == null ? "" : initialText, false) {')
+                        .replaceAll(/mc[.]player[.]playNotifySound[(]/, 'com.opendreamcore.client.CompatPlayer.playNotifySound(mc.player, ')
+                // Screen.render → extractRenderState（26.x 提交管线）
+                r = r.replace('public void render(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {',
+                              'public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {')
+                r = r.replaceAll(/super\.render\(g, mouseX, mouseY, partialTick\)/, 'super.extractRenderState(g, mouseX, mouseY, partialTick)')
+                r = r.replace('public void render(net.minecraft.client.gui.GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {',
+                              'public void extractRenderState(net.minecraft.client.gui.GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {')
+                r = r.replaceAll(/protected\s+void\s+renderWidget\(/, 'protected void extractWidgetRenderState(')
+                if (f.name in INPUT_FILES) {
+                    def MBE = 'net.minecraft.client.input.MouseButtonEvent'
+                    def UNPACK_MOUSE = '{' + BS_NL + '        final double mouseX = __ev.x(); final double mouseY = __ev.y(); final int button = __ev.buttonInfo().button();'
+                    def UNPACK_CLICK = '{' + BS_NL + '        final double mouseX = __ev.x(); final double mouseY = __ev.y();'
+                    r = r
+                        .replace('public boolean mouseClicked(double mouseX, double mouseY, int button) {',
+                                 "public boolean mouseClicked(${MBE} __ev, boolean __dbl) ${UNPACK_MOUSE}")
+                        .replace('public boolean mouseReleased(double mouseX, double mouseY, int button) {',
+                                 "public boolean mouseReleased(${MBE} __ev) ${UNPACK_MOUSE}")
+                        .replace('public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {',
+                                 "public boolean mouseDragged(${MBE} __ev, double dragX, double dragY) ${UNPACK_MOUSE}")
+                        .replace('public void onClick(double mouseX, double mouseY) {',
+                                 "public void onClick(${MBE} __ev, boolean __dbl) ${UNPACK_CLICK}")
+                        .replace('public boolean charTyped(char codePoint, int modifiers) {',
+                                 'public boolean odcCharTypedX(net.minecraft.client.input.CharacterEvent __ev) {'+ BS_NL + '        final char codePoint = (char) __ev.codepoint(); final int modifiers = 0;')
+                        .replace('odcCharTypedX(net.minecraft.client.input.CharacterEvent',
+                                 'charTyped(net.minecraft.client.input.CharacterEvent')
+                        .replace('public boolean keyPressed(int keyCode, int scanCode, int modifiers) {',
+                                 'public boolean keyPressed(net.minecraft.client.input.KeyEvent __ev) {' + BS_NL + '        final int keyCode = __ev.key(); final int scanCode = __ev.scancode(); final int modifiers = __ev.modifiers();')
+                        .replaceAll(/super\.keyPressed\(keyCode, scanCode, modifiers\)/,
+                                 'super.keyPressed(new net.minecraft.client.input.KeyEvent(keyCode, scanCode, modifiers))')
+                        .replaceAll(/super\.mouseClicked\(mouseX, mouseY, button\)/,
+                                 "super.mouseClicked(new ${MBE}(mouseX, mouseY, new net.minecraft.client.input.MouseButtonInfo(button, 0)), false)")
+                        .replaceAll(/super\.mouseReleased\(mouseX, mouseY, button\)/,
+                                 "super.mouseReleased(new ${MBE}(mouseX, mouseY, new net.minecraft.client.input.MouseButtonInfo(button, 0)))")
+                        .replaceAll(/super\.mouseDragged\(mouseX, mouseY, button, dragX, dragY\)/,
+                                 "super.mouseDragged(new ${MBE}(mouseX, mouseY, new net.minecraft.client.input.MouseButtonInfo(button, 0)), dragX, dragY)")
+                        .replaceAll(/hovered[.]onClick[(]mx, my[)]/,
+                                 "hovered.onClick(new ${MBE}(mx, my, new net.minecraft.client.input.MouseButtonInfo(0, 0)), false)")
+                }
+                if (r != text) { f.write(r, 'UTF-8') }
+            }
+        }
+    }
+}
+tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
+tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
+tasks.named('compileJava').configure { dependsOn 'remapDrift' }

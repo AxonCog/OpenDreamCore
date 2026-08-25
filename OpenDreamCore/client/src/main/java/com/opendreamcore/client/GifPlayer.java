@@ -41,7 +41,7 @@ public final class GifPlayer {
     private GifPlayer(List<Frame> frames, int totalMs) {
         this.frames.addAll(frames);
         this.totalMs = totalMs;
-        this.textureId = ResourceLocation.fromNamespaceAndPath("opendreamcore",
+        this.textureId = CompatRender.rl("opendreamcore",
                 "gif/" + Integer.toHexString(System.identityHashCode(this)));
         int acc = 0;
         for (Frame frame : frames) {
@@ -64,7 +64,7 @@ public final class GifPlayer {
         }
         if (index != lastIndex) {
             lastIndex = index;
-            DynamicTexture tex = new DynamicTexture(frames.get(index).image());
+            DynamicTexture tex = CompatRender.newDynamicTexture(frames.get(index).image());
             Minecraft.getInstance().getTextureManager().register(textureId, tex);
         }
         return textureId;
@@ -91,7 +91,10 @@ public final class GifPlayer {
             if (file == null || !Files.isRegularFile(file)) {
                 return null;
             }
-            List<Frame> frames = decode(Files.newInputStream(file));
+            List<Frame> frames;
+            try (var in = Files.newInputStream(file)) {
+                frames = decode(in);
+            }
             if (frames.isEmpty()) {
                 return null;
             }
@@ -115,7 +118,8 @@ public final class GifPlayer {
         com.opendreamcore.remote.RemoteMedia.get(url, RemoteImageStore.cacheDir()).thenAccept(path -> {
             Minecraft.getInstance().execute(() -> {
                 try {
-                    List<Frame> frames = decode(Files.newInputStream(path));
+                    List<Frame> frames;
+                    try (var in = Files.newInputStream(path)) { frames = decode(in); }
                     if (!frames.isEmpty()) {
                         GifPlayer player = new GifPlayer(frames, frames.stream().mapToInt(Frame::delayMs).sum());
                         CACHE.put(url, player);
@@ -168,7 +172,7 @@ public final class GifPlayer {
         NativeImage out = new NativeImage(img.getWidth(), img.getHeight(), true);
         for (int x = 0; x < img.getWidth(); x++) {
             for (int y = 0; y < img.getHeight(); y++) {
-                out.setPixelRGBA(x, y, img.getRGB(x, y));
+                CompatRender.nativeSetPixel(out, x, y, img.getRGB(x, y));
             }
         }
         return out;

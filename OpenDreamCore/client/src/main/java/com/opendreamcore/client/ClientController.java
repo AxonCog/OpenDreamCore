@@ -1,5 +1,7 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.methods.ClientMethodSupport;
+
 import com.mojang.logging.LogUtils;
 import com.opendreamcore.page.Element;
 import com.opendreamcore.page.Page;
@@ -35,12 +37,76 @@ public final class ClientController {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     private static final ClientController INSTANCE = new ClientController();
-    private static final String CLIENT_VERSION = "0.1.0";
+    /** 客户端 mod 版本：首次使用时从加载器元数据读取（Fabric/Forge/NeoForge 反射择路）。 */
+    private static volatile String CLIENT_VERSION;
+
+    private static String clientVersion() {
+        String v = CLIENT_VERSION;
+        if (v == null || v.isBlank()) {
+            synchronized (ClientController.class) {
+                v = CLIENT_VERSION;
+                if (v == null || v.isBlank()) {
+                    v = detectModVersion();
+                    CLIENT_VERSION = v;
+                }
+            }
+        }
+        return v;
+    }
+
+    private static String detectModVersion() {
+        // 方案1：Fabric
+        try {
+            Class<?> fl = Class.forName("net.fabricmc.loader.api.FabricLoader");
+            Object loader = fl.getMethod("getInstance").invoke(null);
+            Object container = ((java.util.Optional<?>) fl.getMethod("getModContainer", String.class)
+                    .invoke(loader, "opendreamcore")).orElse(null);
+            if (container != null) {
+                Object meta = container.getClass().getMethod("metadata").invoke(container);
+                return (String) meta.getClass().getMethod("getVersion").invoke(meta);
+            }
+        } catch (Throwable ignored) { }
+        // 方案2：Forge/NeoForge ModList
+        for (String mlClass : new String[]{"net.minecraftforge.fml.ModList", "net.neoforged.fml.ModList"}) {
+            try {
+                Class<?> ml = Class.forName(mlClass);
+                Object modList = ml.getMethod("get").invoke(null);
+                Object container = ((java.util.Optional<?>) ml.getMethod("getModContainerById", String.class)
+                        .invoke(modList, "opendreamcore")).orElse(null);
+                if (container != null) {
+                    // Forge: getModInfo().getVersion()
+                    try {
+                        Object info = container.getClass().getMethod("getModInfo").invoke(container);
+                        return (String) info.getClass().getMethod("getVersion").invoke(info);
+                    } catch (Throwable ignored2) { }
+                    // NeoForge: getModInfo().getVersion() 同理但可能有差异
+                }
+            } catch (Throwable ignored) { }
+        }
+        // 方案3：从 jar manifest 读 Implementation-Version
+        try {
+            String ver = ClientController.class.getPackage().getImplementationVersion();
+            if (ver != null && !ver.isBlank()) return ver;
+        } catch (Throwable ignored) { }
+        return "unknown";
+    }
+
+    /** 平台壳可显式覆盖版本号（加载器探测失败时兜底）。 */
+    public static void setClientVersion(String v) {
+        if (v != null && !v.isBlank()) {
+            CLIENT_VERSION = v;
+        }
+    }
 
     private volatile UiSender sender;
 
     private final LocalPageManager localPages = new LocalPageManager();
     private final Map<String, Page> serverPages = new ConcurrentHashMap<>();
+
+    /** 握手期密钥未到时先扣住的加密页面/同步包，ready_ack 后按序回放。 */
+    private final java.util.List<com.opendreamcore.protocol.message.PageSync> pendingPageSyncs = new java.util.ArrayList<>();
+    private final java.util.List<com.opendreamcore.protocol.message.HudSync> pendingHudSyncs = new java.util.ArrayList<>();
+    private final java.util.List<com.opendreamcore.protocol.message.PageControl> pendingControls = new java.util.ArrayList<>();
     private final CloudSyncClient cloud = new CloudSyncClient();
     private final TooltipStore tooltips = new TooltipStore();
     private final ElementEditStore elementEdits = new ElementEditStore();
@@ -118,14 +184,14 @@ public final class ClientController {
                 g.fill(bx, by, bx + boxW, by + 26, bg);
                 g.fill(bx, by, bx + boxW, by + 1, (a << 24) | 0x505868);
                 var pose = g.pose();
-                pose.pushPose();
-                pose.translate(bx + 4, by + 5, 0);
-                pose.scale(1.0F, 1.0F, 1.0F);
+                CompatRender.posePush(pose);
+                CompatRender.poseTranslate(pose, bx + 4, by + 5);
+                CompatRender.poseScale(pose, 1.0F, 1.0F);
                 g.renderItem(stack, 0, 0);
                 if (stack.getCount() > 1) {
                     g.renderItemDecorations(mc.font, stack, 0, 0);
                 }
-                pose.popPose();
+                CompatRender.posePop(pose);
                 int textColor = (a << 24) | 0xFFFFFF;
                 g.drawString(mc.font, name, bx + 24, by + 9, textColor, true);
             }
@@ -248,7 +314,7 @@ public final class ClientController {
         // 全局热键（HUD 页面声明，页面外也响应；经 HUD 会话路由）
         if (hudSession != null) {
             for (Map.Entry<String, String> e : globalKeyBinds.entrySet()) {
-                var mapping = ClientMethods.keyMapping(e.getValue());
+                var mapping = ClientMethodSupport.keyMapping(e.getValue());
                 if (mapping != null && mapping.consumeClick()) {
                     sendKeyEvent(hudSession, "key:" + e.getKey(), "keybind:" + e.getKey());
                 }
@@ -272,7 +338,7 @@ public final class ClientController {
             return;
         }
         for (Map.Entry<String, String> e : keyBinds.entrySet()) {
-            var mapping = ClientMethods.keyMapping(e.getValue());
+            var mapping = ClientMethodSupport.keyMapping(e.getValue());
             if (mapping != null && mapping.consumeClick()) {
                 sendKeyEvent("key:" + e.getKey(), "keybind:" + e.getKey());
             }
@@ -616,10 +682,12 @@ public final class ClientController {
         try {
             java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(4)
                     .order(java.nio.ByteOrder.nativeOrder());
-            target.bindRead();
+            if (!CompatRender.targetBindRead(target)) {
+                return null;
+            }
             org.lwjgl.opengl.GL11.glReadPixels(px, target.viewHeight - py - 1, 1, 1,
                     org.lwjgl.opengl.GL11.GL_RGBA, org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, buf);
-            target.unbindRead();
+            CompatRender.targetUnbindRead(target);
             int r = buf.get(0) & 0xFF;
             int g = buf.get(1) & 0xFF;
             int b = buf.get(2) & 0xFF;
@@ -1869,6 +1937,69 @@ public final class ClientController {
     /** 平台网络层注入（入口类在 setup 时调用）。 */
     public void setSender(UiSender sender) {
         this.sender = sender;
+        // 统一管线绑定（平台差异仅在注入器 SPI 内）；预载延至首帧（入口期窗口可能未就绪）
+        com.opendreamcore.client.resource.PackRegistry.bindInjector(
+                () -> com.opendreamcore.client.spi.ResourcePackInjector.current());
+    }
+
+    /**
+     * 连服时把 /odc 子命令转发给服务端执行；单人世界返回 false 走本地命令。
+     * 反射适配两代命令包：1.21.2+ 单参构造 / 1.20.x 全参构造。
+     * 全壳共用本入口——各 target 不再自持转发实现（一个链路铁律）。
+     */
+    public boolean tryForwardOdcCommand(String subCommand) {
+        var conn = Minecraft.getInstance().getConnection();
+        if (conn == null) {
+            return false;
+        }
+        String cmd = subCommand == null || subCommand.isEmpty() ? "odc" : "odc " + subCommand;
+        try {
+            // 新版：ServerboundChatCommandPacket(String)
+            var pkt = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket")
+                    .getConstructor(String.class)
+                    .newInstance(cmd);
+            conn.send((net.minecraft.network.protocol.Packet<?>) pkt);
+            return true;
+        } catch (NoSuchMethodException legacy) {
+            try {
+                var cls = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket");
+                var pkt = cls.getConstructor(String.class, java.time.Instant.class, long.class,
+                                Class.forName("net.minecraft.commands.arguments.ArgumentSignatures"),
+                                Class.forName("net.minecraft.network.chat.LastSeenMessages$Update"))
+                        .newInstance(cmd, java.time.Instant.now(), 0L,
+                                Class.forName("net.minecraft.commands.arguments.ArgumentSignatures")
+                                        .getField("EMPTY").get(null),
+                                Class.forName("net.minecraft.network.chat.LastSeenMessages$Update")
+                                        .getConstructor(int.class, java.util.BitSet.class)
+                                        .newInstance(0, new java.util.BitSet()));
+                conn.send((net.minecraft.network.protocol.Packet<?>) pkt);
+                return true;
+            } catch (Throwable t) {
+                LOGGER.warn("命令转发失败: {}", t.toString());
+                return false;
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("命令转发失败: {}", t.toString());
+            return false;
+        }
+    }
+
+    /** 托管材质包目录创建+扫描注入；入口期传加载器 gameDir 立即执行，未传则首帧兜底。 */
+    public synchronized void ensureManagedPacks(java.nio.file.Path gameDir) {
+        if (managedPacksDone) {
+            return;
+        }
+        managedPacksDone = true;
+        try {
+            java.nio.file.Path dir = gameDir != null ? gameDir
+                    : Minecraft.getInstance().gameDirectory.toPath();
+            int n = com.opendreamcore.client.packs.LocalPackPreload.preload(dir);
+            if (n > 0) {
+                LOGGER.info("本地材质包预置完成：{} 个", n);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("本地材质包预置失败: {}", t.toString());
+        }
     }
 
     /** 发送协议消息（target 网络层转发到对应通道）。 */
@@ -1899,6 +2030,11 @@ public final class ClientController {
 
     /** 下行分发：服务端 → 客户端 → 对应通道订阅者（EventBus "custom:<通道>"）。 */
     public void handleCustomPacket(String channel, String payload) {
+        // D3 保留通道：odc/pack → 服务端下发的材质包安装指令
+        if ("odc/pack".equals(channel)) {
+            com.opendreamcore.packs.PackInstaller.installFromPayload(payload);
+            return;
+        }
         try {
             com.opendreamcore.script.EventBus.publish("custom:" + channel, payload);
         } catch (Exception e) {
@@ -1945,6 +2081,11 @@ public final class ClientController {
         AnimationEngine.get().reset();
         applyBindings(page.options()); // 页面键鼠绑定（keybinds/mousebinds 选项）
         applyMusic(page.options()); // 页面背景音乐（music 选项）
+        // 先卸载底层原版界面：服务端插件下发页面时，原版箱子/背包界面可能仍开着，
+        // 背包物品会从自定义 UI 缝隙透出（NeoForge/Fabric 同修）
+        if (mc.screen != null && !(mc.screen instanceof OdcScreen)) {
+            mc.setScreen(null);
+        }
         mc.setScreen(newScreen);
         runLifecycle(page, "open");
         LOGGER.info("打开页面 {}（{} 个元素）", page.id(), count(nodes));
@@ -1967,6 +2108,9 @@ public final class ClientController {
         screenStack.push(sub);
         applyBindings(page.options());
         applyMusic(page.options());
+        if (mc.screen != null && !(mc.screen instanceof OdcScreen)) {
+            mc.setScreen(null); // 卸载底层原版界面（容器物品不再透出）
+        }
         mc.setScreen(sub);
         runLifecycle(page, "open");
     }
@@ -2139,6 +2283,12 @@ public final class ClientController {
     public void renderHud(net.minecraft.client.gui.GuiGraphics g) {
         if (hudNodes == null || hudPage == null) {
             return;
+        }
+        if (!hudDiagDone) {
+            hudDiagDone = true;
+            var w = Minecraft.getInstance().getWindow();
+            LOGGER.info("HUD 首帧诊断: 元素 {} 画布 {}x{} guiScale {}", hudNodes.size(),
+                    w.getGuiScaledWidth(), w.getGuiScaledHeight(), w.calculateScale(0, false));
         }
         // HUD 页面背景（options.background：颜色值 = 半透明遮罩；true = 默认深色；缺省/false = 透明）
         Object hudBg = hudPage.options() == null ? null : hudPage.options().get("background");
@@ -2360,11 +2510,11 @@ public final class ClientController {
         }
         @Override public void addElement(String type, double x, double y) {
             String id = type + "_" + System.currentTimeMillis() % 10000;
-            int[] size = OdcScreen.defaultSizeFor(type);
+            int[] size = com.opendreamcore.client.screen.EditSpecs.defaultSizeFor(type);
             com.opendreamcore.page.Layout layout = new com.opendreamcore.page.Layout(
                     String.valueOf((int) x), String.valueOf((int) y),
                     String.valueOf(size[0]), String.valueOf(size[1]));
-            Element el = new Element(id, type, layout, OdcScreen.defaultPropsFor(type),
+            Element el = new Element(id, type, layout, com.opendreamcore.client.screen.EditSpecs.defaultPropsFor(type),
                     null, null, new java.util.LinkedHashMap<>(), List.of(), null);
             String pid = hudPage.id() == null ? "hud" : hudPage.id();
             elementEdits.addCopy(pid, el);
@@ -3154,7 +3304,7 @@ public final class ClientController {
             return;
         }
         try {
-            var sound = net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.get(
+            var sound = UiRenderer.soundEvent(
                     net.minecraft.resources.ResourceLocation.tryParse(soundId));
             Minecraft mc = Minecraft.getInstance();
             if (sound != null && mc.player != null) {
@@ -3268,6 +3418,7 @@ public final class ClientController {
     /** 滑块松手：上报 INPUT 数值（服务端裁决 / 本地 input 脚本）。 */
 
     /** 世界渲染回调（RenderLevelStageEvent 里调用）：多面板同屏，逐面板独立渲染。 */
+
     public void renderWorld(net.minecraft.client.Camera camera, float partialTick) {
         if (worldPanels.isEmpty()) {
             return;
@@ -3337,11 +3488,17 @@ public final class ClientController {
                     tabReveal = 1 - (1 - p) * (1 - p) * (1 - p);
                 }
             }
-            WorldHologram.render(panel.nodes, panel.page.options(), camera, partialTick, panel.hoverId,
-                    pid, panel.page.variables(),
-                    worldDragOffsets.isEmpty() ? null : worldDragOffsets,
-                    worldPage == panel.page ? (WorldEditor.get().worldEditPreview ? null : WorldEditor.get().worldEditSelected) : null,
-                    worldTabActive(pid), tabReveal, panel.anchor);
+            try {
+                WorldHologram.render(panel.nodes, panel.page.options(), camera, partialTick, panel.hoverId,
+                        pid, panel.page.variables(),
+                        worldDragOffsets.isEmpty() ? null : worldDragOffsets,
+                        worldPage == panel.page ? (WorldEditor.get().worldEditPreview ? null : WorldEditor.get().worldEditSelected) : null,
+                        worldTabActive(pid), tabReveal, panel.anchor);
+            } catch (Throwable panelDrawFail) {
+                // 面板绘制中断可能把 Tesselator 留在 building 态，立即闭合防止污染原版渲染
+                LOGGER.warn("世界面板 {} 绘制异常: {}", pid, panelDrawFail.toString());
+                forceCloseTesselator();
+            }
             // 面板标题小字（billboard，面板包围盒上方居中；无标题/空跳过；编辑模式隐藏避免遮挡；
             // options.titleLabel: false 可关闭；title 支持 ${vars.xx}/{{vars.xx}} 插值 → 动态面板名）
             String pTitleRaw = panel.page.title();
@@ -3589,9 +3746,65 @@ public final class ClientController {
                             worldBorderColorOf(findWorldNode(WorldEditor.get().worldEditSelected)));
                 }
             }
+        forceCloseTesselator();
         }
         WorldEditor.get().tickWorldInteraction(camera);
+
     }
+
+    // 强制闭合可能残留的 Tesselator 缓冲（防止 "Already building!" 崩溃级联）
+    private static void forceCloseTesselator() {
+        // 按签名而非方法名反射：生产环境是 SRG 名，Mojmap 名匹配不到等于没修。
+        // builder 获取器 = 无参且返回 BufferBuilder；building 探测 = BufferBuilder 上无参返回 boolean 的方法；
+        // end = BufferBuilder 上无参 void 方法中调用后 building 变 false 的那个（逐个试探）。
+        try {
+            var t = com.mojang.blaze3d.vertex.Tesselator.getInstance();
+            Object builder = null;
+            for (var m : t.getClass().getMethods()) {
+                if (m.getParameterCount() == 0 && m.getReturnType().getSimpleName().equals("BufferBuilder")) {
+                    builder = m.invoke(t);
+                    break;
+                }
+            }
+            if (builder == null) {
+                return;
+            }
+            Boolean building = null;
+            java.lang.reflect.Method probe = null;
+            for (var m : builder.getClass().getMethods()) {
+                if (m.getParameterCount() == 0 && m.getReturnType() == boolean.class) {
+                    boolean r;
+                    try {
+                        r = (Boolean) m.invoke(builder);
+                    } catch (Throwable continueProbe) {
+                        continue;
+                    }
+                    // 首个无副作用可调用的 boolean 方法视为 building 探针
+                    building = r;
+                    probe = m;
+                    break;
+                }
+            }
+            if (!Boolean.TRUE.equals(building)) {
+                return;
+            }
+            for (var m : builder.getClass().getMethods()) {
+                if (m.getParameterCount() == 0 && m.getReturnType() == void.class) {
+                    try {
+                        m.invoke(builder);
+                        Boolean after = (Boolean) probe.invoke(builder);
+                        if (!after) {
+                            LOGGER.warn("已强制闭合残留的渲染缓冲");
+                            return;
+                        }
+                    } catch (Throwable tryNext) {
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
 
     /**
      * 屏幕外箭头（HUD 渲染阶段调用）：world.offScreenArrows: true 时，
@@ -4303,21 +4516,19 @@ public final class ClientController {
         double b1y = y + size * Math.sin(back - spread);
         double b2x = x + size * Math.cos(back + spread);
         double b2y = y + size * Math.sin(back + spread);
-        var matrix = g.pose().last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+        var matrix = CompatRender.guiMatrix(g);
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         builder.addVertex(matrix, (float) tipX, (float) tipY, 0).setColor(red, green, blue, alpha);
         builder.addVertex(matrix, (float) b1x, (float) b1y, 0).setColor(red, green, blue, alpha);
         builder.addVertex(matrix, (float) b2x, (float) b2y, 0).setColor(red, green, blue, alpha);
-        com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(builder.buildOrThrow());
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     static double numOf(Object v, double fallback) {
@@ -9273,6 +9484,9 @@ public final class ClientController {
             return (List<RenderNode>) cached[1];
         }
         List<RenderNode> nodes = LayoutEngine.layout(editedPage(page), w, h, elementEdits.forPage(pageId));
+        // 根层按 z 升序稳定排序（与 RenderNode 子节点排序同规则）：z 大画在上面、同 z 保持声明顺序。
+        // 屏幕/HUD/世界全部节点列表的唯一出口 —— 绘制层迭确定，不受 YAML 书写顺序影响。
+        nodes = UiRenderer.zSorted(nodes);
         layoutCache.put(key, new Object[]{hash, nodes});
         return nodes;
     }
@@ -9367,6 +9581,37 @@ public final class ClientController {
         LOGGER.info("服务端全局状态已更新 {} 项", state.values().size());
     }
 
+    // ================= 服务端窗口标题下发（window_title）=================
+
+    private boolean hudDiagDone;
+    private volatile boolean managedPacksDone;
+
+    static {
+        // 模组加载阶段：读缓存并直接应用最近一次的标题（无缓存跳过，服务端下发后哈希去重写盘）
+        try {
+            new com.opendreamcore.client.controller.TitlePushService().applyLatestCachedTitle();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private final com.opendreamcore.client.controller.TitlePushService titlePushService =
+            new com.opendreamcore.client.controller.TitlePushService();
+
+    /** window_title 到达：委托 controller/TitlePushService（C6 抽出）。 */
+    public void handleWindowTitle(com.opendreamcore.protocol.message.WindowTitlePush push) {
+        titlePushService.handleWindowTitle(push);
+    }
+
+    /** 进服早期调用（JOIN 事件）：按服务器地址预载缓存标题——委托 controller/TitlePushService。 */
+    public void preloadServerTitle() {
+        titlePushService.preloadServerTitle();
+    }
+
+    /** 断线/退出服务器：解除覆盖，还原本地 branding 序列。 */
+    public void clearServerTitle() {
+        titlePushService.clearServerTitle();
+    }
+
     /** 进服后拉取服务端 tooltip 注册表。 */
     public void requestTooltips() {
         var buf = new com.opendreamcore.protocol.OdcByteArrayBuf();
@@ -9426,177 +9671,84 @@ public final class ClientController {
         return Minecraft.getInstance().getConnection() != null;
     }
 
-    // ---------- 脚本调度（Script.延迟执行 / 计划执行 / 防抖 / 节流 / Screen.延迟变量） ----------
+    // ---------- 脚本调度（委托 client/controller/ScriptScheduler，C6 拆分） ----------
 
-    /** 脚本定时任务。kind：0 一次性 / 1 循环 / 2 防抖 / 3 节流 / 4 延迟变量。 */
-    private static final class ScriptTask {
-        final long id;
-        final String script;
-        final int kind;
-        final String key;     // 防抖/节流/延迟变量同名键（缺省 = 脚本文本）；其它 kind 为 null
-        final String pageId;  // 调度时页面 id（页面关闭时清理）
-        final long periodMs;  // 循环/防抖/节流周期；一次性 = 0
-        final java.util.function.Consumer<Page> action; // 非脚本任务回调（延迟变量用；null = 执行脚本）
-        long dueAt;
-        boolean pending;      // 节流：周期内再次调用 → 周期末补跑一次（合并）
-
-        ScriptTask(long id, String script, int kind, String key, String pageId, long periodMs, long dueAt,
-                   java.util.function.Consumer<Page> action) {
-            this.id = id;
-            this.script = script;
-            this.kind = kind;
-            this.key = key;
-            this.pageId = pageId;
-            this.periodMs = periodMs;
-            this.dueAt = dueAt;
-            this.action = action;
-        }
-    }
-
-    /** 脚本任务上限（防失控：防抖/节流/循环全算）。 */
-    private static final int MAX_SCRIPT_TASKS = 64;
-
-    private final java.util.Map<Long, ScriptTask> scriptTasks = new java.util.concurrent.ConcurrentHashMap<>();
-    private long nextTaskId = 1;
-
-    /** 调度脚本执行；intervalMs = 0 一次性，>0 循环。返回任务 id（任务数超上限返回 -1）。 */
-    public long scheduleScript(String script, long delayMs, long intervalMs) {
-        return scheduleTask(0, script, delayMs, intervalMs, null, null);
-    }
-
-    /** 防抖：同名键（缺省 = 脚本文本）重置计时，安静 ms 毫秒后执行一次。返回任务 id。 */
-    public long debounceScript(String script, long ms, String key) {
-        String k = key == null || key.isBlank() ? script : key;
-        String pid = currentPageId();
-        scriptTasks.values().removeIf(t -> t.kind == 2 && java.util.Objects.equals(t.key, k)
-                && java.util.Objects.equals(t.pageId, pid));
-        return scheduleTask(2, script, ms, ms, k, null);
-    }
-
-    /** 节流：周期内最多执行一次（周期内再次调用合并为周期末一次尾调用）。返回任务 id。 */
-    public long throttleScript(String script, long ms, String key) {
-        String k = key == null || key.isBlank() ? script : key;
-        String pid = currentPageId();
-        for (ScriptTask t : scriptTasks.values()) {
-            if (t.kind == 3 && java.util.Objects.equals(t.key, k)
-                    && java.util.Objects.equals(t.pageId, pid)) {
-                t.pending = true;
-                t.dueAt = Math.min(t.dueAt, System.currentTimeMillis() + ms);
-                return t.id;
-            }
-        }
-        return scheduleTask(3, script, ms, ms, k, null);
-    }
-
-    /** 统一调度入口；任务数超上限返回 -1。action 非空 = 非脚本任务（延迟变量等）。 */
-    private long scheduleTask(int kind, String script, long delayMs, long periodMs, String key,
-                              java.util.function.Consumer<Page> action) {
-        if (scriptTasks.size() >= MAX_SCRIPT_TASKS) {
-            LOGGER.warn("脚本任务数超上限 {}，拒绝调度", MAX_SCRIPT_TASKS);
-            return -1;
-        }
-        long id = nextTaskId++;
-        Page page = currentPage();
-        scriptTasks.put(id, new ScriptTask(id, script, kind, key,
-                page == null ? null : page.id(), periodMs,
-                System.currentTimeMillis() + Math.max(0, delayMs), action));
-        return id;
-    }
-
-    /** 延迟设置页面变量（Screen.延迟设置变量）：到期写 page.variables 并按展示形态刷新；同名挂起任务先取消。 */
-    public long delaySetPageVar(String varName, Object value, long ms) {
-        String pid = currentPageId();
-        if (pid == null || varName == null) {
-            return -1;
-        }
-        cancelDelayedVar(pid, varName);
-        return scheduleTask(4, null, ms, ms, varName, page -> {
-            page.variables().put(varName, value);
-            Page cur = currentPage();
-            if (cur != null && pid.equals(cur.id())) {
-                if (screen != null) {
-                    refreshCurrent();
+    private final com.opendreamcore.client.controller.ScriptScheduler scriptScheduler =
+            new com.opendreamcore.client.controller.ScriptScheduler(new com.opendreamcore.client.controller.ScriptScheduler.Host() {
+                @Override public String currentPageId() { return ClientController.this.currentPageId(); }
+                @Override public Page currentPage() { return ClientController.this.currentPage(); }
+                @Override public Page pageById(String pageId) { return ClientController.this.pageById(pageId); }
+                @Override public void runLocalAction(Page page, String script) { ClientController.this.runLocalAction(page, script); }
+                @Override public void applyDelayedVar(String pageId, String varName, Object value) {
+                    ClientController.this.applyDelayedVar(pageId, varName, value);
                 }
-            } else if (hudPage != null && pid.equals(hudPage.id())) {
-                hudNodes = layoutPage(hudPage, Minecraft.getInstance().getWindow().getGuiScaledWidth(),
-                        Minecraft.getInstance().getWindow().getGuiScaledHeight());
-            } else if (worldPage != null && pid.equals(worldPage.id())) {
-                invalidateLayout(worldPage);
-            }
-        });
+            });
+
+    /** 延迟变量到期应用（屏幕/HUD/世界分支；由 ScriptScheduler 回调）。 */
+    void applyDelayedVar(String pageId, String varName, Object value) {
+        Page page = pageById(pageId);
+        if (page == null) return;
+        page.variables().put(varName, value);
+        Page cur = currentPage();
+        if (cur != null && pageId.equals(cur.id())) {
+            if (screen != null) refreshCurrent();
+        } else if (hudPage != null && pageId.equals(hudPage.id())) {
+            hudNodes = layoutPage(hudPage, Minecraft.getInstance().getWindow().getGuiScaledWidth(),
+                    Minecraft.getInstance().getWindow().getGuiScaledHeight());
+        } else if (worldPage != null && pageId.equals(worldPage.id())) {
+            invalidateLayout(worldPage);
+        }
     }
 
-    /** 取消页面挂起的延迟变量（不存在返回 false）。 */
+    /** 调度脚本执行；intervalMs = 0 一次性，>0 循环。返回任务 id。 */
+    public long scheduleScript(String script, long delayMs, long intervalMs) {
+        return scriptScheduler.scheduleScript(script, delayMs, intervalMs);
+    }
+
+    /** 防抖：同名键重置计时，安静 ms 毫秒后执行一次。 */
+    public long debounceScript(String script, long ms, String key) {
+        return scriptScheduler.debounceScript(script, ms, key);
+    }
+
+    /** 节流：周期内最多一次（合并尾调用）。 */
+    public long throttleScript(String script, long ms, String key) {
+        return scriptScheduler.throttleScript(script, ms, key);
+    }
+
+    /** 延迟设置页面变量（Screen.延迟设置变量）。 */
+    public long delaySetPageVar(String varName, Object value, long ms) {
+        return scriptScheduler.delaySetPageVar(varName, value, ms);
+    }
+
+    /** 取消页面挂起的延迟变量。 */
     public boolean cancelDelayedVar(String pageId, String varName) {
-        if (pageId == null || varName == null) {
-            return false;
-        }
-        return scriptTasks.values().removeIf(t -> t.kind == 4 && varName.equals(t.key)
-                && pageId.equals(t.pageId));
+        return scriptScheduler.cancelDelayedVar(pageId, varName);
     }
 
-    /** 延迟变量剩余毫秒（无挂起任务返回 -1）。 */
+    /** 延迟变量剩余毫秒（无挂起任务 -1）。 */
     public double delayedVarRemaining(String pageId, String varName) {
-        if (pageId == null || varName == null) {
-            return -1;
-        }
-        long now = System.currentTimeMillis();
-        for (ScriptTask t : scriptTasks.values()) {
-            if (t.kind == 4 && varName.equals(t.key) && pageId.equals(t.pageId)) {
-                return Math.max(0, t.dueAt - now);
-            }
-        }
-        return -1;
+        return scriptScheduler.delayedVarRemaining(pageId, varName);
     }
 
-    /** 取消脚本任务（不存在返回 false）。 */
+    /** 取消脚本任务。 */
     public boolean cancelScript(long id) {
-        return scriptTasks.remove(id) != null;
+        return scriptScheduler.cancelScript(id);
     }
 
-    /** 页面关闭清理：该页调度/归属的全部任务取消（防抖/节流/循环/一次性）。 */
+    /** 页面关闭清理全部任务。 */
     public void cancelScriptsForPage(String pageId) {
-        if (pageId == null) {
-            return;
-        }
-        scriptTasks.values().removeIf(t -> pageId.equals(t.pageId));
+        scriptScheduler.cancelScriptsForPage(pageId);
     }
 
-    /** 当前页面 id（屏幕优先；无则为 null）。 */
+    private void tickScriptTasks() {
+        scriptScheduler.tick();
+    }
+
+
+/** 当前页面 id（屏幕优先；无则为 null）。 */
     public String currentPageId() {
         Page page = currentPage();
         return page == null ? null : page.id();
-    }
-
-    /** 渲染线程 tick：到期任务执行（循环/节流重置计时，防抖/延迟变量/一次性移除）。 */
-    private void tickScriptTasks() {
-        if (scriptTasks.isEmpty()) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        for (ScriptTask task : scriptTasks.values()) {
-            if (now < task.dueAt) {
-                continue;
-            }
-            Page page = currentPage() != null ? currentPage() : pageById(task.pageId);
-            if (page != null) {
-                if (task.action != null) {
-                    task.action.accept(page); // 非脚本任务（延迟变量等）
-                } else {
-                    runLocalAction(page, task.script);
-                }
-            }
-            switch (task.kind) {
-                case 1 -> task.dueAt = now + task.periodMs;                    // 循环
-                case 2 -> scriptTasks.remove(task.id);                          // 防抖：一次
-                case 3 -> {                                                     // 节流：常驻，周期末补跑合并
-                    task.dueAt = now + task.periodMs;
-                    task.pending = false;
-                }
-                case 4 -> scriptTasks.remove(task.id);                          // 延迟变量：一次
-                default -> scriptTasks.remove(task.id);                         // 一次性
-            }
-        }
     }
 
     /**
@@ -9670,23 +9822,65 @@ public final class ClientController {
 
     // ---------- 服务端下发（page_control） ----------
 
+    /** 握手竞态回放：密钥已到，把暂存的页面/HUD/控制指令按原序补跑一遍。 */
+    private void flushPendingHandshake() {
+        java.util.List<com.opendreamcore.protocol.message.PageSync> pages;
+        java.util.List<com.opendreamcore.protocol.message.HudSync> huds;
+        synchronized (pendingPageSyncs) {
+            if (pendingPageSyncs.isEmpty()) {
+                return;
+            }
+            pages = new java.util.ArrayList<>(pendingPageSyncs);
+            pendingPageSyncs.clear();
+        }
+        synchronized (pendingHudSyncs) {
+            huds = new java.util.ArrayList<>(pendingHudSyncs);
+            pendingHudSyncs.clear();
+        }
+        LOGGER.info("握手回放：暂存页面 {} 条 / HUD {} 条", pages.size(), huds.size());
+        for (var s : pages) {
+            storeServerPage(s);
+        }
+        for (var h : huds) {
+            handleHudSync(h);
+        }
+        // 控制指令最后回放：此时 serverPages 已填好
+        java.util.List<com.opendreamcore.protocol.message.PageControl> controls;
+        synchronized (pendingControls) {
+            controls = new java.util.ArrayList<>(pendingControls);
+            pendingControls.clear();
+        }
+        for (var c : controls) {
+            try {
+                handlePageControl(c);
+            } catch (Exception e) {
+                LOGGER.warn("回放控制指令失败 {}: {}", c.pageId(), e.toString());
+            }
+        }
+    }
+
     public void handlePageControl(PageControl control) {
         switch (control.action()) {
-            case OPEN -> {
+            case OPEN, SUB_OPEN -> {
                 Page page = serverPages.get(control.pageId());
                 if (page == null) {
-                    LOGGER.warn("服务端要求打开未知页面 {}", control.pageId());
+                    // 页面还没到且还有暂存的加密包（握手竞态）：控制指令也扣住回放，
+                    // 否则 OPEN 先于 page_sync 解密到达，页面永远开不出来
+                    boolean waiting;
+                    synchronized (pendingPageSyncs) { waiting = !pendingPageSyncs.isEmpty(); }
+                    if (waiting) {
+                        synchronized (pendingControls) { pendingControls.add(control); }
+                        LOGGER.debug("服务端控制 {} 页面未就绪，暂存待回放", control.pageId());
+                    } else {
+                        LOGGER.warn("服务端要求打开未知页面 {}", control.pageId());
+                    }
                     return;
                 }
-                open(page, control.sessionId());
-            }
-            case SUB_OPEN -> {
-                Page page = serverPages.get(control.pageId());
-                if (page == null) {
-                    LOGGER.warn("服务端要求打开未知子页 {}", control.pageId());
-                    return;
+                if (control.action() == PageControl.Action.OPEN) {
+                    open(page, control.sessionId());
+                } else {
+                    openSubPage(page, control.sessionId());
                 }
-                openSubPage(page, control.sessionId());
             }
             case CLOSE, SUB_CLOSE -> {
                 String closingId = control.sessionId();
@@ -9764,6 +9958,11 @@ public final class ClientController {
         }
     }
 
+    /** 服务端页面 id 清单（/odc list 用，排序输出）。 */
+    public java.util.List<String> serverPageIds() {
+        return serverPages.keySet().stream().sorted().toList();
+    }
+
     public void storeServerPage(Page page) {
         serverPages.put(page.id() == null ? "page" : page.id(), page);
     }
@@ -9772,22 +9971,47 @@ public final class ClientController {
     public void storeServerPage(com.opendreamcore.protocol.message.PageSync sync) {
         try {
             Page page = buildServerPage(sync.pageId(), sync.content(), sync.encrypted());
-            if (page != null) {
-                serverPages.put(page.id() == null ? sync.pageId() : page.id(), page);
-                LOGGER.info("收到服务端页面 {}（{}）", sync.pageId(), sync.encrypted() ? "加密" : "明文");
+            if (page == null) {
+                // 密钥未到（握手竞态）：先扣住，ready_ack 后回放
+                if (sync.encrypted()) {
+                    synchronized (pendingPageSyncs) { pendingPageSyncs.add(sync); }
+                    LOGGER.debug("服务端页面 {} 密钥未到，暂存待回放", sync.pageId());
+                } else {
+                    LOGGER.warn("服务端页面解析失败 {}", sync.pageId());
+                }
+                return;
+            }
+            String pid = page.id() == null ? sync.pageId() : page.id();
+            serverPages.put(pid, page);
+            LOGGER.info("收到服务端页面 {}（{}，解析出 {} 元素）", pid,
+                    sync.encrypted() ? "加密" : "明文", page.elements() == null ? -1 : page.elements().size());
+            // 自动挂载：display:hud → openHud；display:world → openWorld。
+            // 同 id 已挂载时跳过，避免与服务端 PAGE_CONTROL OPEN 重复触发两遍脚本/提示
+            if (page.displayMode() == com.opendreamcore.page.DisplayMode.HUD) {
+                Minecraft.getInstance().execute(() -> {
+                    if (hudPage == null || !pid.equals(hudPage.id())) {
+                        openHud(page);
+                    }
+                });
+            }
+            if (page.displayMode() == com.opendreamcore.page.DisplayMode.WORLD) {
+                Minecraft.getInstance().execute(() -> {
+                    if (findWorldPanel(pid) == null) {
+                        openWorld(page, null);
+                    }
+                });
             }
         } catch (Exception e) {
             LOGGER.warn("服务端页面解析失败 {}: {}", sync.pageId(), e.toString());
         }
     }
 
-    /** 服务端页面字节 → Page（解密 + import 展开 + schema 构建）。 */
+    /** 服务端页面字节 → Page（解密 + import 展开 + schema 构建）。密钥未到返回 null（调用方决定暂存）。 */
     private Page buildServerPage(String pageId, byte[] content, boolean encrypted) {
         byte[] plain = content;
         if (encrypted) {
             byte[] key = cloud.sessionKey();
             if (key.length == 0) {
-                LOGGER.warn("服务端页面已加密但无会话 key: {}", pageId);
                 return null;
             }
             plain = com.opendreamcore.protocol.Crypto.decrypt(key, content);
@@ -9807,6 +10031,12 @@ public final class ClientController {
         }
         try {
             Page page = buildServerPage(sync.pageId(), sync.content(), sync.encrypted());
+            if (page == null && sync.encrypted()) {
+                // 密钥未到：暂存待 ready_ack 回放
+                synchronized (pendingHudSyncs) { pendingHudSyncs.add(sync); }
+                LOGGER.debug("服务端 HUD {} 密钥未到，暂存待回放", sync.pageId());
+                return;
+            }
             if (page != null) {
                 openHud(page, sync.sessionId().isEmpty() ? null : sync.sessionId());
                 LOGGER.info("服务端 HUD 挂载 {}（{}）", sync.pageId(), sync.mode());
@@ -9961,8 +10191,11 @@ public final class ClientController {
 
     /** 进服时发送 ready。 */
     public void sendReady() {
-        Ready ready = new Ready(com.opendreamcore.protocol.Protocol.VERSION, CLIENT_VERSION,
+        Ready ready = new Ready(com.opendreamcore.protocol.Protocol.VERSION, clientVersion(),
                 com.opendreamcore.protocol.Protocol.CAPABILITY_LOCAL_UI | com.opendreamcore.protocol.Protocol.CAPABILITY_CLOUD);
+        // 先声明下行通道（minecraft:register）：必须早于 READY——服务端收到 READY 即刻下发
+        // PAGE_SYNC，晚于声明会被 Paper 静默丢弃（首包竞态，1.20.1 实机实证）。
+        sendRaw("minecraft:register", com.opendreamcore.protocol.Protocol.clientboundRegisterPayload());
         var buf = new com.opendreamcore.protocol.OdcByteArrayBuf();
         ready.encode(buf);
         sendRaw(com.opendreamcore.protocol.Protocol.READY, buf.toByteArray());
@@ -9976,6 +10209,7 @@ public final class ClientController {
         serverVersion = ack.modVersion();
         serverProtocol = ack.protocolVersion();
         cloud.onReadyAck(ack.resourceKey());
+        flushPendingHandshake();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             return;
@@ -9990,7 +10224,7 @@ public final class ClientController {
             LOGGER.info("服务端不允许本地 UI，跳过本地页面加载");
         }
         boolean protoOk = ack.protocolVersion() == com.opendreamcore.protocol.Protocol.VERSION;
-        boolean modOk = ack.modVersion().equals(CLIENT_VERSION);
+        boolean modOk = ack.modVersion().equals(clientVersion());
         boolean enforce = isEnforce();
         if (protoOk && modOk) {
             // 全部一致：绿色
@@ -10157,110 +10391,37 @@ public final class ClientController {
         return true;
     }
 
-    // ---------- 动画变量（Var.动画值 / 设置动画值 / 动画到：数值补间每帧写入页面变量） ----------
+    // ---------- 动画变量（委托 client/controller/AnimateVarService，C6 拆分） ----------
 
-    /** 动画变量补间（起点 → 终点，durationMs 内按缓动推进）。 */
-    private static final class AnimateTween {
-        final String pageId;
-        final String name;
-        final double from;
-        final double to;
-        final long startMs;
-        final long durationMs;
-        final com.opendreamcore.script.Easing.Type easing;
-
-        AnimateTween(String pageId, String name, double from, double to, long startMs, long durationMs,
-                     com.opendreamcore.script.Easing.Type easing) {
-            this.pageId = pageId;
-            this.name = name;
-            this.from = from;
-            this.to = to;
-            this.startMs = startMs;
-            this.durationMs = durationMs;
-            this.easing = easing;
-        }
-
-        double valueAt(long nowMs) {
-            double p = durationMs <= 0 ? 1 : Math.min(1, (nowMs - startMs) / (double) durationMs);
-            double e = com.opendreamcore.script.Easing.apply(easing, p);
-            return from + (to - from) * e;
-        }
-
-        boolean finishedAt(long nowMs) {
-            return nowMs >= startMs + durationMs;
-        }
-    }
-
-    private final java.util.Map<String, AnimateTween> animateValueTweens =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private final com.opendreamcore.client.controller.AnimateVarService animateVarService =
+            new com.opendreamcore.client.controller.AnimateVarService(new com.opendreamcore.client.controller.AnimateVarService.Host() {
+                @Override public Page anyCurrentPage() { return ClientController.this.anyCurrentPage(); }
+                @Override public Page pageById(String pageId) { return ClientController.this.pageById(pageId); }
+                @Override public void setPageVarAny(String name, Object value) { ClientController.this.setPageVarAny(name, value); }
+                @Override public void refreshScreenIfPage(Page page) {
+                    if (screen != null && screen.page() == page) refreshCurrent();
+                }
+            });
 
     /** 设置动画变量（立即写入页面变量并清除补间；Var.设置动画值）。 */
     public boolean setAnimateValue(String name, Object value) {
-        animateValueTweens.remove(name);
-        double nv = value instanceof Number n ? n.doubleValue() : 0;
-        return setPageVarAny(name, nv);
+        return animateVarService.setAnimateValue(name, value);
     }
 
-    /** 动画到：当前值 → 目标值，durationMs 内按缓动每帧推进（Var.动画到）。 */
+    /** 动画到：durationMs 内从当前值缓动到目标值。 */
     public boolean animateValueTo(String name, double to, long durationMs,
                                   com.opendreamcore.script.Easing.Type easing) {
-        Page page = anyCurrentPage();
-        if (page == null || name == null) {
-            return false;
-        }
-        Object cur = page.variables().get(name);
-        double from = cur instanceof Number n ? n.doubleValue() : 0;
-        if (durationMs <= 0) {
-            animateValueTweens.remove(name);
-            return setPageVarAny(name, to);
-        }
-        animateValueTweens.put(name, new AnimateTween(page.id(), name, from, to,
-                System.currentTimeMillis(), durationMs, easing));
-        return true;
+        return animateVarService.animateValueTo(name, to, durationMs, easing);
     }
 
-    /** 动画变量当前值（活动补间取插值；否则读页面变量；不存在 0。Var.动画值）。 */
+    /** 动画变量当前值（活动补间取插值；否则读页面变量）。 */
     public double getAnimateValue(String name) {
-        AnimateTween t = name == null ? null : animateValueTweens.get(name);
-        if (t != null) {
-            long now = System.currentTimeMillis();
-            double v = t.valueAt(now);
-            if (t.finishedAt(now)) {
-                animateValueTweens.remove(name);
-            }
-            return v;
-        }
-        Page page = anyCurrentPage();
-        if (page == null || name == null) {
-            return 0;
-        }
-        Object cur = page.variables().get(name);
-        return cur instanceof Number n ? n.doubleValue() : 0;
+        return animateVarService.getAnimateValue(name);
     }
 
-    /** 每帧推进：活动补间写入其归属页面变量（HUD/世界每帧读变量 → 数值天然动画；屏幕补 refresh）。 */
     private void tickAnimateValues() {
-        if (animateValueTweens.isEmpty()) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        java.util.List<String> done = new java.util.ArrayList<>();
-        for (AnimateTween t : animateValueTweens.values()) {
-            double v = t.valueAt(now);
-            Page page = pageById(t.pageId);
-            if (page != null) {
-                page.variables().put(t.name, v);
-                if (screen != null && screen.page() == page) {
-                    refreshCurrent();
-                }
-            }
-            if (t.finishedAt(now)) {
-                done.add(t.name);
-            }
-        }
-        done.forEach(animateValueTweens::remove);
+        animateVarService.tick();
     }
-
     // ---------- 组件方法（动态改元素属性） ----------
 
     /** 按路径设置元素属性（"text.content"/"button.label"/"color" 等），返回是否找到元素。 */

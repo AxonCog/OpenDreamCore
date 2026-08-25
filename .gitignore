@@ -21,6 +21,12 @@ Thumbs.db
 # 本地临时
 _mdk_tmp/
 
+# pi 会话数据（本地工具，不上传）
+.pi-glla/
+
+# 构建产物 jar（发版走 GitHub Release，不入库）
+jars/
+
 # output 供本地/CI 收集产物（不入库，按需生成）
 output/
 
@@ -32,7 +38,11 @@ OpenDreamCore跨版本规划.md
 OpenDreamCore开发分析.md
 .commandcode/
 
-# docs 只上传 YAML语法.md 和 协议.md，其余排除
+# docs 只上传 YAML语法.md、协议.md 和 API.md，其余排除
 docs/*
 !docs/YAML语法.md
 !docs/协议.md
+!docs/API.md
+
+# 本地构建日志
+clog.txt

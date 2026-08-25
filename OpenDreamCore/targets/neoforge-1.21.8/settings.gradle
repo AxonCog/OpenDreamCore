@@ -1,0 +1,8 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+    }
+}
+
+rootProject.name = 'opendreamcore-neoforge-1.21.8'

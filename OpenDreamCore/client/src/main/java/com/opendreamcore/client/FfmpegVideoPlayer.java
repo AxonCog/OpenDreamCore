@@ -388,7 +388,7 @@ public final class FfmpegVideoPlayer {
         NativeImage out = new NativeImage(w, h, false);
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                out.setPixelRGBA(x, y, source.getRGB(x, y));
+                CompatRender.nativeSetPixel(out, x, y, source.getRGB(x, y));
             }
         }
         return out;
@@ -413,10 +413,10 @@ public final class FfmpegVideoPlayer {
             return textureId; // 尚未解码出帧：已有纹理继续显示
         }
         if (textureId == null) {
-            textureId = ResourceLocation.fromNamespaceAndPath("opendreamcore",
+            textureId = CompatRender.rl("opendreamcore",
                     "video/" + Integer.toHexString(System.identityHashCode(this)));
         }
-        DynamicTexture tex = new DynamicTexture(next);
+        DynamicTexture tex = CompatRender.newDynamicTexture(next);
         Minecraft.getInstance().getTextureManager().register(textureId, tex);
         if (uploaded != null) {
             uploaded.close(); // 旧帧纹理释放（其 NativeImage 一并释放）

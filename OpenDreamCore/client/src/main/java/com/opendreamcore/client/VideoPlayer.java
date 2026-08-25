@@ -28,7 +28,7 @@ public final class VideoPlayer {
 
     private VideoPlayer(List<String> frames) {
         this.frames = frames;
-        this.textureId = ResourceLocation.fromNamespaceAndPath("opendreamcore",
+        this.textureId = CompatRender.rl("opendreamcore",
                 "video/" + Integer.toHexString(System.identityHashCode(this)));
     }
 
@@ -41,9 +41,12 @@ public final class VideoPlayer {
         if (index != lastIndex) {
             lastIndex = index;
             try {
-                NativeImage image = NativeImage.read(Files.newInputStream(Path.of(frames.get(index))));
+                NativeImage image;
+                try (var in = Files.newInputStream(Path.of(frames.get(index)))) {
+                    image = NativeImage.read(in);
+                }
                 Minecraft.getInstance().getTextureManager()
-                        .register(textureId, new DynamicTexture(image));
+                        .register(textureId, CompatRender.newDynamicTexture(image));
             } catch (IOException e) {
                 return null;
             }

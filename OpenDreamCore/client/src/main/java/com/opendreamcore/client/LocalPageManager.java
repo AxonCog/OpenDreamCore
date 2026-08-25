@@ -48,16 +48,7 @@ public final class LocalPageManager {
         } catch (IOException e) {
             return;
         }
-        if (files.isEmpty()) {
-            try (var stream = Files.walk(uiDir)) {
-                stream.filter(p -> {
-                    String name = p.getFileName().toString();
-                    return name.endsWith(".yaml") || name.endsWith(".yml");
-                }).forEach(files::add);
-            } catch (IOException ignored) {
-                files = new ArrayList<>();
-            }
-        }
+        // C7：移除原"files 为空时二次 walk"死代码（重复扫描且可能清空结果，无任何效果）
         // 两阶段：先解析全部 IR（import 模板跨页面解析需要全量），再逐个展开构建
         // 页面 id = 相对 UI 目录的路径（去掉 .yaml/.yml 后缀；斜杠统一为 /）
         Map<String, Map<String, Object>> irst = new java.util.LinkedHashMap<>();
@@ -66,7 +57,7 @@ public final class LocalPageManager {
                 String yaml = Files.readString(file, StandardCharsets.UTF_8);
                 String id = uiDir.relativize(file).toString().replace("\\", "/")
                         .replaceFirst("\\.(ya?ml)$", "");
-                irst.put(id, new YamlParser().parse(yaml));
+                irst.put(id, parseAuto(yaml));
             } catch (Exception e) {
                 ClientController.LOGGER.warn("本地页面解析失败 {}: {}", file.getFileName(), e.toString());
             }
@@ -85,6 +76,20 @@ public final class LocalPageManager {
     }
 
 
+
+    /**
+     * 自动检测格式：统一经 AdapterRegistry.detect 路由（v2 规划 E4，检测单一来源）。
+     * 命中 DreamCoreParser 时附带启用 方法.* 脚本桥 + 客户端运行时宿主（均幂等）。
+     */
+    private static Map<String, Object> parseAuto(String yaml) {
+        var parser = com.opendreamcore.adapter.AdapterRegistry.detect(yaml);
+        if (parser instanceof com.opendreamcore.adapter.dreamcore.DreamCoreParser) {
+            // 旧格式：启用 方法.* 脚本桥 + 客户端运行时宿主（均幂等）
+            com.opendreamcore.adapter.dreamcore.LegacyMethods.ensureRegistered();
+            LegacyClientHost.install();
+        }
+        return parser != null ? parser.parse(yaml) : new YamlParser().parse(yaml);
+    }
 
     public Page get(String pageId) {
         return pages.get(pageId);

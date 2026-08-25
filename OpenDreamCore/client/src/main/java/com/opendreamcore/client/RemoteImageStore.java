@@ -61,8 +61,8 @@ public final class RemoteImageStore {
     /** 渲染线程：缓存文件 → NativeImage → 动态纹理。 */
     private static void loadTexture(String url, Path file) {
         try (NativeImage image = NativeImage.read(Files.newInputStream(file))) {
-            DynamicTexture texture = new DynamicTexture(image);
-            ResourceLocation id = ResourceLocation.fromNamespaceAndPath("opendreamcore",
+            DynamicTexture texture = CompatRender.newDynamicTexture(image);
+            ResourceLocation id = CompatRender.rl("opendreamcore",
                     "remote/" + Integer.toHexString(url.hashCode()));
             Minecraft.getInstance().getTextureManager().register(id, texture);
             TEXTURES.put(url, id);

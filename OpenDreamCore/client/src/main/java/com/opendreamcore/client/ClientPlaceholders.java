@@ -150,7 +150,7 @@ public final class ClientPlaceholders {
                 case "gamemode" -> Minecraft.getInstance().gameMode == null ? ""
                         : Minecraft.getInstance().gameMode.getPlayerMode().getName();
                 case "biome" -> p.level() == null ? ""
-                        : p.level().getBiome(p.blockPosition()).getRegisteredName();
+                        : CompatRender.holderRegisteredName(p.level().getBiome(p.blockPosition()));
                 case "dimension" -> p.level() == null ? "" : p.level().dimension().location().toString();
                 case "online_time" -> (double) ClientController.get().onlineSeconds();
                 case "held_item" -> p.getMainHandItem().isEmpty() ? "" : p.getMainHandItem().getHoverName().getString();
@@ -209,8 +209,8 @@ public final class ClientPlaceholders {
                 case "hand_name" -> p.getMainHandItem().isEmpty() ? "" : p.getMainHandItem().getHoverName().getString();
                 case "count" -> (double) p.getMainHandItem().getCount();
                 case "offhand" -> p.getOffhandItem().isEmpty() ? "" : p.getOffhandItem().getItem().toString();
-                case "armor" -> (double) p.getInventory().armor.stream()
-                        .filter(s -> !s.isEmpty()).count();
+                case "armor" -> (double) ((java.util.List<net.minecraft.world.item.ItemStack>) CompatRender.invArmor(p.getInventory()))
+                        .stream().filter(s -> !s.isEmpty()).count();
                 default -> null;
             };
         });

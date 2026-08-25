@@ -22,7 +22,7 @@
       "com.opendreamcore.FabricOpenDreamCore"
     ]
   },
-  "mixin": [
+  "mixins": [
     "opendreamcore.mixins.json"
   ],
   "depends": {

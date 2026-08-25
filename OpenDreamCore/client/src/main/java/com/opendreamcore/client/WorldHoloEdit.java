@@ -45,11 +45,11 @@ final class WorldHoloEdit {
         PoseStack pose = new PoseStack();
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float dx = h.x - c.x;
         float dy = h.y - c.y;
@@ -80,9 +80,9 @@ final class WorldHoloEdit {
             builder.addVertex(matrix, x2, y2, h.z).setColor(0.42F, 0.65F, 0.96F, 0.9F);
             builder.addVertex(matrix, x3, y3, h.z).setColor(0.42F, 0.65F, 0.96F, 0.9F);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 编辑模式缩放手柄：右下角亮色方块。 */
@@ -102,19 +102,19 @@ final class WorldHoloEdit {
         PoseStack pose = new PoseStack();
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float s = 0.05F;
         WorldHoloUtils.edge(builder, matrix, h.x - s, h.y - s, h.x + s, h.y + s, 1, 1, 1, 0.9F);
         WorldHoloUtils.edge(builder, matrix, h.x - s * 0.55F, h.y - s * 0.55F, h.x + s * 0.55F, h.y + s * 0.55F,
                 0.42F, 0.65F, 0.96F, 0.95F);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 编辑模式描边手柄：左边缘菱形（白色外框 + 元素描边色内芯）。 */
@@ -136,11 +136,11 @@ final class WorldHoloEdit {
         PoseStack pose = new PoseStack();
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float dx = h.x - c.x;
         float dy = h.y - c.y;
@@ -166,9 +166,9 @@ final class WorldHoloEdit {
         builder.addVertex(matrix, h.x + si, h.y, h.z).setColor(ir, ig, ib, 0.95F);
         builder.addVertex(matrix, h.x, h.y - si, h.z).setColor(ir, ig, ib, 0.95F);
         builder.addVertex(matrix, h.x - si, h.y, h.z).setColor(ir, ig, ib, 0.95F);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 拖拽幽灵影：元素拖拽前原位置的半透明框。 */
@@ -184,11 +184,11 @@ final class WorldHoloEdit {
                 base.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float hw = (float) (w / 2);
         float hh = (float) (h / 2);
@@ -198,9 +198,9 @@ final class WorldHoloEdit {
         WorldHoloUtils.edge(builder, matrix, -hw, hh - t, hw, hh, r, g, b, a);
         WorldHoloUtils.edge(builder, matrix, -hw, -hh, -hw + t, hh, r, g, b, a);
         WorldHoloUtils.edge(builder, matrix, hw - t, -hh, hw, hh, r, g, b, a);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 吸附磁吸圈：锚点平面 radius 半径细圆环。 */
@@ -216,11 +216,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float r = 1.0F, g = 0.7F, b = 0.0F, a = 0.30F;
         float t = 0.008F;
@@ -237,9 +237,9 @@ final class WorldHoloEdit {
             builder.addVertex(matrix, x1 + t, y1 + t, 0).setColor(r, g, b, a);
             builder.addVertex(matrix, x0 + t, y0 + t, 0).setColor(r, g, b, a);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 淡出范围可视化：锚点平面双圆环。 */
@@ -264,11 +264,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         if (dim) {
             drawRangeRing(builder, matrix, fadeDistance, 0.55F, 0.55F, 0.6F, 0.18F);
@@ -277,13 +277,13 @@ final class WorldHoloEdit {
             drawRangeRing(builder, matrix, fadeDistance, 1.0F, 0.7F, 0.0F, 0.35F);
             drawRangeRing(builder, matrix, fadeDistance + range, 0.9F, 0.2F, 0.2F, 0.35F);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 淡出圈环绘制。 */
-    private static void drawRangeRing(VertexConsumer builder, Matrix4f matrix, double radius,
+    private static void drawRangeRing(CompatBuffer builder, Matrix4f matrix, double radius,
                                       float r, float g, float b, float a) {
         if (radius <= 0) {
             return;
@@ -317,19 +317,19 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float arm = 0.5F, t = 0.02F;
         WorldHoloUtils.edge(builder, matrix, -arm, -t, arm, t, 1.0F, 0.7F, 0.0F, 0.55F);
         WorldHoloUtils.edge(builder, matrix, -t, -arm, t, arm, 1.0F, 0.7F, 0.0F, 0.55F);
         WorldHoloUtils.edge(builder, matrix, -0.03F, -0.03F, 0.03F, 0.03F, 1.0F, 1.0F, 1.0F, 0.85F);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 镜像翻转 ghost 预览。 */
@@ -346,11 +346,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float r = horizontal ? 0.4F : 0.3F;
         float g = 0.7F;
@@ -369,9 +369,9 @@ final class WorldHoloEdit {
             WorldHoloUtils.edge(builder, matrix, x0, y0, x0 + t, y1, r, g, b, a);
             WorldHoloUtils.edge(builder, matrix, x1 - t, y0, x1, y1, r, g, b, a);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 分布 ghost 预览。 */
@@ -387,11 +387,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float r = 0.3F, g = 1.0F, b = 0.85F, a = 0.30F;
         float t = 0.015F;
@@ -405,9 +405,9 @@ final class WorldHoloEdit {
             WorldHoloUtils.edge(builder, matrix, x0, y0, x0 + t, y1, r, g, b, a);
             WorldHoloUtils.edge(builder, matrix, x1 - t, y0, x1, y1, r, g, b, a);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 多选/框选预览包围盒。 */
@@ -423,11 +423,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float r = 1.0F, g = 0.7F, b = 0.0F;
         float t = 0.02F;
@@ -436,9 +436,9 @@ final class WorldHoloEdit {
         WorldHoloUtils.edge(builder, matrix, (float) x0, (float) y0, (float) (x0 + t), (float) y1, r, g, b, 0.55F);
         WorldHoloUtils.edge(builder, matrix, (float) (x1 - t), (float) y0, (float) x1, (float) y1, r, g, b, 0.55F);
         WorldHoloUtils.edge(builder, matrix, (float) x0, (float) y0, (float) x1, (float) y1, r, g, b, 0.06F);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 锁定角标。 */
@@ -454,11 +454,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         double size = Math.min(0.18, Math.min(w, h) / 3);
         float x0 = (float) (cx + w / 2 - size * 1.2);
@@ -474,9 +474,9 @@ final class WorldHoloEdit {
         float hx = x0 + s / 2 - hole / 2;
         float hy = y0 + s / 2 - hole / 2;
         WorldHoloUtils.edge(builder, matrix, hx, hy, hx + hole, hy + hole, r, g, b, 0.9F);
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 拖拽参考线（吸附线）。 */
@@ -504,11 +504,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         float span = 30.0F;
         double gx = guides[0];
@@ -531,9 +531,9 @@ final class WorldHoloEdit {
             float a = thick ? 0.85F : 0.55F;
             WorldHoloUtils.edge(builder, matrix, -span, (float) gy, span, (float) (gy + t), r, g, b, a);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 编辑网格。 */
@@ -549,11 +549,11 @@ final class WorldHoloEdit {
                 anchor.z - camera.getPosition().z);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         double half = 8.0;
         float r = 0.55F, g = 0.72F, b = 0.95F;
@@ -563,9 +563,9 @@ final class WorldHoloEdit {
             WorldHoloUtils.edge(builder, matrix, (float) -half, (float) v, (float) half, (float) (v + 0.006), r, g, b, a);
             WorldHoloUtils.edge(builder, matrix, (float) v, (float) -half, (float) (v + 0.006), (float) half, r, g, b, a);
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 
     /** 点击涟漪。 */
@@ -583,11 +583,11 @@ final class WorldHoloEdit {
         PoseStack pose = new PoseStack();
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
+        CompatRender.disableDepthTest();
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR);
         double maxRadius = 0.45;
         float ringWidth = 0.035F;
@@ -627,8 +627,8 @@ final class WorldHoloEdit {
                 builder.addVertex(matrix, x3, y3, (float) wz).setColor(cr, cg, cb, alpha);
             }
         }
-        WorldHoloUtils.drawSafe(builder);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
+        builder.buildAndDraw();
+        CompatRender.enableDepthTest();
+        CompatRender.disableBlend();
     }
 }

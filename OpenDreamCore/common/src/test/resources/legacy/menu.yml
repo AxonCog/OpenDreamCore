@@ -1,0 +1,686 @@
+﻿
+# 匹配界面名,hud为自动开启
+# GuiInventory可以替换背包
+# GuiIngameMenu可以替换ESC
+# 或者直接填写箱子界面名称，即可替换箱子界面(颜色符号需写为§)
+match: "龙核菜单"
+
+# 禁止ESC直接关闭界面，采用Functions的按键监听来关闭界面
+allowEscClose: true
+
+Functions:
+  keyPress: "(方法.取当前按下键=='E' || 方法.取当前按下键=='ESCAPE')?{方法.异步执行方法('关闭界面');}:0"
+  open: |-
+    方法.异步执行方法('每秒重新计算绘制起始点和更新变量');
+    方法.异步执行方法('槽位检测');
+    方法.异步执行方法('循环检测');
+    (方法.取物品数(方法.取物品('引导槽位'))=='0')?{方法.设置组件值('图片名称','texture','引导/引导1.gif');}:0;
+    (方法.取物品数(方法.取物品('壁纸槽位'))=='0')?{方法.设置组件值('背景','texture','菜单/背景图层.png');}:0;
+    方法.播放声音('菜单/打开菜单.ogg')
+
+  关闭界面: |-
+    界面变量.关闭时间=方法.取当前时间;
+    方法.延时(100);
+    方法.关闭界面;
+    方法.播放声音('菜单/选择.ogg')
+
+  每秒重新计算绘制起始点和更新变量: |-
+    方法.更新变量值('vault_eco_balance');
+    方法.更新变量值('playerpoints_points');
+    方法.更新变量值('localtime_time');
+    方法.更新变量值('player_name');
+    方法.更新变量值('bungee_1F');
+    方法.更新变量值('combatpower_me');
+    方法.更新变量值('nyeconomy_梨钻');
+    方法.延时(1000);                         
+    方法.异步执行方法('每秒重新计算绘制起始点和更新变量');
+
+  循环检测: |-
+    (方法.取物品数(方法.取物品('引导槽位'))=='0')?{用户变量.槽位图片存储=('引导/引导1.gif');}:0;
+    (方法.取物品数(方法.取物品('壁纸槽位'))=='0')?{用户变量.壁纸存储=('菜单/背景图层.png');}:0;
+    方法.延时(1000);
+    方法.异步执行方法('循环检测');
+
+  槽位检测: |-
+    界面变量.lore词条 = 方法.替换(方法.替换(方法.取物品lore(方法.取物品('引导槽位'),'0'),'引导系列:"',''),'"','');
+    用户变量.槽位图片存储 = 方法.合并文本('引导/',界面变量.lore词条,'.gif');
+    界面变量.头像选择 = 方法.替换(方法.替换(方法.取物品lore(方法.取物品('头像槽位'),'0'),'头像系列:"',''),'"','');
+    用户变量.头像存储 = 方法.合并文本('头像/',界面变量.头像选择,'.png');
+    界面变量.头像框选择 = 方法.替换(方法.替换(方法.取物品lore(方法.取物品('头像框槽位'),'0'),'头像框系列:"',''),'"','');
+    用户变量.头像框存储 = 方法.合并文本('头像框/',界面变量.头像框选择,'.png');
+    界面变量.壁纸选择 = 方法.替换(方法.替换(方法.取物品lore(方法.取物品('壁纸槽位'),'0'),'壁纸系列:"',''),'"','');
+    用户变量.壁纸存储 = 方法.合并文本('壁纸/',界面变量.壁纸选择,'.png');
+    方法.延时(1000);
+    方法.异步执行方法('槽位检测');
+
+  wheel: "滚动条_texture.distanceY=滚动条_texture.distanceY-滚动条_texture.maxDistanceY*0.03*方法.取滚轮值"
+################################################################
+背景:
+  type: 'texture'
+  x: "(w-背景.width)/1.8"
+  y: "(h-背景.height)/1.5"
+  width: h*1.4
+  height: 背景.width* 1080 / 1920
+  texture: 用户变量.壁纸存储
+背景边框:
+  type: 'texture'
+  x: "(w-背景.width)/1.8"
+  y: "(h-背景.height)/1.5"
+  width: h*1.4
+  height: 背景.width* 1080 / 1920
+  texture: "菜单/背景边框.png"
+信息框背景:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.001"
+  y: "背景.y + 背景.height*0.01"
+  width: h*1.4
+  height: 背景.width* 1080 / 2080
+  texture: "菜单/信息框背景.png"
+  scale: 1
+信息框1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.25"
+  y: "背景.y + 背景.height*0.001"
+  width: h*2.5
+  height: 背景.width* 150 / 240
+  texture: "菜单/信息框.png"
+  scale: 0.1
+信息框2:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.48"
+  y: "背景.y + 背景.height*0.001"
+  width: h*2.5
+  height: 背景.width* 150 / 240
+  texture: "菜单/信息框.png"
+  scale: 0.1
+信息框3:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.72"
+  y: "背景.y + 背景.height*0.001"
+  width: h*2.5
+  height: 背景.width* 150 / 240
+  texture: "菜单/信息框.png"
+  scale: 0.1
+金币1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.25"
+  y: "背景.y + 背景.height*0.021"
+  width: h*1.5
+  height: 金币1.width* 80 / 80
+  texture: "菜单/金币.png"
+  tip:
+  - '金币'
+  scale: 0.03
+梨钻1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.48"
+  y: "背景.y + 背景.height*0.021"
+  width: h*1.5
+  height: 金币1.width* 80 / 80
+  texture: "菜单/梨钻.png"
+  tip:
+  - '梨钻'
+  scale: 0.032
+点券1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.72"
+  y: "背景.y + 背景.height*0.021"
+  width: h*1.5
+  height: 金币1.width* 80 / 80
+  texture: "菜单/点券.png"
+  tip:
+  - '点券'
+  scale: 0.03
+金币2:
+  type: 'label'
+  x: "背景.x + 背景.width*0.3"
+  y: "背景.y + 背景.height*0.04"
+  texts: 
+    - '&f%vault_eco_balance%' 
+  tip:
+  - '金币'
+  scale: "方法.取屏幕高度*0.0025"
+梨钻2:
+  type: 'label'
+  x: "背景.x + 背景.width*0.58"
+  y: "背景.y + 背景.height*0.04"
+  texts: 
+    - '&f%nyeconomy_梨钻%' 
+  tip:
+  - '梨钻'
+  scale: "方法.取屏幕高度*0.0025"
+点券2:
+  type: 'label'
+  x: "背景.x + 背景.width*0.82"
+  y: "背景.y + 背景.height*0.04"
+  texts: 
+    - '&f%playerpoints_points%' 
+  tip:
+  - '点券'
+  scale: "方法.取屏幕高度*0.0025"
+加号1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.86"
+  y: "背景.y + 背景.height*0.028"
+  width: h*1.5
+  height: 加号1.width* 80 / 80
+  texture: "菜单/加号.png"
+  tip:
+  - '点击充值'
+  scale: 0.025
+精灵背景框:
+  type: 'texture'
+  x: "(w-背景.width)/1.73"
+  y: "(h-背景.height)/1.5"
+  width: h*0.28
+  height: 背景.width* 335 / 600
+  texture: "菜单/框1.png"
+标题_label:
+  x: "背景.x + 背景.width*0.06"
+  y: "背景.y + 背景.height*0.03"
+  scale: "方法.取屏幕高度*0.0034"
+  texts: 
+    - '青梨宝可梦' 
+  alpha: "方法.取界面存活时间/700"
+################################################################
+个性化:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.65"
+  y: "背景.y + 背景.height*0.7"
+  width: 背景.width*0.08
+  height: 个性化.width* 60 / 300
+  texture: "菜单/个性化.png"
+  actions:
+    click: "方法.打开GUI('个性化')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  tip:
+  - '&f打开个性化设置菜单'
+  - '&f自定义你的菜单'
+  scale: 2.5
+战力值:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.65"
+  y: "背景.y + 背景.height*0.77"
+  width: 背景.width*0.08
+  height: 战力值.width* 60 / 300
+  texture: "菜单/战力.png"
+  scale: 2.5
+战力_label:
+  x: "背景.x + 背景.width*0.74"
+  y: "背景.y + 背景.height*0.79"
+  scale: "方法.取屏幕高度*0.003"
+  texts: 
+    - '&f%combatpower_me%' 
+  alpha: "方法.取界面存活时间/700"  
+################################################################
+精灵相册:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.66
+  y: 背景.y + 背景.height*0.85
+  width: 背景.width*0.1
+  height: 背景.width*0.1
+  identifier: 'container_6'
+  drawBackground: false
+  scale: 0.7
+精灵查询:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.72
+  y: 背景.y + 背景.height*0.85
+  width: 背景.width*0.1
+  height: 背景.width*0.1
+  identifier: 'container_7'
+  drawBackground: false
+  scale: 0.7
+定点设家:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.78
+  y: 背景.y + 背景.height*0.85
+  width: 背景.width*0.1
+  height: 背景.width*0.1
+  identifier: 'container_8'
+  drawBackground: false
+  scale: 0.7
+称号仓库:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.84
+  y: 背景.y + 背景.height*0.85
+  width: 背景.width*0.1
+  height: 背景.width*0.1
+  identifier: 'container_9'
+  drawBackground: false
+  scale: 0.7
+################################################################
+商城:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.03
+  y: 背景.y + 背景.height*0.7
+  #z: 1
+  width: 背景.width*0.2
+  height: 背景.width*0.2
+  identifier: 'container_11'
+  drawBackground: false
+  scale: 0.85
+商城框1:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.03"
+  y: "背景.y + 背景.height*0.6"
+  width: 背景.width*0.08
+  height: 商城框1.width* 60 / 300
+  texture: "菜单/框2.png"
+  scale: 2
+强力推荐:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.06"
+  y: "背景.y + 背景.height*0.69"
+  width: 背景.width*0.08
+  height: 强力推荐.width* 61 / 152
+  texture: "菜单/强力推荐.png"
+################################################################
+右边框:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.22"
+  y: "背景.y + 背景.height*0.08"
+  width: 背景.width*0.069
+  height: 右边框.width* 1000 / 900
+  texture: "菜单/框3.png"
+  scale: 7
+治疗:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.84"
+  y: "背景.y + 背景.height*0.75"
+  width: 背景.width*0.1
+  height: 治疗.width* 185 / 400
+  texture: "菜单/治疗.png"
+  scale: 1.2
+  tip:
+  - '点击按钮'
+  - '小姐姐远程给精灵治疗'
+背包:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.84"
+  y: "背景.y + 背景.height*0.66"
+  width: 背景.width*0.1
+  height: 背包.width* 185 / 400
+  texture: "菜单/背包.png"
+  actions:
+    click: "方法.聊天('/pc')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  tip:
+  - '点击打开远程PC'
+  - 'VIP2以上可用'
+  scale: 1.2
+ID_label:
+  x: "背景.x + 背景.width*0.36"
+  y: "背景.y + 背景.height*0.12"
+  scale: "方法.取屏幕高度*0.002"
+  texts: 
+    - '&F您的ID:&2%player_name%' 
+    - '&F您所在大区：&2一区'
+    - '本区在线人数：%bungee_1F%'
+    - '方法.取当前时间格式化' 
+  alpha: "方法.取界面存活时间/700"  
+################################################################
+精灵框1:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.046
+  y: 背景.y + 背景.height*0.12
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+精灵框2:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.12
+  y: 背景.y + 背景.height*0.12
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+精灵框3:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.046
+  y: 背景.y + 背景.height*0.29
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+精灵框4:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.12
+  y: 背景.y + 背景.height*0.29
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+精灵框5:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.046
+  y: 背景.y + 背景.height*0.45
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+精灵框6:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.12
+  y: 背景.y + 背景.height*0.45
+  width: h*0.1
+  height: 背景.width* 17 / 240
+  texture: "菜单/精灵边框.png"
+1-1:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.056
+  y: 背景.y + 背景.height*0.128
+  #z: 1
+  width: 背景.width*0.065 
+  height: 背景.width*0.065
+  identifier: 'container_0'
+  drawBackground: false
+  scale: 0.8
+2-2:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.13
+  y: 背景.y + 背景.height*0.128
+  #z: 1
+  width: 背景.width*0.065
+  height: 背景.width*0.065
+  identifier: 'container_1'
+  drawBackground: false
+  scale: 0.8
+3-3:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.056
+  y: 背景.y + 背景.height*0.3
+  #z: 1
+  width: 背景.width*0.065
+  height: 背景.width*0.065
+  identifier: 'container_2'
+  drawBackground: false
+  scale: 0.8
+4-4:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.13
+  y: 背景.y + 背景.height*0.3
+  #z: 1
+  width: 背景.width*0.065
+  height: 背景.width*0.065
+  identifier: 'container_3'
+  drawBackground: false
+  scale: 0.8
+5-5:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.056
+  y: 背景.y + 背景.height*0.46
+  #z: 1
+  width: 背景.width*0.065
+  height: 背景.width*0.065
+  identifier: 'container_4'
+  drawBackground: false
+  scale: 0.8
+6-6:
+  type: 'slot'
+  x: 背景.x + 背景.width*0.13
+  y: 背景.y + 背景.height*0.46
+  #z: 1
+  width: 背景.width*0.065
+  height: 背景.width*0.065
+  identifier: 'container_5'
+  drawBackground: false
+  scale: 0.8
+################################################################
+图片名称:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.7
+  y: 背景.y + 背景.height*0.1
+  width: 50
+  height: 70
+  texture: 用户变量.槽位图片存储
+  scale: "方法.取屏幕高度*0.0065"
+################################################################
+头像名称1:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.27
+  y: 背景.y + 背景.height*0.14
+  width: 背景.width*0.28
+  height: 头像名称1.width* 200 / 200
+  texture: 用户变量.头像存储
+  scale: 0.2
+头像名称2:
+  type: 'texture'
+  x: 背景.x + 背景.width*0.25
+  y: 背景.y + 背景.height*0.1
+  width: 背景.width*0.28
+  height: 头像名称2.width* 1
+  texture: 用户变量.头像框存储
+  scale: 0.35
+################################################################
+框4:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.22"
+  y: "背景.y + 背景.height*0.08"
+  width: 背景.width*0.069
+  height: 框4.width* 1000 / 900
+  texture: "菜单/框4.png"
+  scale: 7
+  actions:
+    preRender: |-
+      variable.scroll = 0-方法.取组件值('滚动条_texture','distancey')*4.0;
+滚动条_texture:
+  x: "背景.x + 背景.width*0.63"
+  y: "背景.y + 背景.height*0.34"
+  width: "方法.取屏幕高度*0.013"
+  height: "方法.取屏幕高度*0.05"
+  texture: "菜单/滚轮.png"
+  scale: 2.2
+  maxDistanceY: "方法.取屏幕高度*0.4"
+主城:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.25"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/2.4"
+  width: 背景.width*0.08
+  height: 主城.width* 120 / 120
+  texture: "菜单/主城.png"
+  textureHovered: "菜单/主城1.png"
+  actions:
+    click: "方法.聊天('/spawn')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+传送:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.34"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/2.4"
+  width: 背景.width*0.08
+  height: 传送.width* 120 / 120
+  texture: "菜单/传送.png"
+  textureHovered: "菜单/传送1.png"
+  actions:
+    click: "方法.打开GUI('传送')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+地皮:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.43"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/2.4"
+  width: 背景.width*0.08
+  height: 地皮.width* 120 / 120
+  texture: "菜单/地皮.png"
+  textureHovered: "菜单/地皮1.png"
+  actions:
+    click: "方法.打开GUI('地皮')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+任务:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.52"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/2.4"
+  width: 背景.width*0.08
+  height: 任务.width* 120 / 120
+  texture: "菜单/任务.png"
+  textureHovered: "菜单/任务1.png"
+  actions:
+    click: "方法.聊天('/ptp open 新手任务')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+试炼:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.25"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.8"
+  width: 背景.width*0.08
+  height: 试炼.width* 120 / 120
+  texture: "菜单/试炼.png"
+  textureHovered: "菜单/试炼1.png"
+  actions:
+    click: "方法.聊天('/warp 试炼塔')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+玩法:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.34"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.8"
+  width: 背景.width*0.08
+  height: 玩法.width* 120 / 120
+  texture: "菜单/玩法.png"
+  textureHovered: "菜单/玩法1.png"
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+签到:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.43"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.8"
+  width: 背景.width*0.08
+  height: 签到.width* 120 / 120
+  texture: "菜单/签到.png"
+  textureHovered: "菜单/签到1.png"
+  actions:
+    click: "方法.聊天('/litesignin gui')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+在线:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.52"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.8"
+  width: 背景.width*0.08
+  height: 在线.width* 120 / 120
+  texture: "菜单/在线.png"
+  textureHovered: "菜单/在线1.png"
+  actions:
+    click: "方法.聊天('/or open')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+排位:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.25"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.44"
+  width: 背景.width*0.08
+  height: 排位.width* 120 / 120
+  texture: "菜单/排位.png"
+  textureHovered: "菜单/排位1.png"
+  actions:
+    click: "方法.聊天('/trmenu open 段位礼包')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+工会:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.34"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.44"
+  width: 背景.width*0.08
+  height: 排位.width* 120 / 120
+  texture: "菜单/工会.png"
+  textureHovered: "菜单/工会1.png"
+  actions:
+    click: "方法.聊天('/guild gui main')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+交易:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.43"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.44"
+  width: 背景.width*0.08
+  height: 交易.width* 120 / 120
+  texture: "菜单/交易.png"
+  textureHovered: "菜单/交易1.png"
+  actions:
+    click: "方法.聊天('/market open sc')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"
+成就:
+  type: 'texture'
+  x: "背景.x + 背景.width*0.52"
+  y: "variable.scroll+(方法.取屏幕高度 - 方法.取屏幕高度*0.02)/1.44"
+  width: 背景.width*0.08
+  height: 成就.width* 120 / 120
+  texture: "菜单/成就.png"
+  textureHovered: "菜单/成就1.png"
+  actions:
+    click: "方法.聊天('/pag')"
+    click_left: |-
+      方法.关闭界面;
+    click_right: |-
+      方法.关闭界面;
+  limitX: "0"
+  limitY: "(方法.取屏幕高度 - 方法.取屏幕高度*0.05)/2.35"
+  limitWidth: "800"
+  limitHeight: "(方法.取屏幕高度 - 方法.取屏幕高度*-1.2)/4"

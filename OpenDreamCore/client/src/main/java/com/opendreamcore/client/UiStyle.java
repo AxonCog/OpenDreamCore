@@ -90,7 +90,7 @@ public final class UiStyle {
         }
         // 默认 opendreamcore 命名空间，补 textures 前缀（gui/logo.png → textures/gui/logo.png）
         String path = s.startsWith("textures/") ? s : "textures/" + s;
-        return ResourceLocation.fromNamespaceAndPath("opendreamcore", path.toLowerCase(Locale.ROOT));
+        return CompatRender.rl("opendreamcore", path.toLowerCase(Locale.ROOT));
     }
 
     /** 本地 PNG 文件 → 动态纹理（失败返回 null，不抛错）。 */
@@ -104,9 +104,10 @@ public final class UiStyle {
             return null;
         }
         try {
-            NativeImage image = NativeImage.read(Files.newInputStream(file));
-            DynamicTexture texture = new DynamicTexture(image);
-            ResourceLocation id = ResourceLocation.fromNamespaceAndPath("opendreamcore",
+            NativeImage image;
+            try (var in = Files.newInputStream(file)) { image = NativeImage.read(in); }
+            DynamicTexture texture = CompatRender.newDynamicTexture(image);
+            ResourceLocation id = CompatRender.rl("opendreamcore",
                     "local/" + Integer.toHexString(key.hashCode()));
             Minecraft.getInstance().getTextureManager().register(id, texture);
             TEXTURE_CACHE.put(key, id);

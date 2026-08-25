@@ -90,7 +90,13 @@ public final class FunctionTriggers implements Listener {
                 if (extra != null) {
                     extra.forEach(scope::assignVar);
                 }
-                DreamLang.execute(script, scope);
+                // 绑定页面上下文：Screen.设置变量 等方法据此写回正确的页面并同步查看者
+                ScriptContext.bind(pageId);
+                try {
+                    DreamLang.execute(script, scope);
+                } finally {
+                    ScriptContext.clear();
+                }
             } catch (Exception e) {
                 plugin.getLogger().warning("触发器 " + name + " 执行失败 (" + pageId + "): " + e);
             }

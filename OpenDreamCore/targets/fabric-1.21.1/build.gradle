@@ -78,7 +78,8 @@ dependencies {
     // common 源码的运行时依赖（antlr4-runtime 需要随 mod 打包）
     // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
     implementation 'org.antlr:antlr4-runtime:4.13.1'
-    // gson/snakeyaml MC 运行时自带，编译期声明即可
+    // gson MC 运行时自带（compileOnly 即可）；snakeyaml Fabric 客户端不自带，
+    // 必须 shade 进 jar（见下方 shadeOnly），否则运行时 NoClassDefFoundError
     compileOnly 'org.yaml:snakeyaml:2.2'
     compileOnly 'com.google.code.gson:gson:2.10.1'
 }
@@ -89,6 +90,10 @@ configurations {
 }
 dependencies {
     shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    // snakeyaml：Fabric 客户端类路径没有，必须打进 jar 并 relocate（与 NeoForge target 一致）
+    shadeOnly 'org.yaml:snakeyaml:2.2'
+    // 加密材质包支持（AES zip）：PackInstaller 经反射调用，运行时可选强化
+    shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
 }
 
 // ---- shadow 配置 ----
@@ -98,6 +103,8 @@ shadowJar {
     configurations = [project.configurations.shadeOnly]
     // 包路径重定向
     relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.shaded.snakeyaml'
+    relocate 'net.lingala.zip4j', 'com.opendreamcore.shaded.zip4j'
     // 合并 META-INF 服务文件
     mergeServiceFiles()
 }
@@ -131,10 +138,18 @@ tasks.register('collectOutput') {
     doLast {
         def out = file('../../../output')
         out.mkdirs()
+        // 只收集当前版本产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
         tasks.named('remapJar').get().archiveFile.get().asFile.parentFile.listFiles()?.each { f ->
             if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-shadow')) {
                 copy { from f; into out }
                 println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar") && f.name != "OpenDreamCore-Plugin-${mod_version}.jar") {
+                delete f
+                println "removed stale ${f.name}"
             }
         }
     }

@@ -67,6 +67,11 @@ public final class OpenDreamCoreAPI {
         return ScriptAPI.INSTANCE;
     }
 
+    /** 窗口标题 API：按玩家下发客户端窗口标题（打字机/轮播/随机）或解除覆盖。 */
+    public static TitleAPI title() {
+        return TitleAPI.INSTANCE;
+    }
+
     /** 插件实例（未加载返回 null）。 */
     static OpenDreamCorePlugin plugin() {
         return OpenDreamCorePlugin.get();

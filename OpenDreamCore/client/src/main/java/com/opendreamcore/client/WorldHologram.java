@@ -26,6 +26,32 @@ public final class WorldHologram {
      * RenderLevelStageEvent 里调用。camera 用于对齐视角（billboard）。
      * 距离淡出：options.world.fadeDistance（米，0 = 关）+ fadeRange（淡出带，默认 3 米）。
      */
+    /** 深度写开关：部分版本 RenderSystem 不再暴露 depthMask，走反射兼容。 */
+    private static void rsDepthMask(boolean write) {
+        try {
+            com.mojang.blaze3d.systems.RenderSystem.class
+                    .getMethod("depthMask", boolean.class).invoke(null, write);
+        } catch (Throwable ignored) {
+        }
+    }
+
+/** 混合函数复位：同上走反射。 */
+    private static void rsDefaultBlendFunc() {
+        try {
+            com.mojang.blaze3d.systems.RenderSystem.class
+                    .getMethod("defaultBlendFunc").invoke(null);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 无参 RenderSystem 状态调用反射版（1.21.5+ 状态 API 重构，方法可能不存在，静默跳过）。 */
+    private static void rsCall(String method) {
+        try {
+            com.mojang.blaze3d.systems.RenderSystem.class.getMethod(method).invoke(null);
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static void render(List<RenderNode> nodes, Map<String, Object> options,
                               net.minecraft.client.Camera camera, float partialTick) {
         render(nodes, options, camera, partialTick, null, null, null, null);
@@ -128,6 +154,11 @@ public final class WorldHologram {
                 anchor.z - camera.getPosition().z);
 
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        // 世界面板统一渲染状态：混合开启（半透明背景可见）、双面（背对不消失）、深度只测不写
+        rsCall("enableBlend");
+        rsDefaultBlendFunc();
+        rsCall("disableCull");
+        rsDepthMask(false);
         try {
             // 深度模式控制：
             // - occluded（默认）：启用深度测试，被遮挡的元素不显示
@@ -181,7 +212,7 @@ public final class WorldHologram {
             // transparent 模式：第二遍——禁用深度测试，用低透明度重画被遮挡的元素
             if (transparentMode) {
                 noDepthPass = true;
-                com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
+                CompatRender.disableDepthTest();
                 double occludedFade = fade * occludedAlpha;
                 for (RenderNode node : ordered) {
                     renderNode(pose, buffers, node, occludedFade, hoverId, selectionId, activeTab, tabReveal,
@@ -190,13 +221,17 @@ public final class WorldHologram {
                 buffers.endBatch();
                 noDepthPass = false;
             }
+        // 面板绘制结束：恢复全局渲染状态（blend/cull/深度写回）
+        rsDepthMask(true);
+        rsCall("enableCull");
+        rsCall("disableBlend");
         } catch (Exception ignored) {
             // 全息渲染出错不拖垮帧
         }
     }
 
     /** 悬停高亮颜色（world.hoverColor 可配，缺省亮蓝；渲染线程单帧字段）。 */
-    private static int currentHoverColor = 0xAA7A8BFF;
+    public static int currentHoverColor = 0xAA7A8BFF;
     /** 当前按下的元素（pageId/elementId 键；按下缩放反馈；渲染线程单帧字段）。 */
     private static String currentPressedKey;
     /** 深度模式（occluded/transparent/always；渲染线程单帧字段）。 */
@@ -218,11 +253,11 @@ public final class WorldHologram {
      * </ul>
      * 编辑浮层（手柄/框选/参考线等）仍显式 disableDepthTest，保证隔墙可编辑。
      */
-    static void applyContentDepth() {
+    public static void applyContentDepth() {
         if (noDepthPass || "always".equals(currentDepthMode)) {
-            com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
+            CompatRender.disableDepthTest();
         } else {
-            com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
+            CompatRender.enableDepthTest();
         }
     }
 
@@ -231,7 +266,7 @@ public final class WorldHologram {
      * 全部世界元素共用：text/rect/image/video/toggle/slider/checkbox/dropdown/
      * progress/item_slot/tabs 等（entity 用 setYRot 走自己的旋转）。
      */
-    private static void applyBillboardRotation(PoseStack pose, Map<?, ?> holo, double[] anim,
+    public static void applyBillboardRotation(PoseStack pose, Map<?, ?> holo, double[] anim,
                                                java.util.Map<String, Object> pageVars) {
         pose.mulPose(Minecraft.getInstance().gameRenderer.getMainCamera().rotation());
         double yaw = holoNum(holo, "yaw", 0, pageVars);
@@ -312,14 +347,12 @@ public final class WorldHologram {
         pose.translate(cx, cy, 0);
         pose.mulPose(mc.gameRenderer.getMainCamera().rotation());
         var matrix = pose.last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+        CompatRender.setColorShader();
         // 圆角矩形用 TRIANGLES 批次（中央 + 四边 + 四角扇形），支持上下渐变
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         float a = ((color >>> 24) & 0xFF) / 255.0F * (float) fade * (float) bgFadeIn;
         if (a > 0) {
@@ -379,12 +412,12 @@ public final class WorldHologram {
         }
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
     /** 四边形（TRIANGLES 批次：2 个三角形）。 */
-    private static void quadTris(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    public static void quadTris(CompatBuffer builder, org.joml.Matrix4f matrix,
                                  float x0, float y0, float x1, float y1,
                                  float red, float green, float blue, float alpha) {
         builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha);
@@ -396,7 +429,7 @@ public final class WorldHologram {
     }
 
     /** 圆角矩形（TRIANGLES）：中央 + 四边 + 四角四分之一圆扇形（每角 6 段）。 */
-    private static void roundedQuadTris(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void roundedQuadTris(CompatBuffer builder, org.joml.Matrix4f matrix,
                                         float x0, float y0, float x1, float y1, float r,
                                         float red, float green, float blue, float alpha) {
         if (r <= 0.01F) {
@@ -416,7 +449,7 @@ public final class WorldHologram {
     }
 
     /** 四分之一圆扇形（角度制，逆时针，中心 + 弧段三角形）。 */
-    private static void cornerFan(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void cornerFan(CompatBuffer builder, org.joml.Matrix4f matrix,
                                   float cx, float cy, float r, double a0, double a1,
                                   float red, float green, float blue, float alpha) {
         int seg = 6;
@@ -436,7 +469,7 @@ public final class WorldHologram {
 
     // ---------- 渐变版本（顶点颜色插值：vertical = 顶 color → 底 gradient；horizontal = 左 → 右） ----------
 
-    private static void gradVertex(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void gradVertex(CompatBuffer builder, org.joml.Matrix4f matrix,
                                    float x, float y, int topArgb, int bottomArgb, float yTop, float yBot,
                                    float alphaMul, boolean horizontal, float xA, float xB,
                                    int midArgb, float midPos) {
@@ -460,7 +493,7 @@ public final class WorldHologram {
     }
 
     /** ARGB 线性插值。 */
-    private static int lerpColor(int a, int b, float t) {
+    public static int lerpColor(int a, int b, float t) {
         int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF, aa = (a >>> 24) & 0xFF;
         int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF, ba = (b >>> 24) & 0xFF;
         return (Math.round(aa + (ba - aa) * t) << 24)
@@ -469,7 +502,7 @@ public final class WorldHologram {
                 | Math.round(ab + (bb - ab) * t);
     }
 
-    private static void quadTrisGrad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void quadTrisGrad(CompatBuffer builder, org.joml.Matrix4f matrix,
                                      float x0, float y0, float x1, float y1,
                                      int topArgb, int bottomArgb, float yTop, float yBot, float alphaMul,
                                      boolean horizontal, int midArgb, float midPos) {
@@ -482,7 +515,7 @@ public final class WorldHologram {
     }
 
     /** 圆角矩形（渐变）：中央 + 四边 + 四角扇形，顶点颜色按 y 插值。 */
-    private static void roundedQuadTrisGrad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void roundedQuadTrisGrad(CompatBuffer builder, org.joml.Matrix4f matrix,
                                             float x0, float y0, float x1, float y1, float r,
                                             int topArgb, int bottomArgb, float yTop, float yBot, float alphaMul,
                                             boolean horizontal, int midArgb, float midPos) {
@@ -503,7 +536,7 @@ public final class WorldHologram {
     }
 
     /** 四分之一圆扇形（渐变）。 */
-    private static void cornerFanGrad(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void cornerFanGrad(CompatBuffer builder, org.joml.Matrix4f matrix,
                                       float cx, float cy, float r, double a0, double a1,
                                       int topArgb, int bottomArgb, float yTop, float yBot, float alphaMul,
                                       boolean horizontal, float xA, float xB, int midArgb, float midPos) {
@@ -684,25 +717,25 @@ public final class WorldHologram {
                     : new double[]{childParent[0] + own[0], childParent[1] + own[1], childParent[2] + own[2]};
         }
         if ("text".equals(node.type())) {
-            renderText(pose, buffers, node, effFade, scope, pageVars, effective);
+            com.opendreamcore.client.world.HoloTextRender.renderText(pose, buffers, node, effFade, scope, pageVars, effective);
             if (hovered) {
-                renderHoverOutline(pose, node, effFade, false, pageVars);
+                com.opendreamcore.client.world.HoloDecor.renderHoverOutline(pose, node, effFade, false, pageVars);
             }
         } else if ("entity".equals(node.type())) {
             // 实体无法直接调透明度：淡出过深时整体不画（避免突兀跳变）
             if (effFade >= 0.5) {
-                renderEntity(pose, buffers, node, effective, pageVars);
+                com.opendreamcore.client.world.HoloEntityRender.renderEntity(pose, buffers, node, effective, pageVars);
             }
         } else if ("rect".equals(node.type())) {
             renderRect(pose, buffers, node, effFade, scope, effective, pageVars);
             if (hovered) {
-                renderHoverOutline(pose, node, effFade, true, pageVars);
+                com.opendreamcore.client.world.HoloDecor.renderHoverOutline(pose, node, effFade, true, pageVars);
             }
         } else if ("button".equals(node.type())) {
             // 世界内按钮：背景（hover/按下态变色）+ 居中标签；点击走通用 CLICK 管线
             renderButton(pose, buffers, node, effFade, scope, effective, pageVars, hovered);
             if (hovered) {
-                renderHoverOutline(pose, node, effFade, true, pageVars);
+                com.opendreamcore.client.world.HoloDecor.renderHoverOutline(pose, node, effFade, true, pageVars);
             }
         } else if ("image".equals(node.type())) {
             String src = UiRenderer.str(UiRenderer.propsMap(node, "image").get("src"));
@@ -712,12 +745,12 @@ public final class WorldHologram {
                 renderImage(pose, buffers, node, effFade, scope, effective, pageVars);
             }
             if (hovered) {
-                renderHoverOutline(pose, node, effFade, true, pageVars);
+                com.opendreamcore.client.world.HoloDecor.renderHoverOutline(pose, node, effFade, true, pageVars);
             }
         } else if ("video".equals(node.type())) {
             renderVideo(pose, buffers, node, effFade, scope, effective, pageVars); // 世界内视频面板（FFmpeg）
         } else if ("canvas".equals(node.type())) {
-            renderCanvas(pose, buffers, node, effFade, scope, effective, pageVars); // 世界内画布（笔刷系统）
+            com.opendreamcore.client.world.HoloCanvas.renderCanvas(pose, buffers, node, effFade, scope, effective, pageVars); // 世界内画布（笔刷系统）
         } else if ("progress".equals(node.type())) {
             renderProgress(pose, buffers, node, effFade, scope, effective, pageVars); // 世界内进度条（billboard 血条）
         } else if ("toggle".equals(node.type())) {
@@ -736,22 +769,22 @@ public final class WorldHologram {
         // 元素发光（hologram.glow：颜色或 {color, size}，内容之前绘制 = 垫底辉光）
         Object glowProp = ownHolo.get("glow");
         if (glowProp != null && !Boolean.FALSE.equals(glowProp)) {
-            renderGlow(pose, node, effFade, pageVars, effective, glowProp);
+            com.opendreamcore.client.world.HoloDecor.renderGlow(pose, node, effFade, pageVars, effective, glowProp);
         }
         // 元素倒影（hologram.shadow：颜色或 {color, offset, size}，内容之前绘制 = 垫底阴影）
         Object shadowProp = ownHolo.get("shadow");
         if (shadowProp != null && !Boolean.FALSE.equals(shadowProp)) {
-            renderShadow(pose, node, effFade, pageVars, effective, shadowProp);
+            com.opendreamcore.client.world.HoloDecor.renderShadow(pose, node, effFade, pageVars, effective, shadowProp);
         }
         // 元素角标（hologram.badge：布尔红点 / 数字数量 / {count, color}，右上角 billboard）
         Object badgeProp = ownHolo.get("badge");
         if (badgeProp != null) {
-            renderBadge(pose, buffers, node, effFade, pageVars, effective, badgeProp);
+            com.opendreamcore.client.world.HoloDecor.renderBadge(pose, buffers, node, effFade, pageVars, effective, badgeProp);
         }
         // 元素状态图标（hologram.statusIcon：文本或 {icon, color}，左上角 billboard）
         Object statusProp = ownHolo.get("statusIcon");
         if (statusProp != null) {
-            renderStatusIcon(pose, buffers, node, effFade, pageVars, effective, statusProp);
+            com.opendreamcore.client.world.HoloDecor.renderStatusIcon(pose, buffers, node, effFade, pageVars, effective, statusProp);
         }
         // 元素边框（hologram.border：颜色字符串或 {color, width, flow, flowColor}，billboard 描边）
         Object borderProp = ownHolo.get("border");
@@ -801,14 +834,14 @@ public final class WorldHologram {
             // 圆角矩形元素：描边跟随 rect.radius
             double borderRadius = "rect".equals(node.type())
                     ? UiRenderer.num(UiRenderer.propsMap(node, "rect").get("radius"), 0) : 0;
-            renderBorderOutline(pose, node, effFade, pageVars, effective, bc, bw, flow, flowColor,
+            com.opendreamcore.client.world.HoloDecor.renderBorderOutline(pose, node, effFade, pageVars, effective, bc, bw, flow, flowColor,
                     borderRadius, flowSpeedMs, dash, dashLen, doubleLine, flowColor2, flowSeg,
                     flowPhase, flowPhase2, borderAlpha, flowGradient, flowReverse, flowSegments,
                     flowSegGap, hovered);
         }
         // 编辑模式选中框（任何类型都画，含无 hover 框的实体/物品）
         if (selected) {
-            renderSelectionOutline(pose, node, effFade, pageVars, effective);
+            com.opendreamcore.client.world.HoloDecor.renderSelectionOutline(pose, node, effFade, pageVars, effective);
         }
         for (RenderNode child : node.children()) {
             renderNode(pose, buffers, child, fade, hoverId, selectionId, activeTab, tabReveal, scope, pageVars,
@@ -889,21 +922,21 @@ public final class WorldHologram {
             if (itemId.startsWith("{")) {
                 // 完整 SNBT 物品
                 var tag = net.minecraft.nbt.NbtUtils.snbtToStructure(itemId);
-                return net.minecraft.world.item.ItemStack.parse(items, tag).orElse(null);
+                return (net.minecraft.world.item.ItemStack) CompatRender.parseStack(items, tag);
             }
             net.minecraft.core.Registry<net.minecraft.world.item.Item> registry =
                     net.minecraft.core.registries.BuiltInRegistries.ITEM;
-            var item = registry.get(net.minecraft.resources.ResourceLocation.tryParse(itemId));
+            Object item = CompatRender.registryGet(registry, net.minecraft.resources.ResourceLocation.tryParse(itemId));
             if (item == null || item == net.minecraft.world.item.Items.AIR) {
                 return null;
             }
             Object rawNbt = spec.get("nbt");
             if (rawNbt == null) {
-                return new net.minecraft.world.item.ItemStack(item, Math.max(1, count));
+                return new net.minecraft.world.item.ItemStack((net.minecraft.world.item.Item) item, Math.max(1, count));
             }
             String snbt = UiRenderer.interpolate(node, String.valueOf(rawNbt), pageVars).trim();
             if (snbt.isEmpty()) {
-                return new net.minecraft.world.item.ItemStack(item, Math.max(1, count));
+                return new net.minecraft.world.item.ItemStack((net.minecraft.world.item.Item) item, Math.max(1, count));
             }
             // id/Count 由 item/count 属性保证，nbt 只叠加组件
             var tag = net.minecraft.nbt.NbtUtils.snbtToStructure(snbt);
@@ -911,7 +944,7 @@ public final class WorldHologram {
             base.putString("id", itemId);
             base.putByte("Count", (byte) Math.max(1, count));
             tag.merge(base);
-            return net.minecraft.world.item.ItemStack.parse(items, tag).orElse(null);
+            return (net.minecraft.world.item.ItemStack) CompatRender.parseStack(items, tag);
         } catch (Exception e) {
             return null; // 解析失败不渲染（非法 id/SNBT）
         }
@@ -954,13 +987,11 @@ public final class WorldHologram {
         float gap = pw * 0.05F;
         float fadeA = (float) fade * (float) (anim == null ? 1 : anim[3]);
         // 页签底色 + 激活下划线（批量一次提交）
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         for (int i = 0; i < n; i++) {
             boolean active = activeTab != null && activeTab.equals(String.valueOf(options.get(i)));
@@ -969,13 +1000,13 @@ public final class WorldHologram {
             int c = active ? activeColor : bg;
             float a = ((c >>> 24) & 0xFF) / 255.0F * fadeA;
             if (a > 0) {
-                edge(builder, matrix, x0, -7, x1, 7,
+                com.opendreamcore.client.world.HoloDecor.edge(builder, matrix, x0, -7, x1, 7,
                         ((c >> 16) & 0xFF) / 255.0F, ((c >> 8) & 0xFF) / 255.0F, (c & 0xFF) / 255.0F, a);
             }
             if (active) {
                 float u = ((activeColor >>> 24) & 0xFF) / 255.0F * fadeA;
                 if (u > 0) {
-                    edge(builder, matrix, x0, -7, x1, -5.5F,
+                    com.opendreamcore.client.world.HoloDecor.edge(builder, matrix, x0, -7, x1, -5.5F,
                             ((activeColor >> 16) & 0xFF) / 255.0F, ((activeColor >> 8) & 0xFF) / 255.0F,
                             (activeColor & 0xFF) / 255.0F, u);
                 }
@@ -983,7 +1014,7 @@ public final class WorldHologram {
         }
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         // 页签文字（billboard，激活高亮）
         for (int i = 0; i < n; i++) {
             boolean active = activeTab != null && activeTab.equals(String.valueOf(options.get(i)));
@@ -1037,13 +1068,11 @@ public final class WorldHologram {
         applyBillboardRotation(pose, holo, anim, pageVars);
         var matrix = pose.last().pose();
         float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         // 框体
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2, 0xFF20242C, alphaMul);
@@ -1056,7 +1085,7 @@ public final class WorldHologram {
         quadV(builder, matrix, ax + h * 0.12, ay - h * 0.1, ax, ay + h * 0.14, 0xFF9AA3B2, alphaMul);
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         // 选项文本
         if (label != null && !label.isEmpty()) {
             Minecraft mc = Minecraft.getInstance();
@@ -1076,7 +1105,7 @@ public final class WorldHologram {
     }
 
     /** 颜色乘 alpha。 */
-    private static int withAlpha(int color, float alphaMul) {
+    public static int withAlpha(int color, float alphaMul) {
         int a = (int) (((color >>> 24) & 0xFF) * alphaMul);
         return (a << 24) | (color & 0xFFFFFF);
     }
@@ -1103,13 +1132,11 @@ public final class WorldHologram {
         var matrix = pose.last().pose();
         float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
         int accent = UiStyle.color(spec.get("color"), 0xFF7A8BFF);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         // 框（底色 + 四边）
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2,
@@ -1128,7 +1155,7 @@ public final class WorldHologram {
         }
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -1191,13 +1218,11 @@ public final class WorldHologram {
         applyBillboardRotation(pose, holo, anim, pageVars);
         var matrix = pose.last().pose();
         float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         double trackH = h * 0.4;
         boolean vertical = UiRenderer.bool(spec.get("vertical"), false);
@@ -1228,7 +1253,7 @@ public final class WorldHologram {
         }
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -1253,13 +1278,11 @@ public final class WorldHologram {
         applyBillboardRotation(pose, holo, anim, pageVars);
         var matrix = pose.last().pose();
         float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.setColorShader();
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
         // 轨道
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2,
@@ -1271,7 +1294,7 @@ public final class WorldHologram {
                 0xFFFFFFFF, alphaMul);
         drawSafe(builder);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -1298,11 +1321,10 @@ public final class WorldHologram {
         applyBillboardRotation(pose, holo, anim, pageVars);
         var matrix = pose.last().pose();
         float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+        CompatRender.setColorShader();
         if (shape != null && ("arc".equalsIgnoreCase(shape) || "circle".equalsIgnoreCase(shape))) {
             double w = holoNum(holo, "width", 1, pageVars);
             double h = holoNum(holo, "height", 1, pageVars);
@@ -1312,8 +1334,7 @@ public final class WorldHologram {
             double sweep = "circle".equalsIgnoreCase(shape) ? 360 : UiRenderer.num(spec.get("sweepAngle"), 270);
             int track = UiStyle.color(spec.get("trackColor"), 0xFF303540);
             int color = UiStyle.color(spec.get("color"), 0xFF4CAF50);
-            var arcBuilder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+            var arcBuilder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             fillArcWorld(arcBuilder, matrix, 0, 0, radius, thickness, start, sweep, track, alphaMul);
             if (ratio > 0) {
@@ -1323,8 +1344,7 @@ public final class WorldHologram {
         } else {
             double w = holoNum(holo, "width", 1, pageVars);
             double h = holoNum(holo, "height", 0.08, pageVars);
-            var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2, 0xFF303540, alphaMul);
             double fillW = w * ratio;
@@ -1335,11 +1355,11 @@ public final class WorldHologram {
             drawSafe(builder);
         }
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
-    private static void fillArcWorld(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    private static void fillArcWorld(CompatBuffer builder, org.joml.Matrix4f matrix,
                                       double cx, double cy, double radius, double thickness,
                                       double startDeg, double sweepDeg, int color, float alphaMul) {
         if (sweepDeg == 0 || radius <= 0 || thickness <= 0) return;
@@ -1375,271 +1395,15 @@ public final class WorldHologram {
      * 笔刷坐标 = 面板内像素（左上原点 y 向下），按面板宽高映射到世界单位。
      * hologram.width/height = 世界面板尺寸；canvas.width/height = 面板逻辑像素尺寸。
      */
-    private static void renderCanvas(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
-        Map<?, ?> spec = UiRenderer.propsMap(node, "canvas");
-        Object brushesRaw = spec.get("brushes");
-        if (!(brushesRaw instanceof List<?> brushes)) {
-            return;
-        }
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double worldW = holoNum(holo, "width", 1, pageVars);
-        double worldH = holoNum(holo, "height", 1, pageVars);
-        double panelW = num(spec.get("width"), 100);
-        double panelH = num(spec.get("height"), 100);
-        if (panelW <= 0 || panelH <= 0 || worldW <= 0 || worldH <= 0) {
-            return;
-        }
-        double sx = worldW / panelW;
-        double sy = worldH / panelH;
-        double[] anim = animOf(node, scope);
-        Minecraft mc = Minecraft.getInstance();
-        pose.pushPose();
-        pose.translate(x + (anim == null ? 0 : anim[0]) + (drag == null ? 0 : drag[0]),
-                y + (anim == null ? 0 : anim[1]) + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, anim, pageVars);
-        var matrix = pose.last().pose();
-        float alphaMul = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        for (Object brushObj : brushes) {
-            if (!(brushObj instanceof Map<?, ?> m)) {
-                continue;
-            }
-            String type = UiRenderer.str(m.get("type"));
-            if (type == null) {
-                continue;
-            }
-            int color = UiStyle.color(m.get("color"), 0xFFFFFFFF);
-            switch (type) {
-                case "rect" -> canvasRect(builder, matrix, node, m, sx, sy, worldW, worldH, color, alphaMul);
-                case "circle" -> canvasCircle(builder, matrix, node, m, sx, sy, worldW, worldH, color, alphaMul);
-                case "line" -> canvasLine(builder, matrix, node, m, sx, sy, worldW, worldH, color, alphaMul);
-                case "triangle" -> canvasTriangle(builder, matrix, node, m, sx, sy, worldW, worldH, color, alphaMul);
-                case "gradient" -> canvasGradient(builder, matrix, node, m, sx, sy, worldW, worldH, alphaMul);
-                default -> {
-                    // 未知笔刷忽略（text/image 用下面单独路径）
-                }
-            }
-        }
-        drawSafe(builder);
-        // 图片/文本笔刷（贴图/字体需要独立绘制）
-        for (Object brushObj : brushes) {
-            if (!(brushObj instanceof Map<?, ?> m)) {
-                continue;
-            }
-            String type = UiRenderer.str(m.get("type"));
-            if (type == null) {
-                continue;
-            }
-            switch (type) {
-                case "image" -> canvasImage(pose, buffers, node, m, sx, sy, worldW, worldH, alphaMul);
-                case "text" -> canvasText(pose, buffers, node, m, sx, sy, worldW, worldH, alphaMul);
-                default -> {
-                }
-            }
-        }
-        applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
-
-    /** 面板像素坐标 → billboard 局部坐标（中心原点，y 向上）。 */
-    private static double[] canvasPos(double px, double py, double sx, double sy,
-                                      double worldW, double worldH) {
-        return new double[]{px * sx - worldW / 2, worldH / 2 - py * sy};
-    }
-
-    private static void canvasRect(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                   RenderNode node, Map<?, ?> m, double sx, double sy,
-                                   double worldW, double worldH, int color, float alphaMul) {
-        double bx = num(m.get("x"), 0);
-        double by = num(m.get("y"), 0);
-        double bw = num(m.get("width"), 10);
-        double bh = num(m.get("height"), 10);
-        double[] p = canvasPos(bx, by, sx, sy, worldW, worldH);
-        double[] p2 = canvasPos(bx + bw, by + bh, sx, sy, worldW, worldH);
-        quadV(builder, matrix, p[0], p2[1], p2[0], p[1], color, alphaMul);
-    }
-
-    private static void canvasCircle(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                     RenderNode node, Map<?, ?> m, double sx, double sy,
-                                     double worldW, double worldH, int color, float alphaMul) {
-        double cx = num(m.get("cx"), 0);
-        double cy = num(m.get("cy"), 0);
-        double r = num(m.get("radius"), 10);
-        boolean fill = UiRenderer.bool(m.get("fill"), true);
-        double[] c = canvasPos(cx, cy, sx, sy, worldW, worldH);
-        double rw = r * sx;
-        double rh = r * sy;
-        int segments = 16;
-        if (fill) {
-            for (int i = 0; i < segments; i++) {
-                double a0 = Math.PI * 2 * i / segments;
-                double a1 = Math.PI * 2 * (i + 1) / segments;
-                canvasVertex(builder, matrix, c[0], c[1], color, alphaMul);
-                canvasVertex(builder, matrix, c[0] + rw * Math.cos(a0), c[1] + rh * Math.sin(a0), color, alphaMul);
-                canvasVertex(builder, matrix, c[0] + rw * Math.cos(a1), c[1] + rh * Math.sin(a1), color, alphaMul);
-            }
-        } else {
-            // 描边圆：逐段细四边形
-            for (int i = 0; i < segments; i++) {
-                double a0 = Math.PI * 2 * i / segments;
-                double a1 = Math.PI * 2 * (i + 1) / segments;
-                double t = Math.min(0.02, Math.min(rw, rh) / 8);
-                double x0 = c[0] + rw * Math.cos(a0), y0 = c[1] + rh * Math.sin(a0);
-                double x1 = c[0] + rw * Math.cos(a1), y1 = c[1] + rh * Math.sin(a1);
-                double x0i = c[0] + (rw - t) * Math.cos(a0), y0i = c[1] + (rh - t) * Math.sin(a0);
-                double x1i = c[0] + (rw - t) * Math.cos(a1), y1i = c[1] + (rh - t) * Math.sin(a1);
-                quad4(builder, matrix, x0, y0, x1, y1, x1i, y1i, x0i, y0i, color, alphaMul);
-            }
-        }
-    }
-
-    private static void canvasLine(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                   RenderNode node, Map<?, ?> m, double sx, double sy,
-                                   double worldW, double worldH, int color, float alphaMul) {
-        double[] a = canvasPos(num(m.get("x1"), 0), num(m.get("y1"), 0), sx, sy, worldW, worldH);
-        double[] b = canvasPos(num(m.get("x2"), 10), num(m.get("y2"), 10), sx, sy, worldW, worldH);
-        double thickness = Math.max(0.01, num(m.get("width"), 1) * (sx + sy) / 2);
-        double dx = b[0] - a[0];
-        double dy = b[1] - a[1];
-        double len = Math.max(1e-6, Math.sqrt(dx * dx + dy * dy));
-        double nx = -dy / len * thickness / 2;
-        double ny = dx / len * thickness / 2;
-        quad4(builder, matrix,
-                a[0] + nx, a[1] + ny, b[0] + nx, b[1] + ny,
-                b[0] - nx, b[1] - ny, a[0] - nx, a[1] - ny,
-                color, alphaMul);
-    }
-
-    private static void canvasTriangle(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                       RenderNode node, Map<?, ?> m, double sx, double sy,
-                                       double worldW, double worldH, int color, float alphaMul) {
-        double[] a = canvasPos(num(m.get("x1"), 0), num(m.get("y1"), 0), sx, sy, worldW, worldH);
-        double[] b = canvasPos(num(m.get("x2"), 10), num(m.get("y2"), 0), sx, sy, worldW, worldH);
-        double[] c = canvasPos(num(m.get("x3"), 0), num(m.get("y3"), 10), sx, sy, worldW, worldH);
-        canvasVertex(builder, matrix, a[0], a[1], color, alphaMul);
-        canvasVertex(builder, matrix, b[0], b[1], color, alphaMul);
-        canvasVertex(builder, matrix, c[0], c[1], color, alphaMul);
-    }
-
-    /** 垂直/水平渐变：8 段细条近似。 */
-    private static void canvasGradient(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                       RenderNode node, Map<?, ?> m, double sx, double sy,
-                                       double worldW, double worldH, float alphaMul) {
-        double bx = num(m.get("x"), 0);
-        double by = num(m.get("y"), 0);
-        double bw = num(m.get("width"), 10);
-        double bh = num(m.get("height"), 10);
-        int from = UiStyle.color(m.get("from"), 0xFFFFFFFF);
-        int to = UiStyle.color(m.get("to"), 0xFF000000);
-        boolean vertical = UiRenderer.bool(m.get("vertical"), true);
-        int steps = 8;
-        double[] p0 = canvasPos(bx, by, sx, sy, worldW, worldH);
-        double[] p1 = canvasPos(bx + bw, by + bh, sx, sy, worldW, worldH);
-        for (int i = 0; i < steps; i++) {
-            double t0 = i / (double) steps;
-            double t1 = (i + 1) / (double) steps;
-            int c0 = UiRenderer.lerpColor(from, to, t0);
-            int c1 = UiRenderer.lerpColor(from, to, t1);
-            double x0, y0, x1, y1, x2, y2, x3, y3;
-            if (vertical) {
-                double yA = p0[1] + (p1[1] - p0[1]) * t0;
-                double yB = p0[1] + (p1[1] - p0[1]) * t1;
-                x0 = p0[0]; y0 = yA; x1 = p1[0]; y1 = yA; x2 = p1[0]; y2 = yB; x3 = p0[0]; y3 = yB;
-            } else {
-                double xA = p0[0] + (p1[0] - p0[0]) * t0;
-                double xB = p0[0] + (p1[0] - p0[0]) * t1;
-                x0 = xA; y0 = p1[1]; x1 = xB; y1 = p1[1]; x2 = xB; y2 = p0[1]; x3 = xA; y3 = p0[1];
-            }
-            canvasVertex(builder, matrix, x0, y0, c0, alphaMul);
-            canvasVertex(builder, matrix, x1, y1, c0, alphaMul);
-            canvasVertex(builder, matrix, x2, y2, c1, alphaMul);
-            canvasVertex(builder, matrix, x0, y0, c0, alphaMul);
-            canvasVertex(builder, matrix, x2, y2, c1, alphaMul);
-            canvasVertex(builder, matrix, x3, y3, c1, alphaMul);
-        }
-    }
-
-    /** 世界画布图片笔刷：贴图 quad。 */
-    private static void canvasImage(PoseStack pose, MultiBufferSource buffers, RenderNode node, Map<?, ?> m,
-                                    double sx, double sy, double worldW, double worldH, float alphaMul) {
-        String src = UiRenderer.str(m.get("src"));
-        net.minecraft.resources.ResourceLocation texture = UiStyle.texture(src);
-        if (texture == null) {
-            return;
-        }
-        double bx = num(m.get("x"), 0);
-        double by = num(m.get("y"), 0);
-        double bw = num(m.get("width"), 10);
-        double bh = num(m.get("height"), 10);
-        double[] p = canvasPos(bx, by, sx, sy, worldW, worldH);
-        double[] p2 = canvasPos(bx + bw, by + bh, sx, sy, worldW, worldH);
-        var matrix = pose.last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.setShaderTexture(0, texture);
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alphaMul);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
-        builder.addVertex(matrix, (float) p[0], (float) p2[1], 0).setUv(0, 0);
-        builder.addVertex(matrix, (float) p2[0], (float) p2[1], 0).setUv(1, 0);
-        builder.addVertex(matrix, (float) p2[0], (float) p[1], 0).setUv(1, 1);
-        builder.addVertex(matrix, (float) p[0], (float) p[1], 0).setUv(0, 1);
-        drawSafe(builder);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-    }
-
-    /** 世界画布文本笔刷：billboard 字体绘制。 */
-    private static void canvasText(PoseStack pose, MultiBufferSource buffers, RenderNode node, Map<?, ?> m,
-                                   double sx, double sy, double worldW, double worldH, float alphaMul) {
-        String content = UiRenderer.interpolate(node, UiRenderer.str(m.get("content")), null);
-        if (content == null || content.isEmpty()) {
-            return;
-        }
-        Minecraft mc = Minecraft.getInstance();
-        double bx = num(m.get("x"), 0);
-        double by = num(m.get("y"), 0);
-        double[] p = canvasPos(bx, by, sx, sy, worldW, worldH);
-        int color = UiStyle.color(m.get("color"), 0xFFFFFFFF);
-        int alpha = (int) (((color >>> 24) & 0xFF) * alphaMul);
-        color = (alpha << 24) | (color & 0xFFFFFF);
-        pose.pushPose();
-        pose.translate(p[0], p[1], 0);
-        pose.scale((float) sx, (float) -sx, (float) sx);
-        mc.font.drawInBatch(content, -mc.font.width(content) / 2.0F, 0, color,
-                UiRenderer.bool(m.get("shadow"), false),
-                pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
-                0, 0xF000F0);
-        pose.popPose();
-    }
-
-    /** 画布顶点（POSITION_COLOR）。 */
-    private static void canvasVertex(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                     double x, double y, int color, float alphaMul) {
-        float[] c = rgba(color, alphaMul);
-        builder.addVertex(matrix, (float) x, (float) y, 0).setColor(c[0], c[1], c[2], c[3]);
-    }
 
     /** RGBA 分解（带 alpha 乘数）。 */
-    private static float[] rgba(int color, float alphaMul) {
+    public static float[] rgba(int color, float alphaMul) {
         float a = ((color >>> 24) & 0xFF) / 255.0F * alphaMul;
         return new float[]{((color >> 16) & 0xFF) / 255.0F, ((color >> 8) & 0xFF) / 255.0F,
                 (color & 0xFF) / 255.0F, a};
     }
 
-    private static void quadV(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    public static void quadV(CompatBuffer builder, org.joml.Matrix4f matrix,
                               double x0, double y0, double x1, double y1, int color, float alphaMul) {
         float[] c = rgba(color, alphaMul);
         builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
@@ -1650,7 +1414,7 @@ public final class WorldHologram {
         builder.addVertex(matrix, (float) x0, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]);
     }
 
-    private static void quad4(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
+    public static void quad4(CompatBuffer builder, org.joml.Matrix4f matrix,
                               double x0, double y0, double x1, double y1,
                               double x2, double y2, double x3, double y3, int color, float alphaMul) {
         float[] c = rgba(color, alphaMul);
@@ -1663,6 +1427,11 @@ public final class WorldHologram {
     }
 
     /** 世界内视频面板（FFmpeg 真视频贴图到 billboard 面板）。 */
+    /** 世界画布渲染——实现移至 world/HoloCanvas（C3 第二波）。 */
+    public static void renderCanvas(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
+        com.opendreamcore.client.world.HoloCanvas.renderCanvas(pose, buffers, node, fade, scope, drag, pageVars);
+    }
+
     private static void renderVideo(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
         Map<?, ?> spec = UiRenderer.propsMap(node, "video");
         String src = UiRenderer.str(spec.get("src"));
@@ -1710,25 +1479,23 @@ public final class WorldHologram {
             float oy = (float) (rect[1] + rect[3] / 2.0 - holoNum(holo, "height", 1, pageVars) / 2.0);
             pose.translate(-ox, -oy, 0);
         }
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShaderTexture(0, texture);
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        CompatRender.setShaderTexture(0, texture);
+        CompatRender.setTextureShader();
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alpha);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
         builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
         builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
         builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
         builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
         drawSafe(builder);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -1759,652 +1526,39 @@ public final class WorldHologram {
         var matrix = pose.last().pose();
         float hw = (float) (w / 2);
         float hh = (float) (h / 2);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShaderTexture(0, texture);
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        CompatRender.setShaderTexture(0, texture);
+        CompatRender.setTextureShader();
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alpha);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
         builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
         builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
         builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
         builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
         drawSafe(builder);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
-    /** 悬停高亮框：围绕元素命中区域画半透明边框（世界单位）。 */
-    private static void renderHoverOutline(PoseStack pose, RenderNode node, double fade, boolean box,
-                                           java.util.Map<String, Object> pageVars) {
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double[] sz = textAutoSizeSafe(node, pageVars); // 文本 wrap 折行自适应
-        double w = sz[0];
-        double h = sz[1];
-        // 锁定元素悬停框琥珀化（hologram.locked = true）：与选中框/角标/包围盒的琥珀语义一致；
-        // 元素级 hoverColor（#RRGGBB/#AARRGGBB）优先于全局悬停色
-        boolean locked = Boolean.parseBoolean(String.valueOf(holo.get("locked")));
-        int override = UiStyle.color(holo.get("hoverColor"), 0);
-        int color = box ? (locked ? 0xFFB84D : (override != 0 ? override : currentHoverColor))
-                : (locked ? 0x66B84D66 : 0x663A4A66); // 面板元素亮色框；文本元素浅色底
-        float r = ((color >> 16) & 0xFF) / 255.0F;
-        float g = ((color >> 8) & 0xFF) / 255.0F;
-        float b = (color & 0xFF) / 255.0F;
-        float a = ((color >>> 24) & 0xFF) / 255.0F * (float) fade;
-        if (a <= 0) {
-            return;
-        }
-        pose.pushPose();
-        pose.translate(x, y, z);
-        applyBillboardRotation(pose, holo, null, pageVars);
-        var matrix = pose.last().pose();
-        float hw = (float) (w / 2);
-        float hh = (float) (h / 2);
-        float t = box ? 0.02F : hh; // 文本：整块底色；面板：细边框
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        if (box) {
-            // 上/下/左/右四条边框
-            edge(builder, matrix, -hw, -hh, hw, -hh + t, r, g, b, a);
-            edge(builder, matrix, -hw, hh - t, hw, hh, r, g, b, a);
-            edge(builder, matrix, -hw, -hh, -hw + t, hh, r, g, b, a);
-            edge(builder, matrix, hw - t, -hh, hw, hh, r, g, b, a);
-        } else {
-            edge(builder, matrix, -hw, -hh, hw, hh, r, g, b, a);
-        }
-        drawSafe(builder);
-        applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
 
-    /** 元素发光（hologram.glow）：多层同心半透明方辉（内容之前绘制，drag = 父链偏移并入）。 */
-    private static void renderGlow(PoseStack pose, RenderNode node, double fade,
-                                   java.util.Map<String, Object> pageVars, double[] drag, Object glowProp) {
-        int color = 0x66FFD700;
-        double sizeMul = 1.0;
-        if (glowProp instanceof Map<?, ?> m) {
-            color = UiStyle.color(m.get("color"), color);
-            sizeMul = UiRenderer.num(m.get("size"), 1.0);
-        } else {
-            color = UiStyle.color(glowProp, color);
-        }
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double w = holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, pageVars);
-        double h = holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, pageVars);
-        float r = ((color >> 16) & 0xFF) / 255.0F;
-        float g = ((color >> 8) & 0xFF) / 255.0F;
-        float b = (color & 0xFF) / 255.0F;
-        float baseA = ((color >>> 24) & 0xFF) / 255.0F;
-        pose.pushPose();
-        pose.translate(x + (drag == null ? 0 : drag[0]),
-                y + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        var matrix = pose.last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        // 四层同心辉光：1.25x / 1.6x / 2.1x / 2.8x，透明度递减
-        float[] alphas = {0.30F, 0.16F, 0.08F, 0.04F};
-        float[] scales = {1.25F, 1.6F, 2.1F, 2.8F};
-        for (int i = 0; i < scales.length; i++) {
-            float layerA = baseA * alphas[i] * (float) fade * (float) sizeMul;
-            if (layerA <= 0.003F) {
-                continue;
-            }
-            float hw = (float) (w / 2 * scales[i]);
-            float hh = (float) (h / 2 * scales[i]);
-            quadTris(builder, matrix, -hw, -hh, hw, hh, r, g, b, layerA);
-        }
-        drawSafe(builder);
-        applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
 
-    /** 元素倒影（hologram.shadow）：向下偏移的多层半透明暗影（内容之前绘制，drag = 父链偏移并入）。 */
-    private static void renderShadow(PoseStack pose, RenderNode node, double fade,
-                                     java.util.Map<String, Object> pageVars, double[] drag, Object shadowProp) {
-        int color = 0x33000000;
-        double offsetMul = 1.0;
-        double sizeMul = 1.0;
-        if (shadowProp instanceof Map<?, ?> m) {
-            color = UiStyle.color(m.get("color"), color);
-            offsetMul = UiRenderer.num(m.get("offset"), 1.0);
-            sizeMul = UiRenderer.num(m.get("size"), 1.0);
-        } else {
-            color = UiStyle.color(shadowProp, color);
-        }
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double w = holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, pageVars);
-        double h = holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, pageVars);
-        float r = ((color >> 16) & 0xFF) / 255.0F;
-        float g = ((color >> 8) & 0xFF) / 255.0F;
-        float b = (color & 0xFF) / 255.0F;
-        float baseA = ((color >>> 24) & 0xFF) / 255.0F;
-        pose.pushPose();
-        pose.translate(x + (drag == null ? 0 : drag[0]),
-                y + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        var matrix = pose.last().pose();
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        // 三层向下偏移阴影：偏移 0.08/0.16/0.26，透明度递减，尺寸微扩
-        float[] alphas = {0.30F, 0.14F, 0.06F};
-        float[] offsets = {0.08F, 0.16F, 0.26F};
-        float[] scales = {1.0F, 1.08F, 1.18F};
-        for (int i = 0; i < offsets.length; i++) {
-            float layerA = baseA * alphas[i] * (float) fade;
-            if (layerA <= 0.003F) {
-                continue;
-            }
-            float dy = -offsets[i] * (float) offsetMul * (float) (h > 0 ? h : 1.0);
-            float hw = (float) (w / 2 * scales[i] * sizeMul);
-            float hh = (float) (h / 2 * scales[i] * sizeMul);
-            quadTris(builder, matrix, -hw, -hh + dy, hw, hh + dy, r, g, b, layerA);
-        }
-        drawSafe(builder);
-        applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
 
-    /** 元素角标（hologram.badge）：右上角 billboard 红点/数量角标（drag = 父链偏移并入）。 */
-    private static void renderBadge(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade,
-                                    java.util.Map<String, Object> pageVars, double[] drag, Object badgeProp) {
-        boolean show = true;
-        int count = 0;
-        int color = 0xFFE53935;
-        if (badgeProp instanceof Boolean b) {
-            show = b;
-        } else if (badgeProp instanceof Number n) {
-            count = n.intValue();
-        } else if (badgeProp instanceof Map<?, ?> m) {
-            Object c = m.get("count");
-            if (c == null) {
-                c = m.get("value");
-            }
-            if (c != null) {
-                count = (int) UiRenderer.num(c, 0);
-            }
-            color = UiStyle.color(m.get("color"), color);
-        } else {
-            show = Boolean.parseBoolean(String.valueOf(badgeProp));
-        }
-        if (!show) {
-            return;
-        }
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double w = holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, pageVars);
-        double h = holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, pageVars);
-        double rb = Math.max(0.06, Math.min(h * 0.4, 0.35));
-        Minecraft mc = Minecraft.getInstance();
-        pose.pushPose();
-        pose.translate(x + w / 2 - rb + (drag == null ? 0 : drag[0]),
-                y + h / 2 - rb + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        float cr = ((color >> 16) & 0xFF) / 255.0F;
-        float cg = ((color >> 8) & 0xFF) / 255.0F;
-        float cb = (color & 0xFF) / 255.0F;
-        float ca = ((color >>> 24) & 0xFF) / 255.0F * (float) fade;
-        if (ca > 0) {
-            // 圆点：12 段扇形（TRIANGLES）
-            com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-            com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-            com.mojang.blaze3d.systems.RenderSystem.setShader(
-                    net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-            var matrix = pose.last().pose();
-            var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-            int seg = 12;
-            float prevX = (float) rb;
-            float prevY = 0;
-            for (int i = 1; i <= seg; i++) {
-                double ang = Math.toRadians(360.0 * i / seg);
-                float nx = (float) (Math.cos(ang) * rb);
-                float ny = (float) (Math.sin(ang) * rb);
-                builder.addVertex(matrix, 0, 0, 0).setColor(cr, cg, cb, ca);
-                builder.addVertex(matrix, prevX, prevY, 0).setColor(cr, cg, cb, ca);
-                builder.addVertex(matrix, nx, ny, 0).setColor(cr, cg, cb, ca);
-                prevX = nx;
-                prevY = ny;
-            }
-            drawSafe(builder);
-        applyContentDepth();
-            com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        }
-        // 数量文字（>0 显示；99+ 截断）
-        if (count > 0) {
-            String label = count > 99 ? "99+" : String.valueOf(count);
-            float ts = (float) (rb / 4.0);
-            pose.scale(ts, -ts, ts);
-            float tw = mc.font.width(label);
-            mc.font.drawInBatch(label, -tw / 2, -4.0F,
-                    withAlpha(0xFFFFFFFF, (float) fade), true,
-                    pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
-                    0, 0xF000F0);
-        }
-        pose.popPose();
-    }
 
-    /** 元素状态图标（hologram.statusIcon）：左上角 billboard 文字图标（drag = 父链偏移并入）。 */
-    private static void renderStatusIcon(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade,
-                                         java.util.Map<String, Object> pageVars, double[] drag, Object statusProp) {
-        String icon = String.valueOf(statusProp);
-        int color = 0xFFE0E0E0;
-        if (statusProp instanceof Map<?, ?> m) {
-            Object i = m.get("icon");
-            if (i == null) {
-                return;
-            }
-            icon = String.valueOf(i);
-            color = UiStyle.color(m.get("color"), color);
-        }
-        icon = UiRenderer.interpolate(node, icon, pageVars);
-        if (icon == null || icon.isBlank()) {
-            return;
-        }
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double w = holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, pageVars);
-        double h = holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, pageVars);
-        double rb = Math.max(0.06, Math.min(h * 0.4, 0.35));
-        Minecraft mc = Minecraft.getInstance();
-        pose.pushPose();
-        pose.translate(x - w / 2 + rb + (drag == null ? 0 : drag[0]),
-                y + h / 2 - rb + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        float ts = (float) (rb / 4.0);
-        pose.scale(ts, -ts, ts);
-        float tw = mc.font.width(icon);
-        mc.font.drawInBatch(icon, -tw / 2, -4.0F,
-                withAlpha(color, (float) fade), true,
-                pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
-                0, 0xF000F0);
-        pose.popPose();
-    }
 
-    /** 元素静态边框（hologram.border）：billboard 四边描边，yaw 同步旋转（drag = 父链偏移并入）。 */
-    private static void renderBorderOutline(PoseStack pose, RenderNode node, double fade,
-                                            java.util.Map<String, Object> pageVars, double[] drag,
-                                            int color, float width, boolean flow, int flowColor,
-                                            double borderRadius, long flowSpeedMs,
-                                            boolean dash, float dashLen, boolean doubleLine,
-                                            int flowColor2, float flowSeg, float flowPhase,
-                                            float flowPhase2, float borderAlpha,
-                                            boolean flowGradient, boolean flowReverse,
-                                            int flowSegments, float flowSegGap,
-                                            boolean hovered) {
-        Map<?, ?> holo = holo(node);
-        // hover 加速开关（border.hoverBoost，默认 true；false = 悬停不加速不拉长段）
-        boolean hoverBoost = true;
-        Object bRaw = holo.get("border");
-        if (bRaw instanceof Map<?, ?> bm && bm.get("hoverBoost") != null) {
-            hoverBoost = Boolean.parseBoolean(String.valueOf(bm.get("hoverBoost")));
-        }
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double w = holoNum(holo, "width", "text".equals(node.type()) ? 2.0 : 1.0, pageVars);
-        double h = holoNum(holo, "height", "text".equals(node.type()) ? 0.25 : 1.0, pageVars);
-        float r = ((color >> 16) & 0xFF) / 255.0F;
-        float g = ((color >> 8) & 0xFF) / 255.0F;
-        float b = (color & 0xFF) / 255.0F;
-        float a = ((color >>> 24) & 0xFF) / 255.0F * (float) fade * Math.max(0, Math.min(1, borderAlpha));
-        if (a <= 0) {
-            return;
-        }
-        pose.pushPose();
-        pose.translate(x + (drag == null ? 0 : drag[0]),
-                y + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        var matrix = pose.last().pose();
-        float hw = (float) (w / 2);
-        float hh = (float) (h / 2);
-        float t = Math.max(0.005F, width);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        float rr = (float) Math.max(0, Math.min(borderRadius, Math.min(w, h) / 2));        if (rr > 0.01F) {
-            // 圆角描边：四条直边（端点内缩 rr）+ 四角圆弧（半径 rr..rr+t）；虚线/双线仅直线矩形支持
-            edge(builder, matrix, -hw + rr, -hh, hw - rr, -hh + t, r, g, b, a);
-            edge(builder, matrix, -hw + rr, hh - t, hw - rr, hh, r, g, b, a);
-            edge(builder, matrix, -hw, -hh + rr, -hw + t, hh - rr, r, g, b, a);
-            edge(builder, matrix, hw - t, -hh + rr, hw, hh - rr, r, g, b, a);
-            arcSegment(builder, matrix, hw - rr, hh - rr, rr, rr + t, 0, 90, r, g, b, a);
-            arcSegment(builder, matrix, -hw + rr, hh - rr, rr, rr + t, 90, 180, r, g, b, a);
-            arcSegment(builder, matrix, -hw + rr, -hh + rr, rr, rr + t, 180, 270, r, g, b, a);
-            arcSegment(builder, matrix, hw - rr, -hh + rr, rr, rr + t, 270, 360, r, g, b, a);
-        } else if (doubleLine) {
-            // 双线：外线（外扩 t）+ 内线（内收 t），间隙 t
-            float seg = Math.max(0.01F, dashLen);
-            drawOutlineEdges(builder, matrix, -hw - t, -hh - t, hw + t, hh + t, r, g, b, a, t, dash, seg);
-            drawOutlineEdges(builder, matrix, -hw + t, -hh + t, hw - t, hh - t, r, g, b, a, t, dash, seg);
-        } else {
-            float seg = Math.max(0.01F, dashLen);
-            drawOutlineEdges(builder, matrix, -hw, -hh, hw, hh, r, g, b, a, t, dash, seg);
-        }
-        // 流光段（flow: true，垫在描边之上）：亮色段沿周长匀速流动；hover 加速（×0.375，下限 300ms）并提亮；
-        // flowColor2 非 0 = 双色流光（对侧半周长第二段）
-        if (flow) {
-            float fa = Math.min(1.0F, ((flowColor >>> 24) & 0xFF) / 255.0F * (float) fade * (hovered ? 1.6F : 1.0F));
-            long cycleMs = flowSpeedMs > 0 ? flowSpeedMs : 1200; // 可配 flowSpeed（ms/圈，0 = 默认）
-            if (hovered && hoverBoost) {
-                cycleMs = Math.max(300, (long) (cycleMs * 0.375));
-            }
-            float segLenFrac = (hovered && hoverBoost) ? 0.22F : 0.15F;
-            if (flowSeg > 0) {
-                segLenFrac = flowSeg; // 显式段长（周长比例，0.1~0.3）
-            }
-            long clock = com.opendreamcore.client.ClientController.get().worldFlowTime(); // K 暂停时钟
-            float lEdge = (float) Math.max(0, 2 * hw - 2 * rr);
-            float lArc = (float) (Math.PI * rr / 2);
-            float perimeter = (rr > 0.01F) ? (4 * lEdge + 4 * lArc) : (4 * hw + 4 * hh);
-            if (perimeter > 0.01F) {
-                float cycle = (clock % cycleMs) / (float) cycleMs * perimeter;
-                if (flowReverse) {
-                    cycle = perimeter - cycle; // 反向流动
-                }
-                cycle += perimeter * flowPhase; // 相位偏移（Shift+,/. 微调；0~1 周长比例）
-                float segLen = perimeter * segLenFrac;
-                boolean gradient = flowGradient && flowColor2 != 0;
-                // 段数：显式 flowSegments > 0 优先；否则双色对侧 = 2 段；默认 1 段
-                int n = flowSegments > 0 ? flowSegments
-                        : (flowColor2 != 0 && !gradient ? 2 : 1);
-                for (int i = 0; i < n; i++) {
-                    int segColor = (i % 2 == 0) ? flowColor
-                            : (flowColor2 != 0 ? flowColor2 : flowColor);
-                    // 段间距：flowSegGap > 0 = 固定间距（周长比例×i）；否则等距（perimeter/n）；
-                    // 副色段（奇数索引）额外叠加 flowPhase2 独立相位（双色对侧微调）
-                    float offset = flowSegGap > 0
-                            ? perimeter * flowSegGap * i : perimeter * i / n;
-                    if (i % 2 == 1) {
-                        offset += perimeter * flowPhase2;
-                    }
-                    drawFlowSegmentAt(builder, matrix, hw, hh, rr, t,
-                            cycle + offset, segLen, perimeter,
-                            segColor, flowColor2, gradient && n == 1, fa);
-                }
-            }
-        }
-        drawSafe(builder);
-        applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
 
-    /** 单色/渐变流光段绘制（圆角或直线沿周长采样；gradient 时段内从 color 渐变到 color2）。 */
-    private static void drawFlowSegmentAt(com.mojang.blaze3d.vertex.VertexConsumer builder,
-                                          org.joml.Matrix4f matrix,
-                                          float hw, float hh, float rr, float t,
-                                          float cycle, float segLen, float perimeter,
-                                          int color, int color2, boolean gradient, float alpha) {
-        int samples = 28;
-        float prevX = 0, prevY = 0;
-        boolean first = true;
-        for (int i = 0; i <= samples; i++) {
-            float s = cycle + segLen * i / samples;
-            float[] p = rr > 0.01F
-                    ? roundedPerimeterPoint(s % perimeter, hw, hh, rr,
-                    (float) Math.max(0, 2 * hw - 2 * rr), (float) (Math.PI * rr / 2))
-                    : straightPerimeterPoint(s % perimeter, hw, hh);
-            if (first) {
-                prevX = p[0];
-                prevY = p[1];
-                first = false;
-                continue;
-            }
-            float dx = p[0] - prevX;
-            float dy = p[1] - prevY;
-            float len = (float) Math.sqrt(dx * dx + dy * dy);
-            if (len > 0.001F) {
-                float nx = -dy / len * t / 2;
-                float ny = dx / len * t / 2;
-                int c = gradient ? lerpColor(color, color2, i / (float) samples) : color;
-                float fr = ((c >> 16) & 0xFF) / 255.0F;
-                float fg = ((c >> 8) & 0xFF) / 255.0F;
-                float fb = (c & 0xFF) / 255.0F;
-                builder.addVertex(matrix, prevX + nx, prevY + ny, 0).setColor(fr, fg, fb, alpha);
-                builder.addVertex(matrix, p[0] + nx, p[1] + ny, 0).setColor(fr, fg, fb, alpha);
-                builder.addVertex(matrix, p[0] - nx, p[1] - ny, 0).setColor(fr, fg, fb, alpha);
-                builder.addVertex(matrix, prevX - nx, prevY - ny, 0).setColor(fr, fg, fb, alpha);
-            }
-            prevX = p[0];
-            prevY = p[1];
-        }
-    }
 
-    /** 直线矩形周长参数化采样点（s 沿周长：上→右→下→左）。 */
-    private static float[] straightPerimeterPoint(float s, float hw, float hh) {
-        float top = 2 * hw;
-        float right = top + 2 * hh;
-        float bottom = right + 2 * hw;
-        float p = bottom + 2 * hh;
-        s = ((s % p) + p) % p;
-        if (s < top) {
-            return new float[]{-hw + s, -hh};
-        }
-        if (s < right) {
-            return new float[]{hw, -hh + (s - top)};
-        }
-        if (s < bottom) {
-            return new float[]{hw - (s - right), hh};
-        }
-        return new float[]{-hw, hh - (s - bottom)};
-    }
 
-    /** 圆弧带（角度制）：半径 r0..r1 的扇形环段（描边圆角用）。 */
-    private static void arcSegment(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                                   float cx, float cy, float r0, float r1, double a0, double a1,
-                                   float red, float green, float blue, float alpha) {
-        int seg = 6;
-        for (int i = 0; i < seg; i++) {
-            double ang0 = Math.toRadians(a0 + (a1 - a0) * i / seg);
-            double ang1 = Math.toRadians(a0 + (a1 - a0) * (i + 1) / seg);
-            float x0 = cx + (float) Math.cos(ang0) * r0;
-            float y0 = cy + (float) Math.sin(ang0) * r0;
-            float x1 = cx + (float) Math.cos(ang1) * r0;
-            float y1 = cy + (float) Math.sin(ang1) * r0;
-            float x2 = cx + (float) Math.cos(ang1) * r1;
-            float y2 = cy + (float) Math.sin(ang1) * r1;
-            float x3 = cx + (float) Math.cos(ang0) * r1;
-            float y3 = cy + (float) Math.sin(ang0) * r1;
-            builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha);
-            builder.addVertex(matrix, x1, y1, 0).setColor(red, green, blue, alpha);
-            builder.addVertex(matrix, x2, y2, 0).setColor(red, green, blue, alpha);
-            builder.addVertex(matrix, x3, y3, 0).setColor(red, green, blue, alpha);
-        }
-    }
 
-    /** 流光段与一条边的重叠部分 → 轴对齐细四边形。边定义：起坐标 (ex,ey) + 方向 (dx,dy)，范围 [e0, e1]。 */
-    /** 圆角矩形周长参数 s(0..perimeter) → 轮廓点（billboard 局部坐标，起点 = 左边中点，顺时针）。 */
-    private static float[] roundedPerimeterPoint(float s, float hw, float hh, float rr,
-                                                 float lEdge, float lArc) {
-        float segLeft = lEdge;
-        float segArcTL = segLeft + lArc;
-        float segTop = segArcTL + lEdge;
-        float segArcTR = segTop + lArc;
-        float segRight = segArcTR + lEdge;
-        float segArcBR = segRight + lArc;
-        float segBottom = segArcBR + lEdge;
-        float segArcBL = segBottom + lArc;
-        if (s < segLeft) {
-            return new float[]{-hw, hh - rr - s};
-        }
-        if (s < segArcTL) {
-            float a = (float) (Math.PI + (s - segLeft) / lArc * (Math.PI / 2));
-            return new float[]{-hw + rr + rr * (float) Math.cos(a), -hh + rr + rr * (float) Math.sin(a)};
-        }
-        if (s < segTop) {
-            return new float[]{-hw + rr + (s - segArcTL), -hh};
-        }
-        if (s < segArcTR) {
-            float a = (float) (-Math.PI / 2 + (s - segTop) / lArc * (Math.PI / 2));
-            return new float[]{hw - rr + rr * (float) Math.cos(a), -hh + rr + rr * (float) Math.sin(a)};
-        }
-        if (s < segRight) {
-            return new float[]{hw, -hh + rr + (s - segArcTR)};
-        }
-        if (s < segArcBR) {
-            float a = (float) ((s - segRight) / lArc * (Math.PI / 2));
-            return new float[]{hw - rr + rr * (float) Math.cos(a), hh - rr + rr * (float) Math.sin(a)};
-        }
-        if (s < segBottom) {
-            return new float[]{hw - rr - (s - segArcBR), hh};
-        }
-        // 左下圆弧（回到起点）
-        float a = (float) (Math.PI / 2 + (s - segBottom) / lArc * (Math.PI / 2));
-        return new float[]{-hw + rr + rr * (float) Math.cos(a), hh - rr + rr * (float) Math.sin(a)};
-    }
 
-    /** 矩形描边四边绘制（虚线：段长 seg、段隙 seg×0.5；实线：整条）。 */
-    private static void drawOutlineEdges(com.mojang.blaze3d.vertex.VertexConsumer builder,
-                                         org.joml.Matrix4f matrix,
-                                         float x0, float y0, float x1, float y1,
-                                         float r, float g, float b, float a, float t,
-                                         boolean dash, float seg) {
-        if (!dash) {
-            edge(builder, matrix, x0, y0, x1, y0 + t, r, g, b, a);
-            edge(builder, matrix, x0, y1 - t, x1, y1, r, g, b, a);
-            edge(builder, matrix, x0, y0, x0 + t, y1, r, g, b, a);
-            edge(builder, matrix, x1 - t, y0, x1, y1, r, g, b, a);
-            return;
-        }
-        float gap = seg * 0.5F;
-        drawDashedEdge(builder, matrix, x0, y0, x1, y0, t, true, r, g, b, a, seg, gap);
-        drawDashedEdge(builder, matrix, x0, y1 - t, x1, y1 - t, t, true, r, g, b, a, seg, gap);
-        drawDashedEdge(builder, matrix, x0, y0, x0, y1 - t, t, false, r, g, b, a, seg, gap);
-        drawDashedEdge(builder, matrix, x1 - t, y0, x1 - t, y1 - t, t, false, r, g, b, a, seg, gap);
-    }
 
-    /** 单边虚线：沿边分段绘制（段长 seg、段隙 gap）。 */
-    private static void drawDashedEdge(com.mojang.blaze3d.vertex.VertexConsumer builder,
-                                       org.joml.Matrix4f matrix,
-                                       float x0, float y0, float x1, float y1, float t,
-                                       boolean horizontal, float r, float g, float b, float a,
-                                       float seg, float gap) {
-        float len = horizontal ? (x1 - x0) : (y1 - y0);
-        float period = seg + gap;
-        if (period <= 0 || len <= 0) {
-            return;
-        }
-        for (float s = 0; s < len; s += period) {
-            float e = Math.min(s + seg, len);
-            if (horizontal) {
-                edge(builder, matrix, x0 + s, y0, x0 + e, y0 + t, r, g, b, a);
-            } else {
-                edge(builder, matrix, x0, y0 + s, x0 + t, y0 + e, r, g, b, a);
-            }
-        }
-    }
 
-    /** WYSIWYG 编辑模式选中框：亮蓝边框（脉冲透明度），锁定元素琥珀色，任意元素类型通用（drag = 父链偏移并入）。 */
-    private static void renderSelectionOutline(PoseStack pose, RenderNode node, double fade,
-                                               java.util.Map<String, Object> pageVars, double[] drag) {
-        Map<?, ?> holo = holo(node);
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double[] sz = textAutoSizeSafe(node, pageVars); // 文本 wrap 折行自适应
-        double w = sz[0];
-        double h = sz[1];
-        // 脉冲：400ms 周期在 0xCC/0x66 间切换
-        int alpha = ((System.currentTimeMillis() / 400) & 1) == 0 ? 0xCC : 0x66;
-        // 锁定元素选中框琥珀色（与悬停框/角标/包围盒琥珀语义一致）
-        boolean locked = Boolean.parseBoolean(String.valueOf(holo.get("locked")));
-        float r = locked ? 1.0F : 0x42 / 255.0F;
-        float g = locked ? 0.72F : 0xA5 / 255.0F;
-        float b = locked ? 0.2F : 0xF5 / 255.0F;
-        float a = alpha / 255.0F * (float) fade;
-        if (a <= 0) {
-            return;
-        }
-        pose.pushPose();
-        pose.translate(x + (drag == null ? 0 : drag[0]),
-                y + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        applyBillboardRotation(pose, holo, null, pageVars);
-        var matrix = pose.last().pose();
-        float hw = (float) (w / 2);
-        float hh = (float) (h / 2);
-        float t = 0.03F;
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-        // 四边框（比 hover 粗）
-        edge(builder, matrix, -hw, -hh, hw, -hh + t, r, g, b, a);
-        edge(builder, matrix, -hw, hh - t, hw, hh, r, g, b, a);
-        edge(builder, matrix, -hw, -hh, -hw + t, hh, r, g, b, a);
-        edge(builder, matrix, hw - t, -hh, hw, hh, r, g, b, a);
-        drawSafe(builder);
-        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        pose.popPose();
-    }
 
-    private static void edge(com.mojang.blaze3d.vertex.VertexConsumer builder, org.joml.Matrix4f matrix,
-                             float x0, float y0, float x1, float y1,
-                             float r, float g, float b, float a) {
-        builder.addVertex(matrix, x0, y0, 0).setColor(r, g, b, a);
-        builder.addVertex(matrix, x1, y0, 0).setColor(r, g, b, a);
-        builder.addVertex(matrix, x1, y1, 0).setColor(r, g, b, a);
-        builder.addVertex(matrix, x0, y1, 0).setColor(r, g, b, a);
-    }
 
     /** 世界内色块（rect，billboard，可作特效背景/光柱）。 */
     private static void renderRect(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
@@ -2437,26 +1591,22 @@ public final class WorldHologram {
         float rr = (float) Math.max(0, Math.min(radius, Math.min(w, h) / 2));
         // 渐变（rect.gradient：顶 color → 底 gradient，圆角同步渐变）
         int gradient = UiStyle.color(spec.get("gradient"), 0);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+        CompatRender.setColorShader();
         if (gradient != 0) {
-            var round = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             roundedQuadTrisGrad(round, matrix, -hw, -hh, hw, hh, rr, color, gradient, -hh, hh, (float) fade, false, 0, 0.5F);
             drawSafe(round);
         } else if (rr > 0.01F) {
-            var round = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             roundedQuadTris(round, matrix, -hw, -hh, hw, hh, rr, r, g, b, a);
             drawSafe(round);
         } else {
-            var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a);
             builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a);
@@ -2465,7 +1615,7 @@ public final class WorldHologram {
             drawSafe(builder);
         }
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -2520,20 +1670,17 @@ public final class WorldHologram {
         float hh = (float) (h / 2);
         double radius = UiRenderer.num(spec.get("radius"), 0.05);
         float rr = (float) Math.max(0, Math.min(radius, Math.min(w, h) / 2));
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+        CompatRender.setColorShader();
         if (rr > 0.01F) {
-            var round = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             roundedQuadTris(round, matrix, -hw, -hh, hw, hh, rr, r, g, b, a);
             drawSafe(round);
         } else {
-            var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                    .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                             com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
             builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a);
             builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a);
@@ -2542,7 +1689,7 @@ public final class WorldHologram {
             drawSafe(builder);
         }
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         // 标签（billboard 文本：8px 字高 ≈ 0.5h；NORMAL 模式深度测试与背景一致）
         String label = UiRenderer.interpolate(node, UiRenderer.str(spec.get("label")), pageVars);
         if (label != null && !label.isEmpty()) {
@@ -2585,26 +1732,24 @@ public final class WorldHologram {
         var matrix = pose.last().pose();
         float hw = (float) (w / 2);
         float hh = (float) (h / 2);
-        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
-        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        CompatRender.enableBlend();
+        CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
-        com.mojang.blaze3d.systems.RenderSystem.setShaderTexture(0, texture);
-        com.mojang.blaze3d.systems.RenderSystem.setShader(
-                net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
+        CompatRender.setShaderTexture(0, texture);
+        CompatRender.setTextureShader();
         // 距离淡出 + 动画 alpha：全局着色器颜色乘 alpha
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alpha);
-        var builder = com.mojang.blaze3d.vertex.Tesselator.getInstance()
-                .begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
                         com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
         builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
         builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
         builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
         builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
         drawSafe(builder);
-        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
-        com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        CompatRender.disableBlend();
         pose.popPose();
     }
 
@@ -2650,7 +1795,6 @@ public final class WorldHologram {
 
 
     /** 选中框圆角带宽（世界单位），UI 一致性。 */
-    private static final float SELECTION_THICKNESS = 0.03F;
 
 
 
@@ -2663,49 +1807,8 @@ public final class WorldHologram {
 
 
 
-    /** 文本自动尺寸（世界单位）：wrap > 0 时宽度 = wrap，高度 = 折行行数 × 8px × scale；
-     *  未显式指定 width/height 时用——命中区域/选中框/包围盒随内容自适应。 */
-    public static double[] textAutoSize(RenderNode node, java.util.Map<String, Object> pageVars) {
-        Map<?, ?> holo = holo(node);
-        Map<?, ?> spec = UiRenderer.propsMap(node, "text");
-        String content = UiRenderer.interpolate(node, UiRenderer.str(spec.get("content")), pageVars);
-        double scale = holoNum(holo, "scale", 0.025, pageVars);
-        double wrap = holoNum(holo, "wrap", 0, pageVars);
-        double w = holo.get("width") != null ? holoNum(holo, "width", 2.0, pageVars)
-                : (wrap > 0 ? wrap : 2.0);
-        double h = holo.get("height") != null ? holoNum(holo, "height", 0.25, pageVars)
-                : (wrap > 0 && content != null
-                ? Math.max(1, wrappedLineCount(content, wrap, scale)) * 8.0 * Math.max(scale, 1e-6)
-                : 0.25);
-        return new double[]{w, h};
-    }
 
-    /** 折行后的行数（与 renderText 同一 wrapText 算法）。 */
-    private static int wrappedLineCount(String content, double wrap, double scale) {
-        int wrapPx = Math.max(8, (int) (wrap / Math.max(scale, 1e-6)));
-        var mc = Minecraft.getInstance();
-        int lines = 0;
-        for (String rawLine : content.split("\n", -1)) {
-            if (rawLine.isEmpty()) {
-                lines++;
-                continue;
-            }
-            lines += wrapText(mc.font, rawLine, wrapPx).size();
-        }
-        return lines;
-    }
-
-    /** 文本自适应尺寸；非文本节点返回默认命中框（悬停框/选中框共用）。 */
-    private static double[] textAutoSizeSafe(RenderNode node, java.util.Map<String, Object> pageVars) {
-        if ("text".equals(node.type())) {
-            return textAutoSize(node, pageVars);
-        }
-        Map<?, ?> holo = holo(node);
-        return new double[]{holoNum(holo, "width", defaultQuadW(node), pageVars),
-                holoNum(holo, "height", defaultQuadH(node), pageVars)};
-    }
-
-    static Map<?, ?> holo(RenderNode node) {
+    public static Map<?, ?> holo(RenderNode node) {
         return node.props().get("hologram") instanceof Map<?, ?> h ? h : Map.of();
     }
 
@@ -2740,183 +1843,21 @@ public final class WorldHologram {
         return fallback;
     }
 
+    /** 文本自动尺寸（世界单位）——实现移至 world/HoloTextRender（C3 第一波）。 */
+    public static double[] textAutoSize(RenderNode node, java.util.Map<String, Object> pageVars) {
+        return com.opendreamcore.client.world.HoloTextRender.textAutoSize(node, pageVars);
+    }
+
     /** 世界页面变量（表达式求值用；无世界页返回空）。 */
     private static java.util.Map<String, Object> worldVars() {
         var controller = ClientController.get();
         return controller.isWorldOpen() ? controller.worldVariables() : java.util.Map.of();
     }
 
-    /** 世界内实体渲染（entity 组件）：按实体类型创建临时实体（不进世界），全息位置展示。 */
-    private static final Map<String, net.minecraft.world.entity.Entity> ENTITY_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
-    private static void renderEntity(PoseStack pose, MultiBufferSource buffers, RenderNode node, double[] drag, java.util.Map<String, Object> pageVars) {
-        Map<?, ?> spec = UiRenderer.propsMap(node, "entity");
-        String typeId = UiRenderer.str(spec.get("type"));
-        if (typeId == null) {
-            return;
-        }
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) {
-            return;
-        }
-        String nbt = UiRenderer.str(spec.get("nbt"));
-        String cacheKey = node.id() + "@" + (nbt == null ? "" : nbt.hashCode());
-        net.minecraft.world.entity.Entity entity = ENTITY_CACHE.get(cacheKey);
-        if (entity == null || !typeId.equals(
-                net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString())) {
-            var type = UiRenderer.entityType(
-                    net.minecraft.resources.ResourceLocation.tryParse(typeId));
-            if (type == null) {
-                return;
-            }
-            entity = type.create(mc.level);
-            if (entity == null) {
-                return;
-            }
-            // NBT 快照（创建时应用一次：村民职业/盔甲架姿势/狼项圈等任意实体数据）
-            if (nbt != null && !nbt.isBlank()) {
-                try {
-                    entity.load(net.minecraft.nbt.TagParser.parseTag(nbt));
-                } catch (Exception ignored) {
-                    // NBT 解析失败按原样渲染
-                }
-            }
-            ENTITY_CACHE.put(cacheKey, entity);
-        }
-        Map<?, ?> holo = node.props().get("hologram") instanceof Map<?, ?> h ? h : Map.of();
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double scale = holoNum(holo, "scale", 1.0, pageVars);
-        double yaw = holoNum(holo, "yaw", 0, pageVars);
-        // 悬浮呼吸：entity.bob: true → 正弦上下浮动（幅度/速度可调）
-        boolean bob = UiRenderer.bool(spec.get("bob"), false);
-        double bobAmp = UiRenderer.num(spec.get("bobAmplitude"), 0.05);
-        double bobSpeed = UiRenderer.num(spec.get("bobSpeed"), 1.0);
-        double bobOff = bob ? Math.sin(System.currentTimeMillis() / 1000.0 * bobSpeed) * bobAmp : 0;
-
-        entity.setPos(x + (drag == null ? 0 : drag[0]), y + bobOff + (drag == null ? 0 : drag[1]), z + (drag == null ? 0 : drag[2]));
-        // 正交朝向（entity.orthographic: true → 实体完全正对相机,像贴片一样无侧脸,UI 化展示）
-        if (UiRenderer.bool(spec.get("orthographic"), false)) {
-            var euler = mc.gameRenderer.getMainCamera().rotation().getEulerAnglesYXZ(new org.joml.Vector3f());
-            entity.setYRot((float) Math.toDegrees(euler.y) + 180.0F);
-            entity.setXRot((float) -Math.toDegrees(euler.x));
-        }
-        // 头部/视线追踪（entity.lookAtPlayer: true → 实体始终看向玩家眼睛；否则静态 yaw）
-        if (!UiRenderer.bool(spec.get("orthographic"), false)
-                && UiRenderer.bool(spec.get("lookAtPlayer"), false) && mc.player != null) {
-            entity.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES,
-                    mc.player.getEyePosition());
-        } else if (!UiRenderer.bool(spec.get("orthographic"), false)) {
-            entity.setYRot((float) yaw);
-            entity.setXRot(0);
-        }
-        // 自定义名牌（entity.name + nameVisible）与发光轮廓（entity.glowing）
-        String name = UiRenderer.interpolate(node, UiRenderer.str(spec.get("name")), pageVars);
-        if (name != null && !name.isEmpty()) {
-            entity.setCustomName(net.minecraft.network.chat.Component.literal(name));
-            entity.setCustomNameVisible(UiRenderer.bool(spec.get("nameVisible"), false));
-        } else {
-            entity.setCustomName(null);
-        }
-        entity.setGlowingTag(UiRenderer.bool(spec.get("glowing"), false));
-
-        pose.pushPose();
-        pose.scale((float) scale, (float) scale, (float) scale);
-        mc.getEntityRenderDispatcher().render(entity, x + (drag == null ? 0 : drag[0]), y + bobOff + (drag == null ? 0 : drag[1]), z + (drag == null ? 0 : drag[2]),
-                entity.getYRot(), 1.0F, pose, buffers, 0xF000F0);
-        pose.popPose();
-    }
-
-    private static void renderText(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, java.util.Map<String, Object> pageVars, double[] drag) {
-        Map<?, ?> spec = UiRenderer.propsMap(node, "text");
-        String content = UiRenderer.interpolate(node, UiRenderer.str(spec.get("content")), pageVars);
-        if (content == null || content.isEmpty()) {
-            return;
-        }
-        Map<?, ?> holo = node.props().get("hologram") instanceof Map<?, ?> h ? h : Map.of();
-        double x = holoNum(holo, "x", 0, pageVars);
-        double y = holoNum(holo, "y", 0, pageVars);
-        double z = holoNum(holo, "z", 0, pageVars);
-        double scale = holoNum(holo, "scale", 0.025, pageVars);
-        int color = UiStyle.color(spec.get("color"), 0xFFFFFFFF);
-        double[] anim = animOf(node, scope);
-        // 动画缩放 + 距离淡出 + 动画 alpha：透明度乘算
-        scale *= anim == null ? 1 : anim[2];
-        int alpha = (int) (((color >>> 24) & 0xFF) * fade * (anim == null ? 1 : anim[3]));
-        color = (alpha << 24) | (color & 0xFFFFFF);
-
-        Minecraft mc = Minecraft.getInstance();
-        pose.pushPose();
-        pose.translate(x + (anim == null ? 0 : anim[0]) + (drag == null ? 0 : drag[0]),
-                y + (anim == null ? 0 : anim[1]) + (drag == null ? 0 : drag[1]),
-                z + (drag == null ? 0 : drag[2]));
-        // 对齐相机（billboard）+ 固定文本尺寸
-        applyBillboardRotation(pose, holo, anim, pageVars);
-        pose.scale((float) scale, (float) -scale, (float) scale);
-        // 多行 + 自动折行：\n 强制换行；hologram.wrap（世界单位）> 0 时按宽度折行
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        double wrap = holoNum(holo, "wrap", 0, pageVars);
-        for (String rawLine : content.split("\n", -1)) {
-            if (wrap > 0) {
-                int wrapPx = Math.max(8, (int) (wrap / Math.max(scale, 1e-6)));
-                lines.addAll(wrapText(mc.font, rawLine, wrapPx));
-            } else {
-                lines.add(rawLine);
-            }
-        }
-        float lineH = 8.0F;
-        float blockH = lines.size() * lineH;
-        float top = -blockH / 2;
-        // 文本对齐（text.align: left / center / right；默认 center；对齐参考 = 折行宽度或最长行）
-        String align = UiRenderer.str(spec.get("align"));
-        float refW = 0;
-        if (wrap > 0) {
-            refW = Math.max(8, (int) (wrap / Math.max(scale, 1e-6)));
-        } else {
-            for (String line : lines) {
-                refW = Math.max(refW, mc.font.width(line));
-            }
-        }
-        for (int i = 0; i < lines.size(); i++) {
-            float w = mc.font.width(lines.get(i));
-            float lx;
-            if ("left".equals(align)) {
-                lx = -refW / 2;
-            } else if ("right".equals(align)) {
-                lx = refW / 2 - w;
-            } else {
-                lx = -w / 2;
-            }
-            mc.font.drawInBatch(lines.get(i), lx, top + i * lineH, color, false,
-                    pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
-                    0, 0xF000F0);
-        }
-        pose.popPose();
-    }
-
-    /** 世界文本自动折行：按字体像素宽度逐字折行（中文/英文都适用）。 */
-    private static java.util.List<String> wrapText(net.minecraft.client.gui.Font font, String text, int maxPx) {
-        java.util.List<String> out = new java.util.ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        for (int i = 0; i < text.length(); i++) {
-            String ch = String.valueOf(text.charAt(i));
-            String trial = cur + ch;
-            if (font.width(trial) > maxPx && cur.length() > 0) {
-                out.add(cur.toString());
-                cur = new StringBuilder(ch);
-            } else {
-                cur = new StringBuilder(trial);
-            }
-        }
-        if (cur.length() > 0) {
-            out.add(cur.toString());
-        }
-        return out;
-    }
 
     /** 元素动画偏移（世界单位；rotation 为 billboard 平面内角度）：{dx, dy, scale, alpha, rot}。 */
-    private static double[] animOf(RenderNode node, String scope) {
+    public static double[] animOf(RenderNode node, String scope) {
         double[] anim = AnimationEngine.get().offset(node.id(), scope);
         // 拖拽倾斜反馈：拖拽中的元素轻微旋转（4°，"拿起"感；按页键控）
         if (com.opendreamcore.client.ClientController.get().worldElementDragging(scope, node.id())) {
@@ -2951,7 +1892,7 @@ public final class WorldHologram {
         return anim;
     }
 
-    private static double num(Object v, double fallback) {
+    public static double num(Object v, double fallback) {
         if (v instanceof Number n) {
             return n.doubleValue();
         }
@@ -2965,13 +1906,8 @@ public final class WorldHologram {
     }
 
     /** 安全构建并绘制：空 buffer 时跳过绘制（防条件跳过全部顶点时 buildOrThrow 崩溃）。 */
-    private static void drawSafe(com.mojang.blaze3d.vertex.BufferBuilder builder) {
-        try {
-            var mesh = builder.buildOrThrow();
-            com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(mesh);
-        } catch (Exception ignored) {
-            // 空 buffer 或其他渲染异常，安全跳过
-        }
+    public static void drawSafe(CompatBuffer builder) {
+        builder.buildAndDraw();
     }
 
     // ---- 兼容转发（实现移至 WorldPicking / WorldHoloEdit，round 5）----
@@ -3056,11 +1992,11 @@ public final class WorldHologram {
     }
 
     // ---- 拾取辅助转发 ----
-    static double defaultQuadH(RenderNode node) {
+    public static double defaultQuadH(RenderNode node) {
         return WorldPicking.defaultQuadH(node);
     }
 
-    static double defaultQuadW(RenderNode node) {
+    public static double defaultQuadW(RenderNode node) {
         return WorldPicking.defaultQuadW(node);
     }
 

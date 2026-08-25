@@ -39,12 +39,16 @@ public final class LayoutEngine {
         return layout(page, windowWidth, windowHeight, null);
     }
 
+    /** 已计算元素的框架缓存（元素 id → {x,y,width,height}），供交叉引用。 */
+    private static final Map<String, Map<String, Object>> COMPUTED_FRAMES = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * 计算整页布局；positionOverrides 非空时按元素 id 覆盖最终坐标（编辑模式用，
      * 键 → {x, y}，值是覆盖后的绝对坐标）。
      */
     public static List<RenderNode> layout(Page page, double windowWidth, double windowHeight,
                                           Map<String, double[]> positionOverrides) {
+        COMPUTED_FRAMES.clear(); // 每次布局前清空，防止旧数据残留
         return layout(page.elements(), null, null, windowWidth, windowHeight, page.variables(), positionOverrides);
     }
 
@@ -87,11 +91,22 @@ public final class LayoutEngine {
         window.put("width", windowWidth);
         window.put("height", windowHeight);
         env.put("window", window);
+        // 旧版（DreamCore/龙核）表达式简写：w = 窗口宽，h = 窗口高（菜单.yml 全篇使用）
+        env.put("w", windowWidth);
+        env.put("h", windowHeight);
         if (parentFrame != null) {
             env.put("parent", parentFrame);
         }
         env.putAll(variables);
 
+        // 注入已计算元素框架，供交叉引用（如 `背景.width`）
+        for (var entry : COMPUTED_FRAMES.entrySet()) {
+            Map<String, Object> frameCopy = new LinkedHashMap<>();
+            for (var fe : entry.getValue().entrySet()) {
+                frameCopy.put(fe.getKey(), fe.getValue());
+            }
+            env.put(entry.getKey(), frameCopy);
+        }
         // 自身框架先求尺寸（this 引用：先宽后高，先算的有值）
         Map<String, Object> self = new LinkedHashMap<>();
         env.put("this", self);
@@ -132,6 +147,27 @@ public final class LayoutEngine {
         double absX = parentFrame == null ? x : ((Number) parentFrame.get("x")).doubleValue() + x;
         double absY = parentFrame == null ? y : ((Number) parentFrame.get("y")).doubleValue() + y;
 
+        // 元素锚点定位（anchor: center/bottom_left/top_right 等，相对屏幕或父容器）
+        String anchorVal = element.props().get("anchor") != null
+                ? String.valueOf(element.props().get("anchor")).trim().toLowerCase(java.util.Locale.ROOT)
+                : null;
+        if (anchorVal != null && !anchorVal.isEmpty()) {
+            double anchorW = Double.isNaN(width) ? 0 : width;
+            double anchorH = Double.isNaN(height) ? 0 : height;
+            double baseX = parentFrame == null ? 0 : ((Number) parentFrame.get("x")).doubleValue();
+            double baseY = parentFrame == null ? 0 : ((Number) parentFrame.get("y")).doubleValue();
+            switch (anchorVal) {
+                case "center" -> { absX = baseX + (windowWidth - anchorW) / 2 + x; absY = baseY + (windowHeight - anchorH) / 2 + y; }
+                case "top_center" -> { absX = baseX + (windowWidth - anchorW) / 2 + x; absY = baseY + y; }
+                case "bottom_center" -> { absX = baseX + (windowWidth - anchorW) / 2 + x; absY = baseY + windowHeight - anchorH + y; }
+                case "bottom_left" -> { absX = baseX + x; absY = baseY + windowHeight - anchorH + y; }
+                case "bottom_right" -> { absX = baseX + windowWidth - anchorW + x; absY = baseY + windowHeight - anchorH + y; }
+                case "top_right" -> { absX = baseX + windowWidth - anchorW + x; absY = baseY + y; }
+                case "center_left" -> { absX = baseX + x; absY = baseY + (windowHeight - anchorH) / 2 + y; }
+                case "center_right" -> { absX = baseX + windowWidth - anchorW + x; absY = baseY + (windowHeight - anchorH) / 2 + y; }
+            }
+        }
+
         // 编辑模式位置覆盖（元素 id → 绝对坐标）
         if (positionOverrides != null) {
             double[] override = positionOverrides.get(element.id());
@@ -149,6 +185,9 @@ public final class LayoutEngine {
         frame.put("y", absY);
         frame.put("width", width);
         frame.put("height", height);
+
+        // 缓存元素框架，供后续元素交叉引用（如 `背景.width`）
+        COMPUTED_FRAMES.put(element.id(), frame);
 
         // 数据绑定：bind 映射（路径 → 表达式）求值后覆盖元素属性（{{vars}} 之外的显式绑定语法）
         Map<String, Object> nodeProps = applyBindings(element, env);
@@ -526,6 +565,9 @@ public final class LayoutEngine {
         window.put("width", windowWidth);
         window.put("height", windowHeight);
         env.put("window", window);
+        // 旧版简写别名：w = 窗口宽，h = 窗口高
+        env.put("w", windowWidth);
+        env.put("h", windowHeight);
         if (frame != null) {
             env.put("parent", frame);
         }

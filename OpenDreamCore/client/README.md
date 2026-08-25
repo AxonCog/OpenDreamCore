@@ -19,7 +19,7 @@ tasks.register('prepareClientSources', Sync) {
 改完代码直接编译 target 即可（Gradle 会先同步）。
 
 ## 放什么
-> 这块如果你自己进行开发请务必遵循我们规范，请勿打乱规范 -梦幻敬上
+> 这块如果你自己进行开发请务必遵循我们规范，请勿打乱规范
 
 - 双平台行为完全一致的客户端逻辑（渲染、编辑器、页面会话、HUD、世界面板、脚本桥……）
 - 依赖：Minecraft 官方 mojmap（两端 mappings 一致）+ LWJGL + `../common/`

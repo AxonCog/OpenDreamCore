@@ -33,7 +33,7 @@ public final class TtfRenderer {
 
         Page(ResourceLocation id) {
             this.image = new NativeImage(PAGE_SIZE, PAGE_SIZE, true);
-            this.texture = new DynamicTexture(image);
+            this.texture = CompatRender.newDynamicTexture(image);
             this.id = id;
             net.minecraft.client.Minecraft.getInstance().getTextureManager().register(id, texture);
         }
@@ -115,16 +115,16 @@ public final class TtfRenderer {
             int gx = (int) cx;
             int gy = (int) (cy - font.ascent() * scale);
             if (shadow) {
-                g.setColor(0.0F, 0.0F, 0.0F, (float) alpha);
-                g.blit(glyph.page.id, gx + 1, gy + 1, gw, gh,
+                CompatRender.setDrawColor(g, 0.0F, 0.0F, 0.0F, (float) alpha);
+                CompatRender.blit(g, glyph.page.id, gx + 1, gy + 1, gw, gh,
                         glyph.x, glyph.y, glyph.w, glyph.h, PAGE_SIZE, PAGE_SIZE);
             }
-            g.setColor(r, gr, b, (float) alpha);
-            g.blit(glyph.page.id, gx, gy, gw, gh,
+            CompatRender.setDrawColor(g, r, gr, b, (float) alpha);
+            CompatRender.blit(g, glyph.page.id, gx, gy, gw, gh,
                     glyph.x, glyph.y, glyph.w, glyph.h, PAGE_SIZE, PAGE_SIZE);
             cx += glyph.advance * scale;
         }
-        g.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+        CompatRender.setDrawColor(g, 1.0F, 1.0F, 1.0F, 1.0F);
     }
 
     /** 取字形（无则渲染进图集）；空白字符返回 null。 */
@@ -149,7 +149,7 @@ public final class TtfRenderer {
                 int r = (argb >> 16) & 0xFF;
                 int gr = (argb >> 8) & 0xFF;
                 int b = argb & 0xFF;
-                page.image.setPixelRGBA(page.cursorX + px, page.cursorY + py,
+                CompatRender.nativeSetPixel(page.image, page.cursorX + px, page.cursorY + py,
                         (r << 24) | (gr << 16) | (b << 8) | a);
             }
         }
@@ -180,7 +180,7 @@ public final class TtfRenderer {
     }
 
     private Page newPage() {
-        Page page = new Page(ResourceLocation.fromNamespaceAndPath("opendreamcore",
+        Page page = new Page(CompatRender.rl("opendreamcore",
                 "font/" + Integer.toHexString(System.identityHashCode(this)) + "/" + (++pageCounter)));
         pages.add(page);
         return page;

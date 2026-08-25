@@ -40,10 +40,18 @@ tasks.register('collectOutput') {
     doLast {
         def out = file('../../output')
         out.mkdirs()
+        // 只收集当前版本的 fat jar，并清掉 output 里旧版本残留，避免误用陈旧构建
+        def cur = "OpenDreamCore-Plugin-${version}.jar"
         file('build/libs').listFiles()?.each { f ->
-            if (f.name.startsWith('OpenDreamCore-Plugin-') && f.name.endsWith('.jar') && !f.name.startsWith('plugin-')) {
+            if (f.name == cur) {
                 copy { from f; into out }
                 println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith('OpenDreamCore-Plugin-') && f.name != cur && f.name.endsWith('.jar')) {
+                delete f
+                println "removed stale ${f.name}"
             }
         }
     }

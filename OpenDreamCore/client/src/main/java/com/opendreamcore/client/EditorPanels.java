@@ -222,32 +222,57 @@ public final class EditorPanels {
         return w;
     }
 
+    /** 附属模组注册的自定义调色板类型（追加在内置类型后面）。 */
+    private static final java.util.List<String[]> CUSTOM_PALETTE = new java.util.ArrayList<>();
+
+    /** 注册自定义调色板条目（附属模组调用；分组名 + 类型名）。 */
+    public static void registerPalette(String group, String type) {
+        for (String[] g : CUSTOM_PALETTE) {
+            if (g[0].equals(group)) {
+                String[] expanded = new String[g.length + 1];
+                System.arraycopy(g, 0, expanded, 0, g.length);
+                expanded[g.length] = type;
+                CUSTOM_PALETTE.set(CUSTOM_PALETTE.indexOf(g), expanded);
+                return;
+            }
+        }
+        CUSTOM_PALETTE.add(new String[]{group, type});
+    }
+
     // ---- 调色板 ----
 
     private void drawPalette(GuiGraphics g, int mouseX, int mouseY) {
         int x = 0;
         int y = TOOLBAR_H;
         int h = host.height() - TOOLBAR_H;
-        g.fill(x, y, x + PALETTE_W, y + h, 0xE0101418);
+        g.fill(x, y, x + PALETTE_W, y + h, panelBg());
         g.fill(x + PALETTE_W - 1, y, x + PALETTE_W, y + h, 0xFF2A3040);
         g.drawString(host.font(), "§e元素调色板", x + 6, y + 4, 0xFFFFFFFF);
         int rowY = y + HEADER_H + 4;
         for (String[] group : PALETTE) {
-            g.drawString(host.font(), "§7" + group[0], x + 4, rowY, 0xFF9AA3B2);
-            rowY += ROW_H - 2;
-            for (int i = 1; i < group.length; i++) {
-                String type = group[i];
-                boolean selected = type.equals(pendingType);
-                boolean hover = mouseX >= x + 2 && mouseX < x + PALETTE_W - 2
-                        && mouseY >= rowY && mouseY < rowY + ROW_H - 1;
-                int bg = selected ? 0xFF1E3A5E : (hover ? 0xFF1A2030 : 0x00000000);
-                if (bg != 0) g.fill(x + 2, rowY, x + PALETTE_W - 2, rowY + ROW_H - 1, bg);
-                g.drawString(host.font(), (selected ? "§b▶ " : "  ") + type, x + 6, rowY + 2,
-                        selected ? 0xFF4FC3F7 : 0xFFC0C8D0);
-                rowY += ROW_H - 1;
-            }
-            rowY += 2;
+            rowY = drawPaletteGroup(g, group, x, rowY, mouseX, mouseY);
         }
+        for (String[] group : CUSTOM_PALETTE) {
+            rowY = drawPaletteGroup(g, group, x, rowY, mouseX, mouseY);
+        }
+    }
+
+    private int drawPaletteGroup(GuiGraphics g, String[] group, int x, int rowY, int mouseX, int mouseY) {
+        g.drawString(host.font(), "§7" + group[0], x + 4, rowY, 0xFF9AA3B2);
+        rowY += ROW_H - 2;
+        for (int i = 1; i < group.length; i++) {
+            String type = group[i];
+            boolean selected = type.equals(pendingType);
+            boolean hover = mouseX >= x + 2 && mouseX < x + PALETTE_W - 2
+                    && mouseY >= rowY && mouseY < rowY + ROW_H - 1;
+            int bg = selected ? 0xFF1E3A5E : (hover ? 0xFF1A2030 : 0x00000000);
+            if (bg != 0) g.fill(x + 2, rowY, x + PALETTE_W - 2, rowY + ROW_H - 1, bg);
+            g.drawString(host.font(), (selected ? "§b▶ " : "  ") + type, x + 6, rowY + 2,
+                    selected ? 0xFF4FC3F7 : 0xFFC0C8D0);
+            rowY += ROW_H - 1;
+        }
+        rowY += 2;
+        return rowY;
     }
 
     // ---- 元素树 ----

@@ -1,0 +1,163 @@
+// OpenDreamCore target: neoforge-1.21.1
+// common/ 共享源码树由本 target 编译期合并，平台网络/渲染/入口在本 target 内。
+
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.143'
+    id 'com.gradleup.shadow' version '8.3.6'
+}
+
+// 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
+def properties = new Properties()
+file('../../gradle.properties').withInputStream { properties.load(it) }
+file('gradle.properties').withInputStream { properties.load(it) }
+properties.each { key, value -> ext.set(key.toString(), value.toString()) }
+
+group = mod_group_id
+version = mod_version
+
+base {
+    archivesName = "${mod_name}-neoforge-1.21.4"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// common/ 是共享源码树（零 MC 依赖，见 common/README.md），编译期合并进本 target。
+// client/ 是双平台共享的客户端源码树（mojmap MC 客户端 API，见 client/README.md），同样编译期合并。
+// 平台相关实现（网络注册、命令、事件钩子）由本 target 的 src 提供。
+sourceSets {
+    main {
+        java.srcDir "$buildDir/generated/common-main"
+        java.srcDir "$buildDir/generated/client-main"
+        resources.srcDir '../../common/src/main/resources'
+    }
+}
+
+// common/ 源码原样复制；antlr4-runtime 的包路径重定向由 shadow 插件在打包阶段完成。
+tasks.register('prepareCommonSources', Sync) {
+    from('../../common/src/main/java')
+    into "$buildDir/generated/common-main"
+}
+// client/ 共享客户端源码原样复制（双平台同一份，改一处两端生效）。
+tasks.register('prepareClientSources', Sync) {
+    from('../../client/src/main/java')
+    into "$buildDir/generated/client-main"
+}
+tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
+tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources' }
+
+// 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+neoForge {
+    version = neoforge_version
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// neoforge 依赖由 moddev 插件自动提供（手动加会触发 variant 冲突）
+dependencies {
+    // common 源码需要 antlr4-runtime（MC 不自带）。
+    // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    // gson MC 运行时自带；snakeyaml NeoForge 不自带，需 shade 进 jar
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    compileOnly 'org.yaml:snakeyaml:2.2'
+    compileOnly 'com.google.code.gson:gson:2.10.1'
+}
+
+// 专用于 shadow 的 configuration：只包含需要 shade 的库（不传递 NeoForge/MC 的任何类）
+configurations {
+    shadeOnly
+}
+dependencies {
+    shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.yaml:snakeyaml:2.2'
+    // 加密材质包支持（AES zip）：PackInstaller 经反射调用，运行时可选强化
+    shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
+}
+
+// ---- shadow 配置 ----
+// 仅把 antlr4-runtime 重定向并打平进主 jar，不再使用 jarJar/jarinjar。
+// 这样 JPMS 不会看到 org.antlr.antlr4.runtime 自动模块名，与 NeoForge 内置的不再冲突。
+shadowJar {
+    archiveClassifier = ''                // 覆盖默认 jar（不带 -all 后缀）
+    configurations = [project.configurations.shadeOnly]
+    // 包路径重定向
+    relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.shaded.snakeyaml'
+    relocate 'net.lingala.zip4j', 'com.opendreamcore.shaded.zip4j'
+    // 合并 META-INF 服务文件
+    mergeServiceFiles()
+}
+
+// 让 build 依赖 shadowJar 而非普通 jar
+tasks.named('jar').configure {
+    enabled = false
+}
+tasks.named('assemble').configure {
+    dependsOn tasks.named('shadowJar')
+}
+
+tasks.named('processResources') {
+    inputs.property 'mod_id', mod_id
+    inputs.property 'mod_version', mod_version
+    inputs.property 'mod_license', mod_license
+    inputs.property 'mod_authors', mod_authors
+    inputs.property 'mod_description', mod_description
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand(
+                'mod_id': mod_id,
+                'mod_version': mod_version,
+                'mod_license': mod_license,
+                'mod_authors': mod_authors,
+                'mod_description': mod_description
+        )
+    }
+}
+
+// build 完自动复制 jar 到 ../../../output
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Copy built jar to ../../../output'
+    doLast {
+        def out = file('../../../output')
+        out.mkdirs()
+        // 只收集当前版本产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
+        file('build/libs').listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && f.name.contains("-${mod_version}-")
+                    && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-javadoc')) {
+                copy { from f; into out }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar") && f.name != "OpenDreamCore-Plugin-${mod_version}.jar") {
+                delete f
+                println "removed stale ${f.name}"
+            }
+        }
+    }
+}
+tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }

@@ -45,13 +45,13 @@ forEachStatement
     | FOR_EACH '(' expression ',' expression ',' expression ',' expression ')' statement
     ;
 
-// while语句（新增）
+// while语句
 whileStatement
     : WHILE '(' expression ')' statement  // while(条件) { ... } 或 当(条件) { ... }
     | WHILE '(' expression ')' blockStatement
     ;
 
-// for语句（新增）
+// for语句
 forStatement
     : FOR '(' forInit? ';' expression? ';' expression? ')' statement
     | FOR '(' forInit? ';' expression? ';' expression? ')' blockStatement
@@ -88,13 +88,13 @@ functionDefinitionStatement
     : FUNCTION IDENTIFIER '(' parameterList? ')' blockStatement  // function name() {} 或 函数 名称() {}
     ;
 
-// 变量声明语句（新增）
+// 变量声明语句
 varDeclaration
     : VAR IDENTIFIER ('=' expression)?      // var x = 10 或 变量 x = 10
     | CONST IDENTIFIER ('=' expression)?    // const PI = 3.14 或 常量 PI = 3.14
     ;
 
-// import语句（新增）
+// import语句
 importStatement
     : IMPORT STRING (AS IDENTIFIER)?                              // import "module" as name
     | IMPORT IDENTIFIER FROM STRING                               // import name from "module"
@@ -102,7 +102,7 @@ importStatement
     | IMPORT JAVA STRING                                          // import java "java.util.*"
     ;
 
-// export语句（新增）
+// export语句
 exportStatement
     : EXPORT IDENTIFIER                                             // export name 或 导出 名称
     | EXPORT '{' exportList '}'                                     // export { a, b, c }
@@ -115,7 +115,7 @@ exportList
     : IDENTIFIER (',' IDENTIFIER)*
     ;
 
-// 类定义语句（新增）
+// 类定义语句
 classStatement
     : CLASS IDENTIFIER (EXTENDS IDENTIFIER)? classBody  // class Name extends Parent { ... }
     ;
@@ -131,7 +131,7 @@ classMember
     | STATIC varDeclaration
     ;
 
-// 命名空间定义语句（新增）
+// 命名空间定义语句
 namespaceStatement
     : NAMESPACE IDENTIFIER namespaceBody  // namespace Name { ... }
     ;
@@ -150,7 +150,7 @@ constDeclaration
     : CONST IDENTIFIER ('=' expression)?
     ;
 
-// try-catch-finally 语句（新增）
+// try-catch-finally 语句
 tryStatement
     : TRY blockStatement catchClause (FINALLY blockStatement)?  // try { ... } catch(e) { ... } finally { ... }
     | TRY blockStatement FINALLY blockStatement                 // try { ... } finally { ... }
@@ -160,12 +160,12 @@ catchClause
     : CATCH '(' IDENTIFIER ')' blockStatement  // catch(错误) { ... } 或 捕获(错误) { ... }
     ;
 
-// throw语句（新增）
+// throw语句
 throwStatement
     : THROW expression  // throw error 或 抛出 错误
     ;
 
-// Java调用语句（新增）
+// Java调用语句
 javaCallStatement
     : JAVA '.' IDENTIFIER ('.' IDENTIFIER)* '(' argumentList? ')'  // Java.String.valueOf(123)
     | JAVA '(' STRING ',' STRING argumentList? ')'                  // Java("java.lang.Math", "max", 1, 2)

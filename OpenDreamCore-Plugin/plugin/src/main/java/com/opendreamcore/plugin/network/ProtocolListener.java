@@ -81,6 +81,7 @@ public final class ProtocolListener implements PluginMessageListener {
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.HUD_SYNC));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.MUSIC));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.CONFIG_PUSH));
+        plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.WINDOW_TITLE));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.UI_ANIMATION));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.WORLD_TAB));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.WORLD_ELEMENT_STATE));
@@ -282,6 +283,35 @@ public final class ProtocolListener implements PluginMessageListener {
             send(player, Protocol.GLOBAL_STATE, buildGlobalState(player));
             // 客户端配置下发（config.yml client 段 → odc.properties）
             send(player, Protocol.CONFIG_PUSH, buildClientConfig());
+            // 客户端窗口标题（config.yml client-title 段，进服即生效，无需指令；未配置则不下发）
+            var titlePush = buildClientTitlePush();
+            if (titlePush != null) {
+                send(player, Protocol.WINDOW_TITLE, titlePush);
+                plugin.getLogger().info("已向 " + player.getName() + " 下发窗口标题（"
+                        + (titlePush.text() == null ? 0 : titlePush.text().length()) + " 字，typewriter="
+                        + titlePush.typewriter() + "）");
+            } else {
+                plugin.getLogger().info("窗口标题未下发：client-title 未启用或文本为空");
+            }
+
+            // 页面下发：push-pages=all 时全量推送所有页面；否则只推已开会话的
+            // 会话可能在通道注册前开启（join 自动开服），首发 PAGE_SYNC 会被 Paper 丢弃；
+            // ready 时通道已注册，此处补发保证可达
+            java.util.Set<String> toPush = new java.util.LinkedHashSet<>(handler.openPageIds(player));
+            if (plugin.getConfig().getString("push-pages", "all").equalsIgnoreCase("all")) {
+                for (com.opendreamcore.page.Page pg : pages.allPages()) {
+                    if (pg.id() != null) {
+                        toPush.add(pg.id());
+                    }
+                }
+            }
+            for (String pid : toPush) {
+                // 必须用编译后的 YAML：原文含 DreamLang 函数块，客户端解析会丢元素
+                String yaml = pages.compiledYaml(pid, player);
+                if (yaml != null) {
+                    send(player, Protocol.PAGE_SYNC, buildPageSync(player, pid, yaml));
+                }
+            }
         } catch (Exception e) {
             plugin.getLogger().warning("ready 解析失败 (" + player.getName() + "): " + e);
         }
@@ -298,6 +328,37 @@ public final class ProtocolListener implements PluginMessageListener {
             }
         }
         return new com.opendreamcore.protocol.message.ConfigPush(sb.toString());
+    }
+
+    /**
+     * 读取 config.yml 的 client-title 段为窗口标题下发消息。
+     * enabled=false 或未配置（text/titles 全空）返回 null 不下发。
+     */
+    com.opendreamcore.protocol.message.WindowTitlePush buildClientTitlePush() {
+        var section = plugin.getConfig().getConfigurationSection("client-title");
+        if (section == null || !section.getBoolean("enabled", false)) {
+            return null;
+        }
+        String text = section.getString("text", "");
+        java.util.List<String> titles = section.getStringList("titles");
+        boolean typewriter = section.getBoolean("typewriter", false);
+        boolean random = section.getBoolean("random", false);
+        int speed = section.getInt("speed", 120);
+        int interval = section.getInt("interval", 3000);
+        int holdMs = section.contains("hold-ms") ? section.getInt("hold-ms") : -1;
+        boolean loop = section.getBoolean("loop", true);
+        if ((titles == null || titles.isEmpty()) && (text == null || text.isEmpty())) {
+            return null;
+        }
+        return com.opendreamcore.protocol.message.WindowTitlePush.config(
+                text, titles, typewriter, random, speed, interval, holdMs, loop);
+    }
+
+    /** 下发窗口标题指令（SET/RESET，TitleAPI 与配置下发共用）。 */
+    public void sendWindowTitle(Player player, com.opendreamcore.protocol.message.WindowTitlePush push) {
+        if (isReady(player)) {
+            send(player, Protocol.WINDOW_TITLE, push);
+        }
     }
 
     /** 广播全部页面给所有已握手玩家（文件热重载后同步新内容）。 */
@@ -380,8 +441,22 @@ public final class ProtocolListener implements PluginMessageListener {
         player.sendPluginMessage(plugin, channel(path), buf.toByteArray());
     }
 
-    /** 下发页面：先同步 YAML（会话 key 存在时加密）+ 布局覆盖，再发打开指令（会话由服务端分配）。返回会话 id。 */
+    /** 同一连接内已执行过 open 脚本的页面（player → pageId 集合），防 join 自动开 + 触发器双开。 */
+    private final java.util.Map<java.util.UUID, java.util.Set<String>> openedPages = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 下发页面：先同步 YAML（会话 key 存在时加密）+ 布局覆盖，再发打开指令（会话由服务端分配）。返回会话 id。
+     *  force=true 时忽略同页去重（/odc open 显式指定时允许重开）。 */
     public String openPage(Player player, String pageId, String yaml) {
+        return openPage(player, pageId, yaml, false);
+    }
+
+    public String openPage(Player player, String pageId, String yaml, boolean force) {
+        var key = player.getUniqueId();
+        var set = openedPages.computeIfAbsent(key, k -> java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>()));
+        if (!force && !set.add(pageId)) {
+            // 本连接已开过同一页：跳过重复脚本/PAGE_CONTROL，只回现有会话
+            return handler.sessionOf(player);
+        }
         send(player, Protocol.PAGE_SYNC, buildPageSync(player, pageId, yaml));
         var layout = editors.loadLayout(pageId);
         if (!layout.isEmpty()) {
@@ -594,6 +669,7 @@ public final class ProtocolListener implements PluginMessageListener {
     public void removeSession(Player player) {
         readyPlayers.remove(player);
         clientVersions.remove(player);
+        openedPages.remove(player.getUniqueId());
     }
 
     /** 会话/事件/脚本统计（/odc stats）。 */

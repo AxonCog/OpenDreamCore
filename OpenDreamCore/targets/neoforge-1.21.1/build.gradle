@@ -76,10 +76,9 @@ neoForge {
 // neoforge 依赖由 moddev 插件自动提供（手动加会触发 variant 冲突）
 dependencies {
     // common 源码需要 antlr4-runtime（MC 不自带）。
-    // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
+    // 编译期可见；运行时由 shadow 打平重定向后打进主 jar（见下方 shadeOnly）。
     implementation 'org.antlr:antlr4-runtime:4.13.1'
-    // gson MC 运行时自带；snakeyaml NeoForge 不自带，需 shade 进 jar
-    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    // snakeyaml/gson：NeoForge 不自带，编译期声明；运行时经 shadow 进主 jar
     compileOnly 'org.yaml:snakeyaml:2.2'
     compileOnly 'com.google.code.gson:gson:2.10.1'
 }
@@ -91,18 +90,23 @@ configurations {
 dependencies {
     shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
     shadeOnly 'org.yaml:snakeyaml:2.2'
+    // 加密材质包支持（AES zip）：PackInstaller 经反射调用，运行时可选强化
+    shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
 }
 
 // ---- shadow 配置 ----
-// 仅把 antlr4-runtime 重定向并打平进主 jar，不再使用 jarJar/jarinjar。
-// 这样 JPMS 不会看到 org.antlr.antlr4.runtime 自动模块名，与 NeoForge 内置的不再冲突。
+// 所有 shade 进 jar 的第三方库都必须 relocate，防止分裂包冲突
 shadowJar {
     archiveClassifier = ''                // 覆盖默认 jar（不带 -all 后缀）
     configurations = [project.configurations.shadeOnly]
-    // 包路径重定向
     relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
-    // 合并 META-INF 服务文件
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.shaded.snakeyaml'
+    relocate 'net.lingala.zip4j', 'com.opendreamcore.shaded.zip4j'
     mergeServiceFiles()
+    // 排除 META-INF 里的旧路径元数据（防止 JPMS 检测到分裂包）
+    exclude 'META-INF/maven/org.yaml/**'
+    exclude 'META-INF/versions/*/org.yaml/**'
+    exclude 'META-INF/versions/*/module-info.class'
 }
 
 // 让 build 依赖 shadowJar 而非普通 jar
@@ -137,10 +141,19 @@ tasks.register('collectOutput') {
     doLast {
         def out = file('../../../output')
         out.mkdirs()
+        // 只收集当前版本产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
         file('build/libs').listFiles()?.each { f ->
-            if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-javadoc')) {
+            if (f.name.endsWith('.jar') && f.name.contains("-${mod_version}-")
+                    && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-javadoc')) {
                 copy { from f; into out }
                 println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar") && f.name != "OpenDreamCore-Plugin-${mod_version}.jar") {
+                delete f
+                println "removed stale ${f.name}"
             }
         }
     }

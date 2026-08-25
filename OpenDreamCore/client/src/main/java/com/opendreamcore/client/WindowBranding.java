@@ -11,12 +11,71 @@ import java.nio.file.Path;
 /**
  * 窗口 Branding：OpenDreamCore/branding/ 下的标题与图标覆盖游戏窗口。
  * - title.txt    → 窗口标题（纯文本，首行有效，自动去空白）
+ * - title.json   → 打字机/轮播标题（优先于 txt；TypewriterSequencer 时序，tick() 驱动）
  * - icon.png     → 窗口图标（任意尺寸，系统缩放）
  * 随 /odc reload 或启动时应用；文件缺失则保持原样。
  */
 public final class WindowBranding {
 
     private WindowBranding() {
+    }
+
+    /** 打字机时序器（title.json 存在时非空）。 */
+    private static volatile com.opendreamcore.branding.TypewriterSequencer sequencer;
+    /** 上次写入的标题（去重，避免每帧重复调用系统 API）。 */
+    private static volatile String lastAppliedTitle;
+    /** 服务端覆盖中的静态标题（SET_STATIC；时序器模式由 sequencer 驱动，此字段为空）。 */
+    private static volatile String serverTitle;
+    /** 服务端覆盖中（DreamCore serverTitleOverride 语义）：本地 title.txt/title.json 序列静默。 */
+    private static volatile boolean serverOverride;
+
+    /**
+     * 服务端下发完整标题配置（window_title SET_CONFIG）：
+     * 覆盖本地 branding 并立即驱动时序器；缓存由调用方负责。
+     */
+    public static void applyServerConfig(com.opendreamcore.branding.TitleConfig cfg) {
+        if (cfg == null || cfg.sequence().isEmpty()) {
+            return;
+        }
+        sequencer = new com.opendreamcore.branding.TypewriterSequencer(cfg);
+        lastAppliedTitle = null;
+        serverTitle = null;
+        serverOverride = true;
+        tick();
+    }
+
+    /** 服务端单文本直设（window_title SET_STATIC）。 */
+    public static void applyServerStatic(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        sequencer = null;
+        serverTitle = text;
+        serverOverride = true;
+        setWindowTitleIfChanged(text);
+    }
+
+    /** 解除服务端覆盖（window_title RESET / 断线），还原本地 branding 序列。 */
+    public static void resetToLocal() {
+        serverOverride = false;
+        serverTitle = null;
+        reload();
+    }
+
+    /** 当前是否处于服务端覆盖（供缓存层判断与测试）。 */
+    public static boolean isServerOverride() {
+        return serverOverride;
+    }
+
+    private static void setWindowTitleIfChanged(String text) {
+        if (!text.equals(lastAppliedTitle)) {
+            try {
+                Minecraft.getInstance().getWindow().setTitle(text);
+                lastAppliedTitle = text;
+            } catch (Throwable ignored) {
+                // 窗口未就绪/无 GL 上下文：保持原值，下帧 tick 重试
+            }
+        }
     }
 
     public static Path brandingDir() {
@@ -45,6 +104,7 @@ public final class WindowBranding {
         }
         boolean didTitle = applyTitle(dir);
         boolean didIcon = applyIcon(dir);
+        HudLogo.load(); // logo_hud.png + logo.json（缺失静默）
         if (didTitle || didIcon) {
             applied = true;
         }
@@ -52,6 +112,8 @@ public final class WindowBranding {
 
     /** 强制重刷（/odc reload 后）：无论单次标记均重试，成功后再次进入单次语义。 */
     public static void reload() {
+        sequencer = null; // title.json 重新加载（打字机从头开始）
+        lastAppliedTitle = null;
         var mc = Minecraft.getInstance();
         if (mc == null || mc.gameDirectory == null || mc.getWindow() == null) {
             return;
@@ -65,6 +127,7 @@ public final class WindowBranding {
         }
         boolean didTitle = applyTitle(dir);
         boolean didIcon = applyIcon(dir);
+        HudLogo.load(); // logo_hud.png + logo.json（缺失静默）
         if (didTitle || didIcon) {
             applied = true;
         }
@@ -88,6 +151,17 @@ public final class WindowBranding {
     }
 
     private static boolean applyTitle(Path dir) {
+        // 优先 title.json（打字机/轮播）；缺失或损坏回退 title.txt 静态
+        Path json = dir.resolve("title.json");
+        if (Files.isRegularFile(json)) {
+            com.opendreamcore.branding.TitleConfig cfg = com.opendreamcore.branding.TitleConfig.load(json);
+            if (cfg != null && !cfg.sequence().isEmpty()) {
+                sequencer = new com.opendreamcore.branding.TypewriterSequencer(cfg);
+                lastAppliedTitle = null;
+                tick();
+                return true;
+            }
+        }
         Path title = dir.resolve("title.txt");
         if (!Files.isRegularFile(title)) {
             return false;
@@ -102,6 +176,45 @@ public final class WindowBranding {
             // 读取失败保持原标题
         }
         return false;
+    }
+
+    /** 打字机帧推进：标题变化才写系统 API。由各平台客户端 tick 事件驱动。 */
+    public static void tick() {
+        com.opendreamcore.client.controller.TitlePushService.consumeStartupPending();
+        try {
+            ClientController.get().ensureManagedPacks(null);
+        } catch (Throwable ignored) {
+        }
+        if (serverOverride) {
+            // 服务端接管期间本地序列静默；
+            // 无序列 = 静态标题，上次写入失败（窗口未就绪）此处自愈重试；
+            // 有序列 = 服务端下发的打字机配置，必须在这里推进，否则永远停在原标题
+            var sseq = sequencer;
+            // 每 tick 无条件重写：原版/其他 mod 会随时覆盖窗口标题，去重会导致覆盖后不再恢复
+            lastAppliedTitle = null;
+            if (sseq == null) {
+                setWindowTitleIfChanged(serverTitle);
+            } else {
+                try {
+                    setWindowTitleIfChanged(sseq.tick(System.currentTimeMillis()));
+                } catch (Throwable ignored) {
+                }
+            }
+            return;
+        }
+        var seq = sequencer;
+        if (seq == null) {
+            return;
+        }
+        try {
+            String s = seq.tick(System.currentTimeMillis());
+            setWindowTitleIfChanged(s);
+            if (seq.isFinished(System.currentTimeMillis())) {
+                sequencer = null; // 定格完毕，停止 tick 开销
+            }
+        } catch (Throwable ignored) {
+            sequencer = null;
+        }
     }
 
     private static boolean applyIcon(Path dir) {
@@ -125,7 +238,7 @@ public final class WindowBranding {
             }
             // 1.21 起 Window.setIcon 走资源包签名，直接 GLFW 设置（跨版本稳定）
             long handle = Minecraft.getInstance().getWindow().getWindow();
-            int[] rgba = image.getPixelsRGBA();
+            int[] rgba = CompatRender.nativeGetPixels(image);
             java.nio.ByteBuffer pixels = java.nio.ByteBuffer.allocateDirect(rgba.length * 4)
                     .order(java.nio.ByteOrder.nativeOrder());
             for (int c : rgba) {

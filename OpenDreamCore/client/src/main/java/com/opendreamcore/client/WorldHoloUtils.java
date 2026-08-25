@@ -32,7 +32,7 @@ final class WorldHoloUtils {
     }
 
     /** 矩形边（四顶点 quad，z=0，单色）。 */
-    static void edge(VertexConsumer builder, Matrix4f matrix,
+    static void edge(CompatBuffer builder, Matrix4f matrix,
                      float x0, float y0, float x1, float y1,
                      float r, float g, float b, float a) {
         builder.addVertex(matrix, x0, y0, 0).setColor(r, g, b, a);
@@ -42,13 +42,8 @@ final class WorldHoloUtils {
     }
 
     /** 安全构建并绘制：空 buffer 时跳过绘制（防条件跳过全部顶点时 buildOrThrow 崩溃）。 */
-    static void drawSafe(BufferBuilder builder) {
-        try {
-            var mesh = builder.buildOrThrow();
-            com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(mesh);
-        } catch (Exception ignored) {
-            // 空 buffer 或其他渲染异常，安全跳过
-        }
+    static void drawSafe(CompatBuffer builder) {
+        builder.buildAndDraw();
     }
 
     /** 页面锚点（options.world.offsetX/Y/Z，默认玩家前方 3 格、eye +0.7）。 */

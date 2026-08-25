@@ -1,0 +1,164 @@
+// OpenDreamCore target: forge-1.20.1
+// MC 1.20.1 + Forge 47.x | Java 17
+// 平台壳：@Mod 入口 + Mixin 拦截 custom payload（收）+ ServerboundCustomPayloadPacket 直发（发）
+buildscript {
+    repositories {
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+        maven { url = 'https://maven.minecraftforge.net' }
+    }
+    dependencies {
+        classpath 'org.spongepowered:mixingradle:0.7.+'
+    }
+}
+
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.+'
+    id 'java'
+    id 'com.gradleup.shadow' version '8.3.6'
+}
+apply plugin: 'org.spongepowered.mixin'
+
+def properties = new Properties()
+file('../../gradle.properties').withInputStream { properties.load(it) }
+file('gradle.properties').withInputStream { properties.load(it) }
+properties.each { key, value -> ext.set(key.toString(), value.toString()) }
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = "${mod_name}-forge-1.20.1"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+        }
+    }
+}
+
+mixin {
+    add sourceSets.main, 'opendreamcore.refmap.json'
+    config 'opendreamcore.mixins.json'
+}
+
+// common/ 是共享源码树（零 MC 依赖），编译期合并进本 target。
+// client/ 是双平台共享的客户端源码树（mojmap MC 客户端 API），同样编译期合并。
+sourceSets {
+    main {
+        java.srcDir "$buildDir/generated/common-main"
+        java.srcDir "$buildDir/generated/client-main"
+        resources.srcDir '../../common/src/main/resources'
+    }
+}
+
+tasks.register('prepareCommonSources', Sync) {
+    from('../../common/src/main/java')
+    into "$buildDir/generated/common-main"
+}
+tasks.register('prepareClientSources', Sync) {
+    from('../../client/src/main/java')
+    into "$buildDir/generated/client-main"
+}
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources' }
+
+// 中文源码/注释：javac 显式 UTF-8
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xmaxerrs', '10000', '-Xmaxwarns', '10000']
+}
+
+repositories {
+    maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:1.20.1-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // common 源码的运行时依赖：antlr4-runtime 需随 mod 打包（shadow relocate）；
+    // gson/snakeyaml MC 运行时自带，编译期声明即可。
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    compileOnly 'org.yaml:snakeyaml:2.2'
+    compileOnly 'com.google.code.gson:gson:2.10.1'
+}
+
+configurations {
+    shadeOnly
+}
+dependencies {
+    shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.yaml:snakeyaml:2.2'
+    // 加密材质包支持（AES zip）：PackInstaller 反射调用
+    shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
+}
+
+shadowJar {
+    archiveClassifier = 'shadow'
+    configurations = [project.configurations.shadeOnly]
+    relocate 'org.antlr.v4.runtime', 'com.opendreamcore.shaded.antlr.v4.runtime'
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.shaded.snakeyaml'
+    relocate 'net.lingala.zip4j', 'com.opendreamcore.shaded.zip4j'
+    mergeServiceFiles()
+    manifest {
+        attributes([
+                'MixinConfigs': 'opendreamcore.mixins.json'
+        ])
+    }
+}
+tasks.named('jar').configure { enabled = false }
+// 原版 jar 已禁用：默认的 reobfJar 无输入可映射，存在则关闭；改为重映射 shadow 产物
+tasks.matching { it.name == 'reobfJar' }.configureEach { enabled = false }
+reobf {
+    shadowJar {}
+}
+tasks.named('assemble').configure { dependsOn tasks.named('reobfShadowJar') }
+
+tasks.named('processResources') {
+    inputs.property 'mod_version', mod_version
+    inputs.property 'mod_id', mod_id
+    inputs.property 'mod_name', mod_name
+    inputs.property 'mod_license', mod_license
+    filesMatching('META-INF/mods.toml') {
+        expand(
+                'mod_id': mod_id,
+                'mod_version': mod_version,
+                'mod_name': mod_name,
+                'mod_license': mod_license
+        )
+    }
+}
+
+// build 完自动复制 jar 到 ../../../output（-shadow 重映射产物改名为正式名）
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Copy built jar to ../../../output'
+    doLast {
+        def out = file('../../../output')
+        out.mkdirs()
+        // 只收集当前版本的产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
+        file('build/libs').listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && f.name.contains('-shadow') && f.name.contains("-${mod_version}-")) {
+                def destName = f.name.replace('-shadow', '')
+                copy { from f; into out }
+                def dest = new File(out, destName)
+                dest.delete()
+                new File(out, f.name).renameTo(dest)
+                println "collected ${dest.name} -> ${out.absolutePath}"
+            }
+        }
+        file(out).listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar") && f.name != "OpenDreamCore-Plugin-${mod_version}.jar") {
+                delete f
+                println "removed stale ${f.name}"
+            }
+        }
+    }
+}
+tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }

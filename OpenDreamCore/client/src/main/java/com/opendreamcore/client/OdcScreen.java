@@ -1,5 +1,15 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.elements.BadgeIconDraws;
+import com.opendreamcore.client.elements.ButtonDraws;
+import com.opendreamcore.client.elements.CardDraws;
+import com.opendreamcore.client.elements.ChartDraws;
+import com.opendreamcore.client.elements.ElementTextUtil;
+import com.opendreamcore.client.elements.InputDraws;
+import com.opendreamcore.client.elements.MediaItemDraws;
+import com.opendreamcore.client.elements.TextElements;
+import com.opendreamcore.client.elements.WorldMiscDraws;
+
 import com.opendreamcore.page.Element;
 import com.opendreamcore.page.Layout;
 import com.opendreamcore.page.Page;
@@ -21,7 +31,8 @@ import java.util.ArrayList;
 public final class OdcScreen extends Screen implements UiRenderer.State {
 
     private final Page page;
-    private final List<RenderNode> nodes;
+    /** 布局树。layoutPage 有缓存会返回共享的不可变列表（List.copyOf），此处必须持私有可变副本，refresh 换引用而非就地改。 */
+    private List<RenderNode> nodes;
     private final UiSession session;
 
     // 交互本地状态（服务端裁决前先本地响应）
@@ -107,8 +118,9 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     public OdcScreen(Page page, List<RenderNode> nodes, UiSession session) {
         super(Component.literal(page.title() == null ? "OpenDreamCore" : page.title()));
         this.page = page;
-        this.nodes = nodes;
+        this.nodes = new ArrayList<>(nodes);
         this.session = session;
+        LegacyClientHost.notePageOpened(); // 旧版 取界面存活时间 计时基准
     }
 
     public Page page() {
@@ -124,8 +136,8 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         if (newNodes == this.nodes) {
             return; // 同一引用（布局缓存命中），无需操作
         }
-        this.nodes.clear();
-        this.nodes.addAll(newNodes);
+        // newNodes 可能是 layoutCache 共享的不可变列表，绝不能 clear/addAll 就地改——整体换私有副本
+        this.nodes = new ArrayList<>(newNodes);
     }
 
     @Override
@@ -222,6 +234,10 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         AnimationEngine.get().tick(null, page.options(), page.variables());
         tickFlips();
+        // 旧版（DreamCore）Functions.preRender：每帧预绘制脚本（存在才跑；编辑模式跳过）
+        if ((!editMode || previewMode) && page.functions() != null && page.functions().containsKey("preRender")) {
+            ClientController.get().runLifecycle(page, "preRender");
+        }
         // 生命周期：tick 每秒一次；resize 窗口尺寸变化时重排
         // （编辑模式隔离：不执行 tick 脚本）
         long now = System.currentTimeMillis();
@@ -253,18 +269,18 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         }
         // 屏幕震动：整体偏移
         double[] shake = ClientController.get().shakeOffset();
-        g.pose().pushPose();
+        CompatRender.posePush(g.pose());
         if (shake != null) {
-            g.pose().translate(shake[0], shake[1], 0);
+            CompatRender.poseTranslate(g.pose(), shake[0], shake[1]);
         }
         // 页面可拖动：整体偏移
-        g.pose().translate(offsetX, offsetY, 0);
+        CompatRender.poseTranslate(g.pose(), offsetX, offsetY);
         UiRenderer.draw(g, this.font, nodes, mouseX - (int) offsetX, mouseY - (int) offsetY, this, page.variables(),
                 page.id());
         if (editMode && !previewMode) {
             drawEditOverlay(g, mouseX - (int) offsetX, mouseY - (int) offsetY);
         }
-        g.pose().popPose();
+        CompatRender.posePop(g.pose());
         // 闪屏
         int flash = ClientController.get().flashColor();
         if (flash != 0) {
@@ -479,10 +495,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     }
 
     private static String fmt(double v) {
-        if (v == Math.rint(v) && Math.abs(v) < 1e15) {
-            return String.valueOf((long) v);
-        }
-        return String.valueOf(v);
+        return com.opendreamcore.client.screen.EditSpecs.fmt(v);
     }
 
     /** 属性面板点中哪个属性（值区域，可编辑属性）；没点中返回 null。 */
@@ -517,38 +530,20 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         editBuffer = propValue(node, prop);
     }
 
-    private final java.util.Deque<String> editUndo = new java.util.ArrayDeque<>();
-    private final java.util.Deque<String> editRedo = new java.util.ArrayDeque<>();
+    /** 撤销/重做历史（实现见 screen/EditHistory）。 */
+    private final com.opendreamcore.client.screen.EditHistory editHistory =
+            new com.opendreamcore.client.screen.EditHistory();
 
     private void pushEditUndo() {
-        try {
-            String snap = ClientController.get().elementEditsSnapshot(page.id() == null ? "page" : page.id());
-            editUndo.push(snap);
-            if (editUndo.size() > 64) editUndo.removeLast(); // 上限 64
-            editRedo.clear();
-        } catch (Exception ignored) {}
+        editHistory.push(page.id() == null ? "page" : page.id());
     }
 
     private void undoEdit() {
-        if (editUndo.isEmpty()) return;
-        try {
-            String cur = ClientController.get().elementEditsSnapshot(page.id() == null ? "page" : page.id());
-            editRedo.push(cur);
-            String prev = editUndo.pop();
-            ClientController.get().restoreElementEdits(page.id() == null ? "page" : page.id(), prev);
-            ClientController.get().refreshCurrent();
-        } catch (Exception ignored) {}
+        editHistory.undo(page.id() == null ? "page" : page.id());
     }
 
     private void redoEdit() {
-        if (editRedo.isEmpty()) return;
-        try {
-            String cur = ClientController.get().elementEditsSnapshot(page.id() == null ? "page" : page.id());
-            editUndo.push(cur);
-            String next = editRedo.pop();
-            ClientController.get().restoreElementEdits(page.id() == null ? "page" : page.id(), next);
-            ClientController.get().refreshCurrent();
-        } catch (Exception ignored) {}
+        editHistory.redo(page.id() == null ? "page" : page.id());
     }
 
     /** 属性编辑实时应用（数字解析失败忽略）。 */
@@ -617,42 +612,17 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     }
 
     private static String offsetY(String y) {
-        try {
-            return String.valueOf(Double.parseDouble(y.trim()) + 20);
-        } catch (NumberFormatException e) {
-            return y;
-        }
+        return com.opendreamcore.client.screen.EditSpecs.offsetY(y);
     }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> deepCopy(Map<String, Object> props) {
-        Map<String, Object> out = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : props.entrySet()) {
-            Object value = entry.getValue();
-            if (value instanceof Map<?, ?> m) {
-                out.put(entry.getKey(), deepCopy((Map<String, Object>) m));
-            } else if (value instanceof List<?> list) {
-                List<Object> copy = new java.util.ArrayList<>();
-                for (Object item : list) {
-                    copy.add(item instanceof Map<?, ?> m ? deepCopy((Map<String, Object>) m) : item);
-                }
-                out.put(entry.getKey(), copy);
-            } else {
-                out.put(entry.getKey(), value);
-            }
-        }
-        return out;
+        return com.opendreamcore.client.screen.EditSpecs.deepCopy(props);
     }
 
     /** 复制子元素（id 加 _copy 后缀避免重复）。 */
     private static List<Element> copyChildren(Element element) {
-        List<Element> out = new java.util.ArrayList<>();
-        for (Element child : element.children()) {
-            out.add(new Element(child.id() + "_copy", child.type(), child.layout(),
-                    deepCopy(child.props()), child.visibleWhen(), child.enabledWhen(),
-                    new LinkedHashMap<>(child.actions()), copyChildren(child), child.parent()));
-        }
-        return out;
+        return com.opendreamcore.client.screen.EditSpecs.copyChildren(element);
     }
 
     /** 调整选中元素 z 层级（[ 减 / ] 加）。 */
@@ -668,36 +638,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     }
 
     private void drawEditNode(GuiGraphics g, RenderNode node) {
-        // 不可见元素画暗紫幽灵框（visibleWhen 条件隐藏时编辑器仍能看到结构，直接定位"页面为什么空"）
-        if (!node.visible()) {
-            int x1 = (int) node.x();
-            int y1 = (int) node.y();
-            int x2 = (int) (node.x() + Math.max(node.width(), 0));
-            int y2 = (int) (node.y() + Math.max(node.height(), 0));
-            int gc = node.id().equals(selectedId) ? 0xFFC678FF : 0x60C678FF;
-            g.fill(x1, y1, x2, y1 + 1, gc);
-            g.fill(x1, y2 - 1, x2, y2, gc);
-            g.fill(x1, y1, x1 + 1, y2, gc);
-            g.fill(x1 + 1, y1 + 1, x2 - 1, y2 - 1, 0x18C678FF);
-            g.drawString(this.font, node.id() + " (隐)", x1 + 2, y1 + 2, gc);
-            for (RenderNode child : node.children()) {
-                drawEditNode(g, child);
-            }
-            return;
-        }
-        int x1 = (int) node.x();
-        int y1 = (int) node.y();
-        int x2 = (int) (node.x() + Math.max(node.width(), 0));
-        int y2 = (int) (node.y() + Math.max(node.height(), 0));
-        int color = node.id().equals(selectedId) ? 0xFFFFFF00 : 0x80FFFFFF;
-        g.fill(x1, y1, x2, y1 + 1, color);
-        g.fill(x1, y2 - 1, x2, y2, color);
-        g.fill(x1, y1, x1 + 1, y2, color);
-        g.fill(x2 - 1, y1, x2, y2, color);
-        g.drawString(this.font, node.id(), x1 + 2, y1 + 2, color);
-        for (RenderNode child : node.children()) {
-            drawEditNode(g, child);
-        }
+        com.opendreamcore.client.screen.EditOutline.drawNode(g, node, selectedId, this.font);
     }
 
     public void setEditMode(boolean on) {
@@ -906,82 +847,20 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
 
     /** 键值对便捷构造（保序）。 */
     private static LinkedHashMap<String, Object> spec(Object... kv) {
-        LinkedHashMap<String, Object> m = new LinkedHashMap<>();
-        for (int i = 0; i + 1 < kv.length; i += 2) {
-            m.put(String.valueOf(kv[i]), kv[i + 1]);
-        }
-        return m;
+        return com.opendreamcore.client.screen.EditSpecs.spec(kv);
     }
 
-    /** 新放置元素的默认尺寸（像素）：按类型给可见的初始大小。 */
+    /** 新放置元素的默认尺寸（像素）：按类型给可见的初始大小。实现见 screen/EditSpecs。 */
     static int[] defaultSizeFor(String type) {
-        return switch (type == null ? "" : type) {
-            case "text" -> new int[]{120, 14};
-            case "button" -> new int[]{100, 20};
-            case "image", "gif", "video", "flip_card" -> new int[]{128, 128};
-            case "input", "chat_input", "dropdown", "suggestion", "table" -> new int[]{140, 18};
-            case "area_input" -> new int[]{160, 60};
-            case "slider", "arc_slider", "progress", "gauge" -> new int[]{120, 10};
-            case "toggle", "checkbox" -> new int[]{44, 14};
-            case "item_slot", "chest_slot", "hot_slot", "entity" -> new int[]{18, 18};
-            case "scroll", "container", "embed", "foreach" -> new int[]{140, 90};
-            default -> new int[]{100, 40}; // rect 等
-        };
+        return com.opendreamcore.client.screen.EditSpecs.defaultSizeFor(type);
     }
 
     /**
      * 新放置元素的默认样式（修复"放的组件不显示组件样式"）：
-     * 之前 addElement 给的是空 props，渲染器没有该类型的外观配置可画（按钮无底色/文本无内容）。
-     * 现在按类型给一套开箱可见的默认值，放置后立即可见，再由属性面板微调。
+     * 按类型给一套开箱可见的默认值。实现见 screen/EditSpecs。
      */
     static Map<String, Object> defaultPropsFor(String type) {
-        Map<String, Object> props = new LinkedHashMap<>();
-        switch (type == null ? "" : type) {
-            case "text" -> props.put("text", spec(
-                    "content", "文本内容", "scale", 1, "color", "#FFFFFF"));
-            case "button" -> props.put("button", spec(
-                    "label", "按钮", "background", "#2A2F3A", "hoverColor", "#3A3F4A",
-                    "textColor", "#FFFFFF", "radius", 3));
-            case "rect" -> props.put("rect", spec(
-                    "color", "#7A8BFF", "radius", 4));
-            case "input" -> props.put("input", spec(
-                    "placeholder", "输入…", "background", "#20242C", "textColor", "#FFFFFF",
-                    "border", "#3A4254"));
-            case "chat_input" -> props.put("chat_input", spec(
-                    "placeholder", "聊天输入…", "background", "#20242C", "textColor", "#FFFFFF"));
-            case "area_input" -> props.put("area_input", spec(
-                    "placeholder", "多行输入…", "background", "#20242C", "textColor", "#FFFFFF"));
-            case "suggestion" -> props.put("suggestion", spec(
-                    "background", "#20242C", "textColor", "#FFFFFF"));
-            case "slider" -> props.put("slider", spec(
-                    "min", 0, "max", 100, "value", 50));
-            case "arc_slider" -> props.put("arc_slider", spec(
-                    "min", 0, "max", 100, "value", 50));
-            case "toggle" -> props.put("toggle", spec(
-                    "value", false, "color", "#7A8BFF"));
-            case "checkbox" -> props.put("checkbox", spec(
-                    "label", "选项", "value", false, "color", "#7A8BFF"));
-            case "dropdown" -> props.put("dropdown", spec(
-                    "options", List.of("选项一", "选项二", "选项三"),
-                    "background", "#20242C", "textColor", "#FFFFFF"));
-            case "image" -> props.put("image", spec(
-                    "src", "minecraft:textures/block/stone.png"));
-            case "progress" -> props.put("progress", spec(
-                    "min", 0, "max", 100, "value", 60, "color", "#4CAF50", "background", "#303540"));
-            case "gauge" -> props.put("gauge", spec(
-                    "min", 0, "max", 100, "value", 60, "color", "#4CAF50"));
-            case "flip_card" -> {
-                props.put("flip_card", spec("duration", 300));
-                props.put("front", spec("rect", spec("color", "#3A4254", "radius", 6)));
-                props.put("back", spec("rect", spec("color", "#7A8BFF", "radius", 6)));
-            }
-            case "table" -> props.put("table", spec(
-                    "columns", List.of("列一", "列二"), "textColor", "#FFFFFF"));
-            case "scroll", "container", "embed", "foreach" -> props.put("rect", spec(
-                    "color", "#33FFFFFF", "radius", 2));
-            default -> { /* 其余类型保持空 props（纯容器/逻辑元素） */ }
-        }
-        return props;
+        return com.opendreamcore.client.screen.EditSpecs.defaultPropsFor(type);
     }
 
     /** hover 元素的 tooltip：服务端注册表优先，其次 YAML 静态（字符串 / List 多行 / 对象样式）。
@@ -1222,7 +1101,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
                     }
                     send(hit, UiEvent.Trigger.CLICK, index + ":" + action);
                 } else {
-                    player.getInventory().selected = index;
+                    CompatRender.invSetSelectedIndex(player.getInventory(), index);
                     send(hit, UiEvent.Trigger.CLICK, String.valueOf(index));
                 }
             }
@@ -1308,7 +1187,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             }
             case "video" -> {
                 // seek 条点击：跳转播放位置（video.seekable: true 时渲染底部进度条）
-                if (!Screen.hasShiftDown() && ScreenElements.handleVideoSeekClick(hit.id(), mouseX, mouseY)) {
+                if (!Screen.hasShiftDown() && MediaItemDraws.handleVideoSeekClick(hit.id(), mouseX, mouseY)) {
                     return true;
                 }
                 send(hit, UiEvent.Trigger.CLICK, null);
@@ -1464,8 +1343,16 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         dragOriginY = offsetY;
     }
 
-    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
+        return mouseScrolled(mouseX, mouseY, 0, verticalAmount);
+    }
+
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        // 旧版（DreamCore）Functions.wheel：写入滚轮上下文并触发（存在才跑）
+        if (page.functions() != null && page.functions().containsKey("wheel")) {
+            LegacyClientHost.setWheelDelta(verticalAmount);
+            ClientController.get().runLifecycle(page, "wheel");
+        }
         // 滚轮优先滚动命中的 scroll 容器
         RenderNode hit = hitInteractive(mouseX, mouseY);
         if (hit != null) {
@@ -1560,6 +1447,12 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // 旧版（DreamCore）Functions.keyPress：写入键名上下文（E/ESCAPE…）并触发（存在才跑）
+        if (page.functions() != null && page.functions().containsKey("keyPress")) {
+            LegacyClientHost.setPressedKey(LegacyClientHost.keyName(keyCode, scanCode));
+            ClientController.get().runLifecycle(page, "keyPress");
+            LegacyClientHost.setPressedKey("");
+        }
         if (keyCode == 256) { // ESC
             if (editMode) {
                 if (previewMode) { // 预览中 ESC = 回编辑
@@ -2143,20 +2036,20 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
                 String sound = String.valueOf(m.get("sound"));
                 float vol = m.get("volume") instanceof Number n ? n.floatValue() : 1.0f;
                 float pitch = m.get("pitch") instanceof Number n2 ? n2.floatValue() : 1.0f;
-                mc.level.playLocalSound(mc.player,
+                mc.player.playNotifySound(
                         UiRenderer.soundEvent(
                                 net.minecraft.resources.ResourceLocation.tryParse(sound)), net.minecraft.sounds.SoundSource.MASTER, vol, pitch);
                 return;
             }
             if (cs instanceof String s && !s.isBlank()) {
-                mc.level.playLocalSound(mc.player,
+                mc.player.playNotifySound(
                         UiRenderer.soundEvent(
                                 net.minecraft.resources.ResourceLocation.tryParse(s)), net.minecraft.sounds.SoundSource.MASTER, 1.0f, 1.0f);
                 return;
             }
         }
         // 默认：原版按钮点击声
-        mc.level.playLocalSound(mc.player,
+        mc.player.playNotifySound(
                 UiRenderer.soundEvent(
                         net.minecraft.resources.ResourceLocation.tryParse("minecraft:ui.button.click")),
                 net.minecraft.sounds.SoundSource.MASTER, 0.3f, 1.0f);

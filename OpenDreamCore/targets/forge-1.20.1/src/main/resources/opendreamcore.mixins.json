@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "refmap": "opendreamcore.refmap.json",
+  "minVersion": "0.8",
+  "package": "com.opendreamcore.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "ClientPacketListenerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

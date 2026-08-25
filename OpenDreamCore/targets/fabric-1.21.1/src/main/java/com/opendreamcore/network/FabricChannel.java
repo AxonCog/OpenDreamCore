@@ -25,25 +25,39 @@ public final class FabricChannel {
     private FabricChannel() {
     }
 
-    /** 收包用 payload：type 由注册处指定。 */
-    public record RawPayload(byte[] bytes) implements CustomPacketPayload {
+    /** 收/发共用 payload：自带 type。
+     *  注意：codec 按 type 解析后会把实例直接喂给编码器，收发必须是同一个类
+     *  （与 NeoForge 侧 network/RawPayload 同构），否则编码期 ClassCastException 断连。 */
+    public record RawPayload(Type<RawPayload> type, byte[] bytes) implements CustomPacketPayload {
         @Override
-        public Type<? extends CustomPacketPayload> type() {
-            throw new UnsupportedOperationException("type 由注册处指定");
+        public Type<RawPayload> type() {
+            return type;
+        }
+
+        public static RawPayload of(Type<RawPayload> type, byte[] bytes) {
+            return new RawPayload(type, bytes);
         }
     }
 
-    /** 发包用 payload：带 type。 */
-    public record SentPayload(Type<RawPayload> type, byte[] bytes) implements CustomPacketPayload {
-    }
-
-    private static StreamCodec<FriendlyByteBuf, RawPayload> rawCodec() {
+    private static StreamCodec<FriendlyByteBuf, RawPayload> rawCodec(CustomPacketPayload.Type<RawPayload> type) {
         return StreamCodec.of((buf, payload) -> buf.writeBytes(payload.bytes()),
                 buf -> {
                     byte[] data = new byte[buf.readableBytes()];
                     buf.readBytes(data);
-                    return new RawPayload(data);
+                    return new RawPayload(type, data);
                 });
+    }
+
+    /** 注册一个 C2S 通道 codec（客户端只发不收）。 */
+    private static void c2s(String path) {
+        var type = typeFor(path);
+        PayloadTypeRegistry.playC2S().register(type, rawCodec(type));
+    }
+
+    /** 注册一个 S2C 通道 codec（客户端只收不发）。 */
+    private static void s2c(String path) {
+        var type = typeFor(path);
+        PayloadTypeRegistry.playS2C().register(type, rawCodec(type));
     }
 
     public static CustomPacketPayload.Type<RawPayload> typeFor(String path) {
@@ -56,41 +70,25 @@ public final class FabricChannel {
 
     /** 客户端侧：注册全部通道的 codec + 接收 handler。 */
     public static void registerClient() {
-        // C2S（发送方向）：ready / ui_event / cloud_diff
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.READY), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.UI_EVENT), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.CLOUD_DIFF), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.TOOLTIP_RESYNC), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.PAGE_LAYOUT), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.EDITOR_LEASE), rawCodec());
-        PayloadTypeRegistry.playC2S().register(typeFor(Protocol.CUSTOM_PACKET), rawCodec());
-        // S2C（接收方向）
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.READY_ACK), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.PAGE_CONTROL), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.PAGE_SYNC), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CLOUD_MANIFEST), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CLOUD_FILE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CLOUD_DELETE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CLOUD_DONE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.STATE_PATCH), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.TOOLTIP_REGISTRY), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.GLOBAL_STATE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.PAGE_LAYOUT), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.EDITOR_LEASE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CONTAINER_SYNC), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CHAT_MESSAGE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.UI_EFFECT), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.BOSS_BAR), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.NAME_TAG), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.ITEM_TIP), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.HUD_SYNC), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.MUSIC), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CONFIG_PUSH), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.UI_ANIMATION), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.WORLD_TAB), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.WORLD_ELEMENT_STATE), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.EDITOR_WORLD_ACK), rawCodec());
-        PayloadTypeRegistry.playS2C().register(typeFor(Protocol.CUSTOM_PACKET), rawCodec());
+        // 全部 opendreamcore:* 通道按协议常量双向注册 codec：
+        // - 发送方向漏注册会在编码期落入 vanilla DiscardedPayload 兜底 → ClassCastException 断连
+        //   （page_close / editor_world 曾因此断连）
+        // - 接收方向未挂 handler 的通道收到后静默忽略，多注册无害；
+        //   新增通道只需在 Protocol 里加常量，无需再维护这份清单
+        for (java.lang.reflect.Field f : Protocol.class.getDeclaredFields()) {
+            if (f.getType() != String.class
+                    || !java.lang.reflect.Modifier.isStatic(f.getModifiers())) {
+                continue;
+            }
+            try {
+                String path = (String) f.get(null);
+                var type = typeFor(path);
+                var codec = rawCodec(type);
+                PayloadTypeRegistry.playC2S().register(type, codec);
+                PayloadTypeRegistry.playS2C().register(typeFor(path), codec);
+            } catch (IllegalAccessException ignored) {
+            }
+        }
 
         register(Protocol.READY_ACK, data -> {
             var ack = com.opendreamcore.protocol.message.ReadyAck.decode(reader(data));
@@ -174,6 +172,9 @@ public final class FabricChannel {
             var packet = com.opendreamcore.protocol.message.CustomPacket.decode(reader(data));
             ClientController.get().handleCustomPacket(packet.channel(), packet.payload());
         });
+        register(Protocol.WINDOW_TITLE, data ->
+                ClientController.get().handleWindowTitle(
+                        com.opendreamcore.protocol.message.WindowTitlePush.decode(reader(data))));
     }
 
     /** 注册一个接收通道：处理丢到渲染线程。 */
@@ -195,7 +196,15 @@ public final class FabricChannel {
     /** 发送协议消息（ClientController.UiSender 实现）。 */
     public static void send(String channelPath, byte[] bytes) {
         if (net.minecraft.client.Minecraft.getInstance().getConnection() != null) {
-            ClientPlayNetworking.send(new SentPayload(typeFor(channelPath), bytes));
+            // 通道名可能带完整命名空间（如 minecraft:register），必须拆分，否则整串塞进 path 会因非法字符抛异常
+            ResourceLocation id;
+            int i = channelPath.indexOf(':');
+            if (i >= 0) {
+                id = ResourceLocation.fromNamespaceAndPath(channelPath.substring(0, i), channelPath.substring(i + 1));
+            } else {
+                id = ResourceLocation.fromNamespaceAndPath(Protocol.NAMESPACE, channelPath);
+            }
+            ClientPlayNetworking.send(RawPayload.of(typeFor(channelPath), bytes));
         }
     }
 }

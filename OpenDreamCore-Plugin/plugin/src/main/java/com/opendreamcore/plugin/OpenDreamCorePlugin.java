@@ -165,7 +165,17 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         instance = this;
         ServerMethods.registerAll();
         com.opendreamcore.plugin.server.ServerPlaceholders.registerAll();
-        saveDefaultConfig(); // config.yml（文件监听开关 + client 配置段下发）
+        // 配置自愈：数据目录缺失则创建；被删除/键缺失时从内置默认恢复（含合并缺省键）
+        if (!getDataFolder().exists()) {
+            getDataFolder().mkdirs();
+        }
+        if (!new java.io.File(getDataFolder(), "config.yml").exists()) {
+            saveDefaultConfig();
+            getLogger().info("已重建默认配置 config.yml");
+        }
+        saveDefaultConfig();
+        getConfig().options().copyDefaults(true);
+        saveConfig();
 
         pages = new ServerPageManager(this);
         pages.load();
@@ -207,24 +217,41 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         // 全局状态周期刷新（在线人数等，5 秒一次）
         getServer().getScheduler().runTaskTimer(this, network::broadcastGlobalState, 100L, 100L);
 
-        // 启动 Logo
+        // 启动横幅：全名字符标 + 信息行（ANSI 渲染，行尾复位防颜色泄漏）
+        String ver = getDescription().getVersion();
         String[] logo = {
-                "§d  ____                   ____                     _   ",
-                "§d / __ \\                 / ___|                   | |  ",
-                "§d| |  | |_   _ _ __ ___  | (___   ___  ___ _ __ ___| |_ ",
-                "§d| |  | | | | | '_ ` _ \\  \\___ \\ / _ \\/ __| '__/ _ \\ __|",
-                "§d| |__| | |_| | | | | | | ____) | (_) \\__ \\ | |  __/ |_ ",
-                "§d \\____/ \\__,_|_| |_| |_| |____/ \\___/|___/_|  \\___|\\__|",
-                "§f v" + getDescription().getVersion()
-                        + " §7| 协议 v" + com.opendreamcore.protocol.Protocol.VERSION
-                        + " §7| 梦幻 QQ:2496599413",
-                "§7  https://github.com/AxonCog/OpenDreamCore"
+                "§d  ___                   ____                            ____               ",
+                "§d / _ \\ _ __   ___ _ __ |  _ \\ _ __ ___  __ _ _ __ ___  / ___|___  _ __ ___ ",
+                "§d| | | | '_ \\ / _ \\ '_ \\| | | | '__/ _ \\/ _` | '_ ` _ \\| |   / _ \\| '__/ _ \\",
+                "§d| |_| | |_) |  __/ | | | |_| | | |  __/ (_| | | | | | | |__| (_) | | |  __/",
+                "§d \\___/| .__/ \\___|_| |_|____/|_|  \\___|\\__,_|_| |_| |_|\\____\\___/|_|  \\___|",
+                "§d      |_|                                                                  ",
+                "§b┃ §fOpenDreamCore §a" + ver,
+                "§b┃ §7协议 v" + com.opendreamcore.protocol.Protocol.VERSION,
+                "§b┃ §7QQ 2496599413",
+                "§b┃ §bhttps://github.com/AxonCog/OpenDreamCore",
         };
         for (String line : logo) {
-            getLogger().info(line);
+            getLogger().info(ansi(line));
         }
 
         getLogger().info("OpenDreamCore 服务端核心已启用（页面 " + pages.ids().size() + " 个）");
+    }
+
+    private static final String ODC_ESC = String.valueOf((char) 27);
+
+    /** § 旧版色码 → ANSI 转义（Log4j 控制台全版本直接渲染）；末尾统一复位防止颜色泄漏到后续日志。 */
+    private static String ansi(String s) {
+        s = s.replace("§b", ODC_ESC + "[96;1m")
+                .replace("§d", ODC_ESC + "[35;1m")
+                .replace("§f", ODC_ESC + "[37;1m")
+                .replace("§7", ODC_ESC + "[90;1m")
+                .replace("§a", ODC_ESC + "[32;1m")
+                .replace("§c", ODC_ESC + "[31;1m")
+                .replace("§e", ODC_ESC + "[33;1m")
+                .replace("§r", ODC_ESC + "[0m");
+        // 末尾复位，防止颜色状态泄漏到后续日志行
+        return s.isBlank() ? s : s + ODC_ESC + "[0m";
     }
 
     /** 从 type-aliases.yml 加载自定义 type 别名（热加载用） */

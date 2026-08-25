@@ -38,6 +38,7 @@ public final class ServerMethods {
         registerScript();
         registerNetwork();
         registerTooltip();
+        registerDreamCoreCompat();
     }
 
     // ========== Tooltip（动态 tooltip 注册/样式/移除） ==========
@@ -435,6 +436,45 @@ public final class ServerMethods {
             OpenDreamCorePlugin.get().sendStatePatch(p, values);
             return true;
         }, "更新状态", "setState", "set_state", "更新变量", "setVar", "set_var");
+        NamespaceRegistry.register("Screen", args -> {
+            // Screen.设置变量(名, 值[, 玩家?])
+            // - 写回服务端页面变量（下次触发器 vars.* 读到最新值，如 showreel 的 ready 自增）
+            // - 第三参指定玩家 → 只给该玩家发状态补丁；
+            //   无玩家上下文（tick 触发器）→ 广播给所有已打开界面的玩家（各自应用到当前页面）
+            if (args.length < 2 || args[0] == null) {
+                return false;
+            }
+            String key = String.valueOf(args[0]);
+            Object value = args[1];
+            Player target = player(args.length > 2 ? new Object[]{args[2]} : new Object[0]);
+            String pageId = ScriptContext.currentPageId();
+            if (pageId == null) {
+                // 无页面上下文：回退找第一个声明了该变量的页面
+                for (String id : OpenDreamCorePlugin.get().pageManager().ids()) {
+                    com.opendreamcore.page.Page pg = OpenDreamCorePlugin.get().pageManager().get(id);
+                    if (pg != null && pg.variables() != null && pg.variables().containsKey(key)) {
+                        pageId = id;
+                        break;
+                    }
+                }
+            }
+            if (pageId != null) {
+                com.opendreamcore.page.Page page = OpenDreamCorePlugin.get().pageManager().get(pageId);
+                if (page != null && page.variables() != null) {
+                    page.variables().put(key, value);
+                }
+            }
+            var values = new java.util.LinkedHashMap<String, Object>();
+            values.put(key, value);
+            if (target != null) {
+                OpenDreamCorePlugin.get().sendStatePatch(target, values);
+            } else {
+                for (Player online : Bukkit.getOnlinePlayers()) {
+                    OpenDreamCorePlugin.get().sendStatePatch(online, values);
+                }
+            }
+            return true;
+        }, "设置变量", "setVariable", "set_variable", "写入变量");
         NamespaceRegistry.register("Screen", args -> {
             Player p = player(args);
             if (p != null) {
@@ -1511,5 +1551,57 @@ public final class ServerMethods {
             return 0;
         }
         return num(args[index]);
+    }
+
+    // ========== DreamCore 兼容方法（菜单.yml 等旧页面直接运行） ==========
+
+    /** 注册 DreamCore 兼容的"方法"命名空间。 */
+    private static void registerDreamCoreCompat() {
+        String ns = "方法";
+
+        // 方法.聊天(玩家名, 消息) → 发送聊天消息
+        NamespaceRegistry.register(ns, args -> {
+            if (args.length >= 2 && args[0] instanceof Player p) {
+                p.sendMessage(String.valueOf(args[1]));
+            }
+            return null;
+        }, "聊天");
+
+        // 方法.替换(文本, 旧值, 新值) → 字符串替换
+        NamespaceRegistry.register(ns, "替换", args -> {
+            if (args.length < 3 || args[0] == null) return args.length > 0 ? args[0] : "";
+            return String.valueOf(args[0]).replace(
+                    String.valueOf(args[1]), String.valueOf(args[2]));
+        });
+
+        // 方法.合并文本(a, b, ...) → 拼接所有参数
+        NamespaceRegistry.register(ns, "合并文本", args -> {
+            var sb = new StringBuilder();
+            for (Object a : args) {
+                if (a != null) sb.append(a);
+            }
+            return sb.toString();
+        });
+
+        // 方法.延时(ms) → 延迟执行后续脚本（服务端调度）
+        NamespaceRegistry.register(ns, "延时", args -> {
+            if (args.length > 0) {
+                long delayMs = (long) num(args, 0);
+                Bukkit.getScheduler().runTaskLater(OpenDreamCorePlugin.get(),
+                        () -> { }, Math.max(1, delayMs / 50)); // tick = 50ms
+            }
+            return null;
+        });
+
+        // 方法.取当前时间() → 当前毫秒时间戳
+        NamespaceRegistry.register(ns, "取当前时间", args -> System.currentTimeMillis());
+
+        // 方法.输出(文本) → 控制台日志
+        NamespaceRegistry.register(ns, "输出", args -> {
+            if (args.length > 0 && args[0] != null) {
+                OpenDreamCorePlugin.get().getLogger().info(String.valueOf(args[0]));
+            }
+            return null;
+        });
     }
 }

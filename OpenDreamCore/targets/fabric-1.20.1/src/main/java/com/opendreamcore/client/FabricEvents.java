@@ -18,12 +18,30 @@ import java.nio.file.Path;
  */
 public final class FabricEvents {
 
+    static {
+        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
+    }
+
     private FabricEvents() {
     }
 
     public static void register() {
         // 网络发送：Fabric 走旧版 channel API
         ClientController.get().setSender(com.opendreamcore.network.FabricChannel::send);
+
+        // 每帧标题推进（主菜单也刷新）；键鼠绑定边沿检测仅在进世界后
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            try {
+                com.opendreamcore.client.WindowBranding.tick();
+            } catch (Exception ignored) {
+            }
+            if (client.player != null) {
+                try {
+                    ClientController.get().tickBindings();
+                } catch (Exception ignored) {
+                }
+            }
+        });
 
         // 进服：本地页面 + 位置记忆 + HUD 挂载 + ready + tooltip 拉取
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
@@ -32,10 +50,16 @@ public final class FabricEvents {
             ClientController.get().loadPositions();
             ClientController.get().elementEdits().load();
             ClientController.get().markLogin();
+            // 服务端标题缓存预载（首包前生效，消除空窗）
+            ClientController.get().preloadServerTitle();
             ClientController.get().autoMountHud();
             ClientController.get().sendReady();
             ClientController.get().requestTooltips();
         });
+
+        // 断线：解除服务端标题覆盖，还原本地 branding
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) ->
+                ClientController.get().clearServerTitle());
 
         // HUD 常驻渲染
         HudRenderCallback.EVENT.register((g, tickDelta) -> ClientController.get().renderHud(g));
@@ -44,15 +68,20 @@ public final class FabricEvents {
         WorldRenderEvents.AFTER_ENTITIES.register(context ->
                 ClientController.get().renderWorld(context.camera(), context.tickDelta()));
 
-        // 容器替换：原版容器打开后，命中本地 match 就换掉
-        ScreenEvents.AFTER_INIT.register(ScreenEvents.ANY, (screen, scaledWidth, scaledHeight, mouseX, mouseY) -> {
+        // 容器替换：原版容器打开后，命中本地 match 就换掉（1.20.1 fabric-api 签名：client+screen+w+h）
+        ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen cs) {
                 String target;
                 if (cs instanceof net.minecraft.client.gui.screens.inventory.InventoryScreen) {
                     target = "inventory";
                 } else {
-                    var id = net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(cs.getMenu().getType());
-                    target = id == null ? null : id.toString();
+try {
+                        var id = net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(cs.getMenu().getType());
+                        target = id == null ? null : id.toString();
+                    } catch (Throwable menuTypeFail) {
+                        // 部分模组容器未注册菜单类型，getType 会抛异常；只按标题匹配
+                        target = null;
+                    }
                 }
                 String title = cs.getTitle().getString();
                 if (target == null) {
@@ -73,79 +102,18 @@ public final class FabricEvents {
 
         // /odc 客户端命令
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-            dispatcher.register(ClientCommandManager.literal("odc")
-                    .then(ClientCommandManager.literal("open")
-                            .then(ClientCommandManager.argument("page", StringArgumentType.greedyString())
-                                    .executes(ctx -> {
-                                        String id = StringArgumentType.getString(ctx, "page");
-                                        Page page = ClientController.get().localPages().get(id);
-                                        if (page == null) {
-                                            ctx.getSource().sendError(Component.literal("没有这个页面: " + id));
-                                            return 0;
-                                        }
-                                        ClientController.get().open(page);
-                                        return 1;
-                                    })))
-                    .then(ClientCommandManager.literal("close")
-                            .executes(ctx -> {
-                                ClientController.get().close();
-                                return 1;
-                            }))
-                    .then(ClientCommandManager.literal("hud")
-                            .executes(ctx -> {
-                                var controller = ClientController.get();
-                                if (controller.isHudOpen()) {
-                                    controller.closeHud();
-                                    ctx.getSource().sendFeedback(Component.literal("HUD 已关闭"));
-                                } else {
-                                    controller.autoMountHud();
-                                    ctx.getSource().sendFeedback(Component.literal(
-                                            controller.isHudOpen() ? "HUD 已挂载" : "没有 match: hud 的本地页面"));
-                                }
-                                return 1;
-                            }))
-                    .then(ClientCommandManager.literal("edit")
-                            .then(ClientCommandManager.literal("on")
-                                    .executes(ctx -> {
-                                        ClientController.get().toggleEdit(true);
-                                        ctx.getSource().sendFeedback(Component.literal("编辑模式已开启（拖动元素改位置）"));
-                                        return 1;
-                                    }))
-                            .then(ClientCommandManager.literal("off")
-                                    .executes(ctx -> {
-                                        ClientController.get().toggleEdit(false);
-                                        ctx.getSource().sendFeedback(Component.literal("编辑模式已关闭"));
-                                        return 1;
-                                    }))
-                            .then(ClientCommandManager.literal("save")
-                                    .executes(ctx -> {
-                                        ClientController.get().saveEdits();
-                                        return 1;
-                                    }))
-                            .then(ClientCommandManager.literal("lease")
-                                    .then(ClientCommandManager.argument("page", StringArgumentType.greedyString())
-                                            .executes(ctx -> {
-                                                ClientController.get().requestLease(StringArgumentType.getString(ctx, "page"));
-                                                return 1;
-                                            })))
-                            .then(ClientCommandManager.literal("release")
-                                    .then(ClientCommandManager.argument("page", StringArgumentType.greedyString())
-                                            .executes(ctx -> {
-                                                ClientController.get().releaseLease(StringArgumentType.getString(ctx, "page"));
-                                                return 1;
-                                            })))
-                            .then(ClientCommandManager.literal("list")
-                                    .executes(ctx -> {
-                                        var ids = ClientController.get().localPages().ids();
-                                        ctx.getSource().sendFeedback(Component.literal(
-                                                "本地页面 (" + ids.size() + "): " + String.join(", ", ids)));
-                                        return 1;
-                                    }))
-                            .executes(ctx -> {
-                                ctx.getSource().sendFeedback(Component.literal(
-                                        "用法: /odc open <页面id> | close | hud | edit | list"));
-                                return 1;
-                            }));
+            dispatcher.register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource>)
+                    com.opendreamcore.client.OdcCommands.buildRoot());
         });
+    }
+
+    /**
+     * 连接服务器时将 /odc 命令转发到服务端执行（单人世界返回 false 走本地逻辑）。
+     * 直接发送命令协议包绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
+     */
+    private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> ctx,
+                                                      String subCommand)  {
+        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
+        return ClientController.get().tryForwardOdcCommand(subCommand);
     }
 }
