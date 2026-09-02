@@ -18,11 +18,6 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Grant execute permission to gradlew
-        run: |
-          chmod +x OpenDreamCore/gradlew
-          chmod +x OpenDreamCore-Plugin/gradlew
-
       - name: Build NeoForge
         working-directory: OpenDreamCore
         run: ./gradlew -p targets/neoforge-1.21.1 build --no-daemon
