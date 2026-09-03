@@ -30,6 +30,6 @@ jobs:
           path: output/*.jar
 
   build-client:
-    name: Build Client
+    name: Build Client-side
     uses: ./.github/workflows/ci_build-client.yml
     secrets: inherit
