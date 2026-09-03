@@ -23,14 +23,6 @@ jobs:
         working-directory: OpenDreamCore-Plugin
         run: ./gradlew build --no-daemon
 
-      - name: Collect jars
-        run: |
-          mkdir -p output
-          find . -name "*.jar" -path "*/build/libs/*" \
-            ! -name "*-sources*" ! -name "*-javadoc*" ! -name "*-dev*" \
-            -exec cp {} output/ \;
-          ls -la output/
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -38,45 +30,6 @@ jobs:
           path: output/*.jar
 
   build-client:
-    strategy:
-      matrix:
-        include:
-          - { target: fabric-1.20.1, java-version: '17' }
-          - { target: neoforge-1.21.1, java-version: '21' }
-          - { target: fabric-1.21.1, java-version: '21' }
-          - { target: neoforge-1.21.4, java-version: '21' }
-          - { target: fabric-1.21.4, java-version: '21' }
-          - { target: neoforge-1.21.8, java-version: '21' }
-          - { target: fabric-1.21.8, java-version: '21' }
-          - { target: neoforge-26.1.2, java-version: '25' }
-          - { target: fabric-26.1.2, java-version: '25' }
-    continue-on-error: true
-    name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up JDK ${{ matrix.java-version }}
-        uses: actions/setup-java@v6
-        with:
-          java-version: '${{ matrix.java-version }}'
-          distribution: 'temurin'
-
-      - name: Build ${{ matrix.target }}
-        working-directory: OpenDreamCore
-        run: ./gradlew -p targets/${{ matrix.target }} build --no-daemon
-
-      - name: Collect jars
-        run: |
-          mkdir -p output
-          find . -name "*.jar" -path "*/build/libs/*" \
-            ! -name "*-sources*" ! -name "*-javadoc*" ! -name "*-dev*" \
-            -exec cp {} output/ \;
-          ls -la output/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: odc-client-${{ matrix.target }}
-          path: output/*.jar
+    name: Build Client
+    uses: ./.github/workflows/ci_build-client.yml
+    secrets: inherit
