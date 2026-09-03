@@ -33,10 +33,10 @@ jobs:
 
       - name: Build
         working-directory: OpenDreamCore
-        run: ./gradlew -p targets/${{ matrix.target }} build --no-daemon
+        run: ./gradlew -p targets/${{ matrix.target }} build --no-daemon -PbuildDir="../../../build"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: odc-client-${{ matrix.target }}
-          path: output/*.jar
+          path: build/libs/*.jar
