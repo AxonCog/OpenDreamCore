@@ -62,3 +62,17 @@ tasks.named('processResources') {
         expand 'version': project.version
     }
 }
+
+project(':plugin').tasks.jar {
+    dependsOn project(':nms-v1_21_R1').tasks.processResources,
+              project(':core').tasks.processResources
+    inputs.files(
+        project(':nms-v1_21_R1').tasks.processResources.outputs,
+        project(':core').tasks.processResources.outputs
+    )
+}
+
+project(':nms-v1_21_R1').tasks.jar {
+    dependsOn project(':core').tasks.processResources
+    inputs.files(project(':core').tasks.processResources.outputs)
+}

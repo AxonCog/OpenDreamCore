@@ -7,39 +7,29 @@ on:
     branches: [master]
 
 jobs:
-  build:
+  build-server: 
+    name: Build Server-side
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: 'temurin'
-
-      - name: Build NeoForge
-        working-directory: OpenDreamCore
-        run: ./gradlew -p targets/neoforge-1.21.1 build --no-daemon
-
-      - name: Build Fabric
-        working-directory: OpenDreamCore
-        run: ./gradlew -p targets/fabric-1.21.1 build --no-daemon
 
       - name: Build Plugin
         working-directory: OpenDreamCore-Plugin
         run: ./gradlew build --no-daemon
 
-      - name: Collect jars
-        run: |
-          mkdir -p output
-          find . -name "*.jar" -path "*/build/libs/*" \
-            ! -name "*-sources*" ! -name "*-javadoc*" ! -name "*-dev*" \
-            -exec cp {} output/ \;
-          ls -la output/
-
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: jars
+          name: odc-server
           path: output/*.jar
+
+  build-client:
+    name: Build Client-side
+    uses: ./.github/workflows/ci_build-client.yml
+    secrets: inherit
