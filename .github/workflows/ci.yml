@@ -48,8 +48,8 @@ jobs:
           - { target: fabric-1.21.4, java-version: '21' }
           - { target: neoforge-1.21.8, java-version: '21' }
           - { target: fabric-1.21.8, java-version: '21' }
-          - { target: neoforge-26.1.2, java-version: '21' }
-          - { target: fabric-26.1.2, java-version: '21' }
+          - { target: neoforge-26.1.2, java-version: '25' }
+          - { target: fabric-26.1.2, java-version: '25' }
     continue-on-error: true
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
