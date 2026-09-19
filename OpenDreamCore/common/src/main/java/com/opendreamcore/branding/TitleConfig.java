@@ -1,5 +1,7 @@
 package com.opendreamcore.branding;
 
+import com.opendreamcore.util.J8;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,15 +48,16 @@ public final class TitleConfig {
 
     /** 展示序列：titles 优先；否则单元素 [text]。全空返回空列表。 */
     public List<String> sequence() {
+        // 空句/空白句直接丢：留着的话打字机对空句每 tick 写空标题，窗口名就秃了
         List<String> seq = new ArrayList<>();
         if (titles != null) {
             for (String t : titles) {
-                if (t != null) {
+                if (t != null && !t.trim().isEmpty()) {
                     seq.add(t);
                 }
             }
         }
-        if (seq.isEmpty() && text != null && !text.isEmpty()) {
+        if (seq.isEmpty() && text != null && !text.trim().isEmpty()) {
             seq.add(text);
         }
         return seq;
@@ -63,8 +66,8 @@ public final class TitleConfig {
     /** 从 JSON 文件加载（Gson）；解析失败返回 null 由调用方回退 title.txt。 */
     public static TitleConfig load(Path json) {
         try {
-            String raw = Files.readString(json, StandardCharsets.UTF_8);
-            if (raw.isBlank()) {
+            String raw = J8.readString(json, StandardCharsets.UTF_8);
+            if (J8.isBlank(raw)) {
                 return null;
             }
             TitleConfig cfg = new com.google.gson.Gson().fromJson(raw, TitleConfig.class);

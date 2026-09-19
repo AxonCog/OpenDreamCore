@@ -1,5 +1,7 @@
 package com.opendreamcore.plugin;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.page.Element;
 
 import java.util.Map;
@@ -30,7 +32,7 @@ public interface ComponentSpec {
         return null;
     }
 
-    // ---- 热拔插生命周期 ----
+    // 热拔插生命周期
 
     /** 组件注册时调用（可做初始化、注册子组件等）。 */
     default void onRegister() {}
@@ -40,7 +42,7 @@ public interface ComponentSpec {
 
     /** 声明依赖的其他组件类型 id（无依赖返回空列表）。 */
     default java.util.List<String> dependencies() {
-        return java.util.List.of();
+        return J8.list();
     }
 
     /** 组件分类（用于调色板/文档分组；缺省 "通用"）。 */

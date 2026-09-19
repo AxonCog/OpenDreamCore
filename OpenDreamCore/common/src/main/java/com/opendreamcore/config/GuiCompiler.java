@@ -1,5 +1,7 @@
 package com.opendreamcore.config;
 
+import com.opendreamcore.util.J8;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -129,7 +131,7 @@ public final class GuiCompiler {
         Map<String, Object> out = new LinkedHashMap<>();
         // type 为空时从 id 推断；有值时走别名映射
         Object typeVal = el.get("type");
-        if (typeVal == null || String.valueOf(typeVal).isBlank()) {
+        if (typeVal == null || J8.isBlank(String.valueOf(typeVal))) {
             String inferred = TypeInferrer.infer(String.valueOf(el.get(KEY_ID)));
             if (inferred != null) {
                 out.put("type", inferred);
@@ -193,7 +195,7 @@ public final class GuiCompiler {
 
     private static boolean shouldDrop(Map<String, Object> el, Context ctx) {
         Object condition = el.get(KEY_CONDITION);
-        if (condition == null || String.valueOf(condition).isBlank()) {
+        if (condition == null || J8.isBlank(String.valueOf(condition))) {
             return false;
         }
         return ctx == null || !ctx.condition(String.valueOf(condition));
@@ -202,7 +204,7 @@ public final class GuiCompiler {
     private static String pickId(Map<String, Object> el, int[] counter) {
         int n = counter[0]++;
         Object id = el.get(KEY_ID);
-        if (id != null && !String.valueOf(id).isBlank()) {
+        if (id != null && !J8.isBlank(String.valueOf(id))) {
             return String.valueOf(id);
         }
         return "el_" + n;

@@ -1,5 +1,7 @@
 package com.opendreamcore.config;
 
+import com.opendreamcore.util.J8;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -7,9 +9,9 @@ import java.util.Map;
  * type 别名映射 + 后缀推断。
  *
  * 两层映射：
- * 1. 别名表（ALIAS_MAP）：type: texture → image, type: label → text
+ * 别名表（ALIAS_MAP）：type: texture → image, type: label → text
  *    用户写 type: texture 或 _texture 后缀都能映射到 image
- * 2. 后缀表（SUFFIX_MAP）：_btn → button, _img → image
+ * 后缀表（SUFFIX_MAP）：_btn → button, _img → image
  *    后缀先查后缀表，没有再查别名表（所以 _texture 也能用）
  *
  * 用户可通过 registerAlias / registerSuffix 动态注册自定义映射，
@@ -37,7 +39,7 @@ public final class TypeInferrer {
     private static final Map<String, String> ALIAS_MAP = new LinkedHashMap<>();
 
     static {
-        // ---- 后缀 ----
+        // 后缀
         registerSuffix("btn", "button");
         registerSuffix("button", "button");
         registerSuffix("txt", "text");
@@ -61,7 +63,7 @@ public final class TypeInferrer {
         registerSuffix("chk", "checkbox");
         registerSuffix("checkbox", "checkbox");
 
-        // ---- 别名（type 值映射）----
+        // 别名（type 值映射）
         registerAlias("texture", "image");
         registerAlias("pic", "image");
         registerAlias("label", "text");
@@ -83,14 +85,14 @@ public final class TypeInferrer {
 
     /** 注册后缀映射，覆盖同名 */
     public static void registerSuffix(String suffix, String type) {
-        if (suffix != null && !suffix.isBlank() && type != null && !type.isBlank()) {
+        if (suffix != null && !J8.isBlank(suffix) && type != null && !J8.isBlank(type)) {
             SUFFIX_MAP.put(suffix.toLowerCase(), type);
         }
     }
 
     /** 注册 type 别名，覆盖同名 */
     public static void registerAlias(String alias, String type) {
-        if (alias != null && !alias.isBlank() && type != null && !type.isBlank()) {
+        if (alias != null && !J8.isBlank(alias) && type != null && !J8.isBlank(type)) {
             ALIAS_MAP.put(alias.toLowerCase(), type);
         }
     }
@@ -106,7 +108,7 @@ public final class TypeInferrer {
      * fill_btn → button, title_txt → text, bg_texture → image
      */
     public static String infer(String id) {
-        if (id == null || id.isBlank()) {
+        if (id == null || J8.isBlank(id)) {
             return null;
         }
         int idx = id.lastIndexOf('_');
@@ -123,11 +125,11 @@ public final class TypeInferrer {
 
     /**
      * 解析最终 type：
-     * 1. 有显式 type → 走别名映射（texture → image, label → text）
-     * 2. 无显式 type → 从 id 后缀推断
+     * 有显式 type → 走别名映射（texture → image, label → text）
+     * 无显式 type → 从 id 后缀推断
      */
     public static String resolve(String explicitType, String id) {
-        if (explicitType != null && !explicitType.isBlank()) {
+        if (explicitType != null && !J8.isBlank(explicitType)) {
             return resolveAlias(explicitType);
         }
         return infer(id);
@@ -135,7 +137,7 @@ public final class TypeInferrer {
 
     /** 别名映射：texture→image, label→text，非别名原样返回 */
     public static String resolveAlias(String type) {
-        if (type == null || type.isBlank()) {
+        if (type == null || J8.isBlank(type)) {
             return type;
         }
         return ALIAS_MAP.getOrDefault(type.toLowerCase(), type);

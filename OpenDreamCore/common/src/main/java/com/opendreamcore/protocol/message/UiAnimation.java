@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -41,7 +43,7 @@ public final class UiAnimation implements Message {
         this.names = new ArrayList<>();
         if (names != null) {
             for (String name : names) {
-                if (name != null && !name.isBlank()) {
+                if (name != null && !J8.isBlank(name)) {
                     this.names.add(name);
                 }
             }

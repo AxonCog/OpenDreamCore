@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -39,7 +41,7 @@ public final class EditorLease implements Message {
     private final String holder;
 
     public EditorLease(Action action, String pageId, String holder) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
         this.action = action;

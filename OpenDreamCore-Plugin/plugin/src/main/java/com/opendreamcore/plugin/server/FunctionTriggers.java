@@ -75,7 +75,7 @@ public final class FunctionTriggers implements Listener {
                 continue;
             }
             String script = page.functions().get(name);
-            if (script == null || script.isBlank()) {
+            if (script == null || (script).trim().isEmpty()) {
                 continue;
             }
             try {

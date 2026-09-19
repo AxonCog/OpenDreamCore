@@ -161,9 +161,9 @@ public final class WorldHologram {
         rsDepthMask(false);
         try {
             // 深度模式控制：
-            // - occluded（默认）：启用深度测试，被遮挡的元素不显示
-            // - always：禁用深度测试，元素始终穿透方块全亮显示
-            // - transparent：两遍渲染——先深度测试画可见部分，再禁用深度测试以低透明度画被遮挡部分
+            // occluded（默认）：启用深度测试，被遮挡的元素不显示
+            // always：禁用深度测试，元素始终穿透方块全亮显示
+            // transparent：两遍渲染：先深度测试画可见部分，再禁用深度测试以低透明度画被遮挡部分
             boolean transparentMode = "transparent".equals(depthMode);
             applyContentDepth();
             // 按下缩放反馈（元素按左键时 scale * 0.95；渲染线程单帧字段，按页键控）
@@ -246,11 +246,11 @@ public final class WorldHologram {
 
     /**
      * 内容绘制深度状态（修复"全息穿墙"）：
-     * <ul>
-     *   <li>occluded（默认）→ 开启深度测试，被方块遮挡的内容不显示</li>
-     *   <li>always → 关闭深度测试，内容穿透方块全亮显示</li>
-     *   <li>transparent 第二遍（noDepthPass）→ 关闭深度测试画低透明残影</li>
-     * </ul>
+     * 
+     *   occluded（默认）→ 开启深度测试，被方块遮挡的内容不显示
+     *   always → 关闭深度测试，内容穿透方块全亮显示
+     *   transparent 第二遍（noDepthPass）→ 关闭深度测试画低透明残影
+     * 
      * 编辑浮层（手柄/框选/参考线等）仍显式 disableDepthTest，保证隔墙可编辑。
      */
     public static void applyContentDepth() {
@@ -467,7 +467,7 @@ public final class WorldHologram {
         }
     }
 
-    // ---------- 渐变版本（顶点颜色插值：vertical = 顶 color → 底 gradient；horizontal = 左 → 右） ----------
+    // 渐变版本（顶点颜色插值：vertical = 顶 color → 底 gradient；horizontal = 左 → 右）
 
     private static void gradVertex(CompatBuffer builder, org.joml.Matrix4f matrix,
                                    float x, float y, int topArgb, int bottomArgb, float yTop, float yBot,
@@ -909,10 +909,10 @@ public final class WorldHologram {
 
     /**
      * 解析物品展示的物品栈（支持 NBT/组件）：
-     * 1) item 以 "{" 开头 → 完整 SNBT 物品标签（含 id/Count/组件），如
+     * item 以 "{" 开头 → 完整 SNBT 物品标签（含 id/Count/组件），如
      *    "{id:'minecraft:diamond_sword',Count:1b,minecraft:enchantments:{levels:{minecraft:sharpness:5}}}"
-     * 2) 纯 id + 可选 `nbt:` 属性（SNBT 组件，如 "{minecraft:custom_name:'\"§b附魔剑\"'}"，与 id/Count 合并）
-     * 3) 纯 id + count（原行为）
+     * 纯 id + 可选 `nbt:` 属性（SNBT 组件，如 "{minecraft:custom_name:'\"§b附魔剑\"'}"，与 id/Count 合并）
+     * 纯 id + count（原行为）
      */
     private static net.minecraft.world.item.ItemStack parseItemStack(Minecraft mc, RenderNode node,
                                                                      Map<?, ?> spec, String itemId, int count,
@@ -1388,7 +1388,7 @@ public final class WorldHologram {
         }
     }
 
-    // ========== 世界画布（canvas 笔刷 → billboard 平面绘制） ==========
+    // 世界画布（canvas 笔刷 → billboard 平面绘制）
 
     /**
      * 世界内画布：与屏幕 canvas 同一套笔刷（rect/circle/line/triangle/gradient/image/text），
@@ -1785,7 +1785,7 @@ public final class WorldHologram {
         }
     }
 
-    // ========== 世界面板射线交互（3D 面板拾取） ==========
+    // 世界面板射线交互（3D 面板拾取）
 
 
 
@@ -1910,7 +1910,7 @@ public final class WorldHologram {
         builder.buildAndDraw();
     }
 
-    // ---- 兼容转发（实现移至 WorldPicking / WorldHoloEdit，round 5）----
+    // 兼容转发（实现移至 WorldPicking / WorldHoloEdit，round 5）
     public static RenderNode raycast(java.util.List<RenderNode> nodes, java.util.Map<String, Object> options, net.minecraft.client.Camera camera, Minecraft mc) {
         return WorldPicking.raycast(nodes, options, camera, mc);
     }
@@ -1991,7 +1991,7 @@ public final class WorldHologram {
         WorldHoloEdit.renderRipples(camera, options, ripples);
     }
 
-    // ---- 拾取辅助转发 ----
+    // 拾取辅助转发
     public static double defaultQuadH(RenderNode node) {
         return WorldPicking.defaultQuadH(node);
     }

@@ -1,0 +1,95 @@
+match: '*'
+Functions:
+  open: |-
+    界面变量.物品 = 方法.序列化物品(方法.取物品('mouse'));
+    方法.debug('0');
+背景:
+  type: texture
+  x: |-
+    (方法.取鼠标x+8+lore.width+7 > w) ? {
+      return w-lore.width-7;
+    } : {
+      return 方法.取鼠标x+8;
+    };
+  y: |-
+    (方法.取鼠标y+lore.height+7 > h) ? {
+      return h-lore.height-7;
+    } : {
+      return 方法.取鼠标y;
+    };
+  width: lore.width+5
+  height: lore.height+5
+  texture: tooltip/背景.png
+  visible: true
+左上角:
+  type: texture
+  x: 背景.x-2
+  y: 背景.y-2
+  width: ((2)*1)
+  height: ((2)*1)
+  texture: tooltip/左上角.png
+  visible: 背景.visible
+上边:
+  type: texture
+  x: 背景.x
+  y: 背景.y-2
+  width: 背景.width
+  height: ((2)*1)
+  texture: tooltip/上边.png
+  visible: 背景.visible
+右上角:
+  type: texture
+  x: 背景.x+背景.width
+  y: 背景.y-2
+  width: ((2)*1)
+  height: ((2)*1)
+  texture: tooltip/右上角.png
+  visible: 背景.visible
+左边:
+  type: texture
+  x: 背景.x-2
+  y: 背景.y
+  width: ((2)*1)
+  height: 背景.height
+  texture: tooltip/左边.png
+  visible: 背景.visible
+右边:
+  type: texture
+  x: 背景.x+背景.width
+  y: 背景.y
+  width: ((2)*1)
+  height: 背景.height
+  texture: tooltip/右边.png
+  visible: 背景.visible
+左下角:
+  type: texture
+  x: 背景.x-2
+  y: 背景.y+背景.height
+  width: ((2)*1)
+  height: ((2)*1)
+  texture: tooltip/左下角.png
+  visible: 背景.visible
+下边:
+  type: texture
+  x: 背景.x
+  y: 背景.y+背景.height
+  width: 背景.width
+  height: ((2)*1)
+  texture: tooltip/下边.png
+  visible: 背景.visible
+右下角:
+  type: texture
+  x: 背景.x+背景.width
+  y: 背景.y+背景.height
+  width: ((2)*1)
+  height: ((2)*1)
+  texture: tooltip/右下角.png
+  visible: 背景.visible
+lore:
+  type: label
+  x: 背景.x+3
+  y: 背景.y+3
+  scale: '1'
+  texts:
+  - 界面变量.lines
+  visible: 背景.visible

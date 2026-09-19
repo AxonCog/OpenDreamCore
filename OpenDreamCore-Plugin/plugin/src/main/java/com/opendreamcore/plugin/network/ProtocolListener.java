@@ -2,6 +2,7 @@ package com.opendreamcore.plugin.network;
 
 import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import com.opendreamcore.plugin.cloud.CloudResourceManager;
+import com.opendreamcore.protocol.LegacyFraming;
 import com.opendreamcore.protocol.Protocol;
 import com.opendreamcore.protocol.message.CloudDiff;
 import com.opendreamcore.protocol.message.CloudManifest;
@@ -22,6 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class ProtocolListener implements PluginMessageListener {
 
+    /**
+     * 老服（<1.13）通道名硬顶 20 字符：客户端读包时就按 20 校验，超了直接断线。
+     * 这些服务器上全部流量复用单通道 opendreamcore（13 字符），消息类型（path）
+     * 骑在载荷里，超单包上限的大件再由 LegacyFraming 切片，与模组端同构；
+     * 1.13+ 上限到 1MB+，用不着分片。
+     */
+    public static final String LEGACY_CHANNEL = Protocol.NAMESPACE;
+
     private final OpenDreamCorePlugin plugin;
     private final ProtocolHandler handler;
     private final CloudResourceManager cloud;
@@ -32,7 +41,14 @@ public final class ProtocolListener implements PluginMessageListener {
     /** 玩家客户端版本信息（ready 时记录，/odc version 用）。 */
     private final Map<Player, ClientVersionInfo> clientVersions = new ConcurrentHashMap<>();
 
+    /** 服务器比 1.13 新返回 false；老服全走单通道 + 载荷带 path。 */
+    private final boolean legacyChannels;
+
+    /** 老服分片重组：每个玩家一套（半截传输互不干扰，超时自动清）。 */
+    private final Map<Player, LegacyFraming.Assembler> assemblers = new ConcurrentHashMap<>();
+
     /** 玩家客户端版本信息。 */
+    @com.github.bsideup.jabel.Desugar
     public record ClientVersionInfo(String modVersion, int protocolVersion, long readyAt) {}
 
     public ProtocolListener(OpenDreamCorePlugin plugin, ProtocolHandler handler, CloudResourceManager cloud,
@@ -45,10 +61,27 @@ public final class ProtocolListener implements PluginMessageListener {
         this.tooltips = tooltips;
         this.editors = editors;
         this.pages = pages;
+        this.legacyChannels = detectLegacyChannels();
+    }
+
+    /** 1.13 给 Material 加了 LEGACY_* 常量，拿它当版本哨兵，不用反射到具体版本号。 */
+    private static boolean detectLegacyChannels() {
+        try {
+            org.bukkit.Material.class.getField("LEGACY_STONE");
+            return false;
+        } catch (NoSuchFieldException | SecurityException e) {
+            return true;
+        }
     }
 
     /** 注册收/发通道。 */
     public void registerChannels() {
+        if (legacyChannels) {
+            // 老服：单通道收发，载荷里自带 path
+            plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, LEGACY_CHANNEL, this);
+            plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, LEGACY_CHANNEL);
+            return;
+        }
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.READY), this);
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.UI_EVENT), this);
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.CLOUD_DIFF), this);
@@ -60,6 +93,9 @@ public final class ProtocolListener implements PluginMessageListener {
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.PAGE_LAYOUT), this);
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.PAGE_CLOSE), this);
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.CUSTOM_PACKET), this);
+        // 分片通道：上行大件（>32K）从模组端切好帧进来；出站方向留给下行大件（>500K）切出去
+        plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, channel(Protocol.CHUNK), this);
+        plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.CHUNK));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.READY_ACK));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.PAGE_SYNC));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.PAGE_CONTROL));
@@ -67,6 +103,7 @@ public final class ProtocolListener implements PluginMessageListener {
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.CLOUD_FILE));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.CLOUD_DELETE));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.CLOUD_DONE));
+        plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.VISUAL_RULES));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.STATE_PATCH));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.TOOLTIP_REGISTRY));
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, channel(Protocol.GLOBAL_STATE));
@@ -93,31 +130,80 @@ public final class ProtocolListener implements PluginMessageListener {
         plugin.getServer().getMessenger().unregisterOutgoingPluginChannel(plugin);
     }
 
-    public static String channel(String path) {
-        return Protocol.NAMESPACE + ":" + path;
+    /** 通道名：老服永远单通道，新服是 namespace:path。 */
+    public String channel(String path) {
+        return legacyChannels ? LEGACY_CHANNEL : Protocol.NAMESPACE + ":" + path;
     }
 
     @Override
     public void onPluginMessageReceived(@NotNull String channel, @NotNull Player player, @NotNull byte[] bytes) {
-        if (channel.equals(channel(Protocol.READY))) {
+        if (legacyChannels) {
+            // 单通道复用：先解帧拿消息类型（大件分片在这里聚齐）
+            try {
+                LegacyFraming.Frame frame = LegacyFraming.parse(bytes);
+                if (frame == null) {
+                    plugin.getLogger().warning("协议帧解析失败 (" + player.getName() + ")，"
+                            + bytes.length + " 字节");
+                    return;
+                }
+                LegacyFraming.Assembler assembler = assemblers.get(player);
+                if (assembler == null) {
+                    assembler = new LegacyFraming.Assembler();
+                    assemblers.put(player, assembler);
+                }
+                byte[] payload = assembler.offer(frame);
+                if (payload == null) {
+                    return; // 分片未齐
+                }
+                dispatchByPath(player, frame.path, payload);
+            } catch (Exception e) {
+                plugin.getLogger().warning("协议载荷解析失败 (" + player.getName() + "): " + e);
+            }
+            return;
+        }
+        String prefix = Protocol.NAMESPACE + ":";
+        String path = channel.startsWith(prefix) ? channel.substring(prefix.length()) : channel;
+        if (path.equals(Protocol.CHUNK)) {
+            // 分片帧：凑包在信箱里，凑齐换回真实通道名再分发
+            LegacyFraming.Frame frame = LegacyFraming.parse(bytes);
+            if (frame == null) {
+                plugin.getLogger().warning("分片帧解析失败 (" + player.getName() + ")，"
+                        + bytes.length + " 字节");
+                return;
+            }
+            LegacyFraming.Assembler assembler = assemblers.computeIfAbsent(player,
+                    k -> new LegacyFraming.Assembler());
+            byte[] payload = assembler.offer(frame);
+            if (payload == null) {
+                return; // 分片未齐
+            }
+            dispatchByPath(player, frame.path, payload);
+            return;
+        }
+        dispatchByPath(player, path, bytes);
+    }
+
+    /** 按消息类型分发（两种通道方案在这里汇合）。 */
+    private void dispatchByPath(Player player, String path, byte[] bytes) {
+        if (path.equals(Protocol.READY)) {
             handleReady(player, bytes);
-        } else if (channel.equals(channel(Protocol.UI_EVENT))) {
+        } else if (path.equals(Protocol.UI_EVENT)) {
             handler.onUiEvent(player, bytes);
-        } else if (channel.equals(channel(Protocol.CLOUD_DIFF))) {
+        } else if (path.equals(Protocol.CLOUD_DIFF)) {
             handleCloudDiff(player, bytes);
-        } else if (channel.equals(channel(Protocol.TOOLTIP_RESYNC))) {
+        } else if (path.equals(Protocol.TOOLTIP_RESYNC)) {
             send(player, Protocol.TOOLTIP_REGISTRY, tooltips.buildRegistry(player));
-        } else if (channel.equals(channel(Protocol.EDITOR_LEASE))) {
+        } else if (path.equals(Protocol.EDITOR_LEASE)) {
             handleEditorLease(player, bytes);
-        } else if (channel.equals(channel(Protocol.EDITOR_SAVE))) {
+        } else if (path.equals(Protocol.EDITOR_SAVE)) {
             handleEditorSave(player, bytes);
-        } else if (channel.equals(channel(Protocol.EDITOR_WORLD))) {
+        } else if (path.equals(Protocol.EDITOR_WORLD)) {
             handleEditorWorld(player, bytes);
-        } else if (channel.equals(channel(Protocol.PAGE_LAYOUT))) {
+        } else if (path.equals(Protocol.PAGE_LAYOUT)) {
             handlePageLayout(player, bytes);
-        } else if (channel.equals(channel(Protocol.PAGE_CLOSE))) {
+        } else if (path.equals(Protocol.PAGE_CLOSE)) {
             handlePageClose(player, bytes);
-        } else if (channel.equals(channel(Protocol.CUSTOM_PACKET))) {
+        } else if (path.equals(Protocol.CUSTOM_PACKET)) {
             handleCustomPacket(player, bytes);
         }
     }
@@ -139,6 +225,13 @@ public final class ProtocolListener implements PluginMessageListener {
             var close = com.opendreamcore.protocol.message.PageClose.decode(
                     new com.opendreamcore.protocol.OdcByteArrayBuf(bytes));
             var session = handler.sessionInfo(close.sessionId());
+            // 关了就允许再开：从本连接已开集合里摘掉，不然第二次 /odc open 被去重拦死
+            if (session != null && session.pageId() != null) {
+                java.util.Set<String> seen = openedPages.get(player.getUniqueId());
+                if (seen != null) {
+                    seen.remove(session.pageId());
+                }
+            }
             handler.closeSession(close.sessionId());
             plugin.containerRegistry().unbind(close.sessionId());
             plugin.getLogger().info("页面关闭 " + player.getName() + " 会话 " + close.sessionId());
@@ -243,9 +336,23 @@ public final class ProtocolListener implements PluginMessageListener {
             var ready = com.opendreamcore.protocol.message.Ready.decode(new com.opendreamcore.protocol.OdcByteArrayBuf(bytes));
             String serverVersion = plugin.getDescription().getVersion();
             plugin.getLogger().info("客户端就绪 " + player.getName() + ": 协议 v" + ready.protocolVersion()
-                    + "，模组 " + ready.modVersion() + "，能力 " + ready.capabilities());
+                    + "，模组 " + ready.modVersion() + "，能力 " + ready.capabilities()
+                    + "，已报备通道 " + player.getListeningPluginChannels());
             readyPlayers.put(player, System.currentTimeMillis());
             clientVersions.put(player, new ClientVersionInfo(ready.modVersion(), ready.protocolVersion(), System.currentTimeMillis()));
+            // 老服客户端的 MC|Register 报备不一定被 Bukkit 认账（1.12 实测 listening 里没有我们的通道，
+            // 而 CraftPlayer.sendPluginMessage 只给已报备的通道发包——下行全被静默跳过）。
+            // 干脆服务器这边直接补报备：addChannel 是 CraftPlayer 的 public 方法，反射调一把
+            String need = legacyChannels ? LEGACY_CHANNEL : Protocol.NAMESPACE + ":" + Protocol.CHUNK;
+            if (!player.getListeningPluginChannels().contains(need)) {
+                forceListenChannel(player, need);
+            }
+            if (!legacyChannels) {
+                String chunk = Protocol.NAMESPACE + ":" + Protocol.CHUNK;
+                if (!player.getListeningPluginChannels().contains(chunk)) {
+                    forceListenChannel(player, chunk);
+                }
+            }
 
             boolean protoOk = ready.protocolVersion() == Protocol.VERSION;
             boolean modOk = ready.modVersion().equals(serverVersion);
@@ -275,9 +382,26 @@ public final class ProtocolListener implements PluginMessageListener {
             if (!protoOk) {
                 return;
             }
+            // 立即补发一份全局状态（周期广播最长要等 5 秒——进服即用在线人数/服务器名/TPS/Ping；
+            // 客户端那句『服务端全局状态已更新 N 项』就是这条链路的活体检测）
+            try {
+                send(player, Protocol.GLOBAL_STATE, buildGlobalState(player));
+                plugin.getLogger().info("已向 " + player.getName()
+                        + " 立即下发全局状态（on ready）");
+            } catch (Exception e) {
+                plugin.getLogger().warning("全局状态立即下发失败 (" + player.getName() + "): " + e);
+            }
             // 云资源清单下发（能力含 CLOUD 才发）
             if ((ready.capabilities() & Protocol.CAPABILITY_CLOUD) != 0) {
                 send(player, Protocol.CLOUD_MANIFEST, cloud.buildManifest());
+            }
+            // 视觉规则下发：
+            // 九系统的规则 YAML 原文打包同步，客户端自行解析渲染；
+            // 无能力位门槛——规则数据无害，老客户端收不到也不影响
+            try {
+                send(player, Protocol.VISUAL_RULES, plugin.visualRules().buildSync());
+            } catch (Exception e) {
+                plugin.getLogger().warning("视觉规则下发失败: " + e);
             }
             // 服务端全局变量（{{global.xxx}} 插值，含 tps/ping）
             send(player, Protocol.GLOBAL_STATE, buildGlobalState(player));
@@ -312,12 +436,21 @@ public final class ProtocolListener implements PluginMessageListener {
                     send(player, Protocol.PAGE_SYNC, buildPageSync(player, pid, yaml));
                 }
             }
+            // join 时扣下的页面/HUD 现在通道已报备，统一放行；
+            // 这里必须放在 toPush 后面，页面脚本先到位，OPEN 才有得渲染
+            flushPendingOnReady(player);
+            // 资源云开始同步：发加密钥匙 + 收对账清单（缺啥补啥多啥删啥）
+            try {
+                plugin.resourcePipeline().startSync(player);
+            } catch (Exception e) {
+                plugin.getLogger().warning("资源云启动失败: " + e);
+            }
         } catch (Exception e) {
             plugin.getLogger().warning("ready 解析失败 (" + player.getName() + "): " + e);
         }
     }
 
-    /** 构建客户端配置（config.yml 的 client 段 → key=value 行）。 */
+    /** 构建客户端配置（config.yml 的 client 段 + hud-baseline 段 → key=value 行）。 */
     private com.opendreamcore.protocol.message.ConfigPush buildClientConfig() {
         var section = plugin.getConfig().getConfigurationSection("client");
         StringBuilder sb = new StringBuilder();
@@ -326,6 +459,14 @@ public final class ProtocolListener implements PluginMessageListener {
                 Object value = section.get(key);
                 sb.append(key).append('=').append(value).append('\n');
             }
+        }
+        // HUD 全局基准段：1920×1080 等比自适的一键开关（客户端生效路径 odc.properties）
+        var hb = plugin.getConfig().getConfigurationSection("hud-baseline");
+        if (hb != null) {
+            sb.append("hud-baseline.enabled=").append(hb.getBoolean("enabled", false)).append('\n');
+            sb.append("hud-baseline.width=").append(hb.getInt("width", 1920)).append('\n');
+            sb.append("hud-baseline.height=").append(hb.getInt("height", 1080)).append('\n');
+            sb.append("hud-baseline.fit=").append(hb.getString("fit", "anchor_top_left")).append('\n');
         }
         return new com.opendreamcore.protocol.message.ConfigPush(sb.toString());
     }
@@ -363,13 +504,15 @@ public final class ProtocolListener implements PluginMessageListener {
 
     /** 广播全部页面给所有已握手玩家（文件热重载后同步新内容）。 */
     public void broadcastPages() {
-        for (String pageId : pages.ids()) {
-            String yaml = pages.yamlOf(pageId);
-            if (yaml == null) {
+        // 必须按玩家编译后下发：原文含 DreamLang 函数块/条件/占位符，
+        // 客户端解析会丢元素（和 ready 推送同款，别图省事发原文）
+        for (Player online : plugin.getServer().getOnlinePlayers()) {
+            if (!isReady(online)) {
                 continue;
             }
-            for (Player online : plugin.getServer().getOnlinePlayers()) {
-                if (isReady(online)) {
+            for (String pageId : pages.ids()) {
+                String yaml = pages.compiledYaml(pageId, online);
+                if (yaml != null) {
                     send(online, Protocol.PAGE_SYNC, buildPageSync(online, pageId, yaml));
                 }
             }
@@ -384,7 +527,8 @@ public final class ProtocolListener implements PluginMessageListener {
         values.put("server_name", plugin.getServer().getName());
         values.put("tps", serverTps());
         try {
-            values.put("ping", (long) player.getPing());
+            // Paper 专有方法，spigot 接口编译期没有，反射拿
+            values.put("ping", (long) player.getClass().getMethod("getPing").invoke(player));
         } catch (Throwable ignored) {
             values.put("ping", 0L);
         }
@@ -394,7 +538,8 @@ public final class ProtocolListener implements PluginMessageListener {
     /** 服务端 TPS：Paper API getTPS → PAPI %server_tps% → 默认 20.0。 */
     private double serverTps() {
         try {
-            double[] tps = plugin.getServer().getTPS();
+            double[] tps = (double[]) plugin.getServer().getClass()
+                    .getMethod("getTPS").invoke(plugin.getServer());
             if (tps != null && tps.length > 0 && tps[0] > 0) {
                 return Math.min(20.0, tps[0]);
             }
@@ -438,7 +583,69 @@ public final class ProtocolListener implements PluginMessageListener {
     public void send(Player player, String path, com.opendreamcore.protocol.message.Message message) {
         var buf = new com.opendreamcore.protocol.OdcByteArrayBuf();
         message.encode(buf);
-        player.sendPluginMessage(plugin, channel(path), buf.toByteArray());
+        sendRaw(player, path, buf.toByteArray());
+    }
+
+    /** join 时擅下的活：客户端 ready 之前发的页面/控制包会被 Bukkit 整个吞掉
+     *  （sendPluginMessage 只认已报备通道），所以 join 侧只管登记，ready 一到统一放行。 */
+    private final Map<Player, java.util.List<Runnable>> pendingOnReady = new ConcurrentHashMap<>();
+
+    /** ready 前攒着，ready 后立刻跑；已经 ready 就直接跑，不留尾巴。 */
+    public void runWhenReady(Player player, Runnable job) {
+        if (isReady(player)) {
+            job.run();
+            return;
+        }
+        pendingOnReady.computeIfAbsent(player, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(job);
+    }
+
+    /** ready 时放行攒下的活；玩家退出时也得清一把，别留引用。 */
+    private void flushPendingOnReady(Player player) {
+        java.util.List<Runnable> jobs = pendingOnReady.remove(player);
+        if (jobs == null) {
+            return;
+        }
+        for (Runnable job : jobs) {
+            try {
+                job.run();
+            } catch (Exception e) {
+                plugin.getLogger().warning("ready 后补发失败 (" + player.getName() + "): " + e);
+            }
+        }
+    }
+
+    /** 反射 CraftPlayer.addChannel：客户端报备缺失时服务器侧强制补录，不然下行发不出去。 */
+    private void forceListenChannel(Player player, String channel) {
+        try {
+            java.lang.reflect.Method m = player.getClass().getMethod("addChannel", String.class);
+            m.invoke(player, channel);
+            plugin.getLogger().info("补报备下行通道 " + channel + " 给 " + player.getName());
+        } catch (Throwable t) {
+            plugin.getLogger().warning("补报备通道失败 " + channel + ": " + t);
+        }
+    }
+
+    /**
+     * 底层发送：大件自动分片，新老两套通道各走各的。
+     *
+     * 老服（1.12-）：全走单通道 opendreamcore，path 封在帧头里；
+     * 新服（1.13+）：下行有 1MB 的线，>500K 的包切块到 chunk 通道分批运，
+     * 模组端拼好再当一条消息处理。小包直接走自己的通道，一帧不多发。
+     */
+    public void sendRaw(Player player, String path, byte[] payload) {
+        if (legacyChannels) {
+            for (byte[] frame : LegacyFraming.frames(path, payload)) {
+                player.sendPluginMessage(plugin, LEGACY_CHANNEL, frame);
+            }
+            return;
+        }
+        if (payload != null && payload.length > LegacyFraming.MAX_S2C_CHUNK_PAYLOAD) {
+            for (byte[] frame : LegacyFraming.frames(path, payload, LegacyFraming.MAX_S2C_CHUNK_PAYLOAD)) {
+                player.sendPluginMessage(plugin, Protocol.NAMESPACE + ":" + Protocol.CHUNK, frame);
+            }
+            return;
+        }
+        player.sendPluginMessage(plugin, Protocol.NAMESPACE + ":" + path, payload);
     }
 
     /** 同一连接内已执行过 open 脚本的页面（player → pageId 集合），防 join 自动开 + 触发器双开。 */
@@ -670,6 +877,8 @@ public final class ProtocolListener implements PluginMessageListener {
         readyPlayers.remove(player);
         clientVersions.remove(player);
         openedPages.remove(player.getUniqueId());
+        assemblers.remove(player);
+        pendingOnReady.remove(player);
     }
 
     /** 会话/事件/脚本统计（/odc stats）。 */

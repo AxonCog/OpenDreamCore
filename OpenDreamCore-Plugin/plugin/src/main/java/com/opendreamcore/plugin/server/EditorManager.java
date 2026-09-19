@@ -24,6 +24,7 @@ public final class EditorManager {
     private final Map<String, Lease> leases = new ConcurrentHashMap<>();
 
     /** 租约：持有者 + 过期时间。 */
+    @com.github.bsideup.jabel.Desugar
     private record Lease(String holder, long expiresAt) {
         boolean expired() {
             return System.currentTimeMillis() > expiresAt;
@@ -65,7 +66,7 @@ public final class EditorManager {
         try {
             Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + ".yaml");
             Files.createDirectories(file.getParent());
-            Files.writeString(file, yaml, StandardCharsets.UTF_8);
+            java.nio.file.Files.write(file, (yaml).getBytes(StandardCharsets.UTF_8));
             pages.load(); // 热重载
             plugin.getLogger().info("页面已保存: " + pageId + "（by " + player.getName() + "）");
             return true;
@@ -83,7 +84,7 @@ public final class EditorManager {
         return sb.length() == 0 ? "没有活跃租约" : sb.toString();
     }
 
-    // ---------- 布局覆盖（元素位置编辑） ----------
+    // 布局覆盖（元素位置编辑）
 
     private static final String LAYOUT_SUFFIX = ".layout.json";
 
@@ -104,8 +105,8 @@ public final class EditorManager {
             }
             Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + LAYOUT_SUFFIX);
             Files.createDirectories(file.getParent());
-            Files.writeString(file, new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(root),
-                    StandardCharsets.UTF_8);
+            java.nio.file.Files.write(file, new com.google.gson.GsonBuilder()
+                    .setPrettyPrinting().create().toJson(root).getBytes(StandardCharsets.UTF_8));
             plugin.getLogger().info("布局已保存: " + pageId + "（by " + player.getName() + "，" + entries.size() + " 项）");
             return true;
         } catch (Exception e) {
@@ -122,7 +123,7 @@ public final class EditorManager {
             if (!Files.isRegularFile(file)) {
                 return entries;
             }
-            var root = com.google.gson.JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            var root = new com.google.gson.JsonParser().parse(new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
             root.entrySet().forEach(entry -> {
                 var pos = entry.getValue().getAsJsonObject();
                 entries.add(new com.opendreamcore.protocol.message.PageLayout.Entry(entry.getKey(),
@@ -134,10 +135,10 @@ public final class EditorManager {
         return entries;
     }
 
-    // ---------- 世界面板 WYSIWYG 编辑（写回页面 YAML） ----------
+    // 世界面板 WYSIWYG 编辑（写回页面 YAML）
 
     /**
-     * 保存世界布局（校验租约）：把元素 hologram.x/y/z 手术式写回 UI/&lt;page&gt;.yaml
+     * 保存世界布局（校验租约）：把元素 hologram.x/y/z 手术式写回 UI/<page>.yaml
      * （保留注释与其余格式），同时清除这些元素的 world_positions 覆盖，然后热重载。
      * optionsProps：页面级选项点路径（world.background.color 等）同样烘焙进 options 块（缺级自动创建）。
      * 返回写入的元素数 + 选项键数（0 = 全部失败）。
@@ -153,7 +154,7 @@ public final class EditorManager {
         }
         boolean hasEntries = entries != null && !entries.isEmpty();
         boolean hasOptions = optionsProps != null && !optionsProps.isEmpty();
-        boolean hasTitle = pageTitle != null && !pageTitle.isBlank();
+        boolean hasTitle = pageTitle != null && !(pageTitle).trim().isEmpty();
         boolean hasVars = variablesProps != null && !variablesProps.isEmpty();
         if (!hasEntries && !hasOptions && !hasTitle && !hasVars) {
             return 0;
@@ -196,7 +197,7 @@ public final class EditorManager {
                         continue;
                     }
                     String create = entry.props().get("__create__");
-                    if (create != null && !create.isBlank()) {
+                    if (create != null && !(create).trim().isEmpty()) {
                         // 新增元素（客户端生成的相对缩进 0 的列表项 YAML 块）
                         if (insertElement(lines, create)) {
                             changed++;
@@ -215,7 +216,7 @@ public final class EditorManager {
                     }
                 }
             }
-            if (pageTitle != null && !pageTitle.isBlank() && bakePageTitle(lines, pageTitle)) {
+            if (pageTitle != null && !(pageTitle).trim().isEmpty() && bakePageTitle(lines, pageTitle)) {
                 changed++;
             }
             if (variablesProps != null) {
@@ -226,7 +227,7 @@ public final class EditorManager {
                 }
             }
             if (changed > 0) {
-                Files.writeString(file, String.join("\n", lines) + "\n", StandardCharsets.UTF_8);
+                java.nio.file.Files.write(file, (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8));
             }
             return changed;
         } catch (Exception e) {
@@ -237,13 +238,13 @@ public final class EditorManager {
 
     /** 页面变量烘焙：在顶层 variables 块内设置/删除变量键（无 variables 块则创建）。 */
     private static boolean bakeVariableProp(java.util.List<String> lines, String key, String value) {
-        if (key == null || key.isBlank() || key.length() > 64 || key.indexOf(':') >= 0) {
+        if (key == null || (key).trim().isEmpty() || key.length() > 64 || key.indexOf(':') >= 0) {
             return false;
         }
         int varIdx = findKeyLine(lines, 0, lines.size(), "variables");
         if (varIdx < 0) {
             int anchor = 0;
-            while (anchor < lines.size() && (lines.get(anchor).isBlank()
+            while (anchor < lines.size() && (lines.get((anchor)).trim().isEmpty()
                     || lines.get(anchor).trim().startsWith("#"))) {
                 anchor++;
             }
@@ -252,7 +253,7 @@ public final class EditorManager {
                 varIdx = lines.size() - 1;
             } else {
                 int topInd = indentOf(lines.get(anchor));
-                lines.add(anchor, " ".repeat(topInd) + "variables:");
+                lines.add(anchor, repeat(" ", topInd) + "variables:");
                 varIdx = anchor;
             }
         } else if (indentOf(lines.get(varIdx)) != 0) {
@@ -270,7 +271,7 @@ public final class EditorManager {
         }
         // 追加到 variables 块尾
         int at = insertAfterBlock(lines, varIdx, hi);
-        lines.add(at, " ".repeat(varInd + 2) + key + ": " + yamlValue(value));
+        lines.add(at, repeat(" ", varInd + 2) + key + ": " + yamlValue(value));
         return true;
     }
 
@@ -292,7 +293,7 @@ public final class EditorManager {
             return true;
         }
         int anchor = 0;
-        while (anchor < lines.size() && (lines.get(anchor).isBlank()
+        while (anchor < lines.size() && (lines.get((anchor)).trim().isEmpty()
                 || lines.get(anchor).trim().startsWith("#"))) {
             anchor++;
         }
@@ -317,7 +318,7 @@ public final class EditorManager {
         int optIdx = findKeyLine(lines, 0, lines.size(), "options");
         if (optIdx < 0) {
             int anchor = 0;
-            while (anchor < lines.size() && (lines.get(anchor).isBlank()
+            while (anchor < lines.size() && (lines.get((anchor)).trim().isEmpty()
                     || lines.get(anchor).trim().startsWith("#"))) {
                 anchor++;
             }
@@ -326,7 +327,7 @@ public final class EditorManager {
                 optIdx = lines.size() - 1;
             } else {
                 int topInd = indentOf(lines.get(anchor));
-                lines.add(anchor, " ".repeat(topInd) + "options:");
+                lines.add(anchor, repeat(" ", topInd) + "options:");
                 optIdx = anchor;
             }
         } else if (indentOf(lines.get(optIdx)) != 0) {
@@ -341,7 +342,7 @@ public final class EditorManager {
             int idx = findKeyLine(lines, lo, hi, seg[s]);
             if (idx < 0) {
                 // 缺级创建：标量插在父块末尾，容器紧跟父键行
-                String pad = " ".repeat(parentInd + 2);
+                String pad = repeat(" ", parentInd + 2);
                 if (s == seg.length - 1) {
                     int at = insertAfterBlock(lines, parentIdx, hi);
                     lines.add(at, pad + seg[s] + ": " + yamlValue(value));
@@ -426,7 +427,7 @@ public final class EditorManager {
         if (elementsIdx < 0) {
             return false; // 非扁平语法（嵌套）不支持插入
         }
-        String firstLine = block.lines().findFirst().orElse("").trim();
+        String firstLine = firstLineOf(block);
         if (!firstLine.startsWith("- id:") && !firstLine.startsWith("-id:")) {
             return false; // 块格式非法
         }
@@ -446,10 +447,10 @@ public final class EditorManager {
         }
         java.util.List<String> newLines = new java.util.ArrayList<>();
         for (String bl : block.split("\n", -1)) {
-            if (bl.isBlank()) {
+            if ((bl).trim().isEmpty()) {
                 continue;
             }
-            newLines.add(" ".repeat(base) + bl);
+            newLines.add(repeat(" ", base) + bl);
         }
         lines.addAll(insertAt, newLines);
         return true;
@@ -457,8 +458,8 @@ public final class EditorManager {
 
     /** 找元素块起点：扁平语法 `- id: xxx` 或嵌套语法顶层 `xxx:`。 */
     private static int findElementStart(java.util.List<String> lines, String elementId) {
-        java.util.Set<String> reserved = java.util.Set.of("title", "options", "variables", "functions",
-                "elements", "animations", "match", "display", "world", "hud", "lines");
+        java.util.Set<String> reserved = new java.util.HashSet<>(java.util.Arrays.asList("title", "options", "variables", "functions",
+                "elements", "animations", "match", "display", "world", "hud", "lines"));
         for (int i = 0; i < lines.size(); i++) {
             String t = lines.get(i).trim();
             if (t.startsWith("#") || t.isEmpty()) {
@@ -533,7 +534,7 @@ public final class EditorManager {
     /** 元素块内插入缺失的 actions 块（首次绑定动作脚本；已存在 → false 交给 bakeProp 下钻）。 */
     private static boolean insertActionsBlock(java.util.List<String> lines, int start, int end,
                                               String key, String value) {
-        if (value == null || value.isBlank()) {
+        if (value == null || (value).trim().isEmpty()) {
             return false;
         }
         String actionKey = key.substring("actions.".length());
@@ -548,13 +549,13 @@ public final class EditorManager {
         int anchor = start;
         for (int i = start; i < end; i++) {
             String t = lines.get(i);
-            if (!t.isBlank() && !t.trim().startsWith("#")) {
+            if (!(t).trim().isEmpty() && !t.trim().startsWith("#")) {
                 anchor = i;
             }
         }
         int ind = indentOf(lines.get(start));
-        lines.add(anchor + 1, " ".repeat(ind + 2) + actionKey + ": " + yamlValue(value));
-        lines.add(anchor + 1, " ".repeat(ind) + "actions:");
+        lines.add(anchor + 1, repeat(" ", ind + 2) + actionKey + ": " + yamlValue(value));
+        lines.add(anchor + 1, repeat(" ", ind) + "actions:");
         return true;
     }
 
@@ -633,7 +634,7 @@ public final class EditorManager {
             boolean any = false;
             for (int i = holoIdx + 1; i < end; i++) {
                 String l = lines.get(i);
-                if (l.isBlank()) {
+                if ((l).trim().isEmpty()) {
                     continue;
                 }
                 if (indentOf(l) <= holoIndent) {
@@ -648,7 +649,7 @@ public final class EditorManager {
             }
             if (!any) {
                 // 没有 x/y/z 键：在 hologram: 后补三行
-                String pad = " ".repeat(holoIndent + 2);
+                String pad = repeat(" ", holoIndent + 2);
                 lines.add(holoIdx + 1, pad + "x: " + fmt(entry.x()));
                 lines.add(holoIdx + 2, pad + "y: " + fmt(entry.y()));
                 lines.add(holoIdx + 3, pad + "z: " + fmt(entry.z()));
@@ -916,5 +917,23 @@ public final class EditorManager {
     private static String fmt(double v) {
         double r = Math.round(v * 1000) / 1000.0;
         return r == Math.floor(r) && !Double.isInfinite(r) ? String.valueOf((long) r) : String.valueOf(r);
+    }
+
+    /** Java11 才有 String.repeat，这里手动拼。 */
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            sb.append(s);
+        }
+        return sb.toString();
+    }
+
+    /** Java11 才有 String.lines()，取首行。 */
+    private static String firstLineOf(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        int nl = s.indexOf('\n');
+        return (nl < 0 ? s : s.substring(0, nl)).trim();
     }
 }

@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -11,7 +13,7 @@ public final class PageClose implements Message {
     private final String sessionId;
 
     public PageClose(String sessionId) {
-        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+        if (sessionId == null || J8.isBlank(sessionId) || sessionId.length() > 64) {
             throw new IllegalArgumentException("会话 id 非法");
         }
         this.sessionId = sessionId;

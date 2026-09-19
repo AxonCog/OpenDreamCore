@@ -1,32 +1,33 @@
-// core：纯逻辑（协议/页面/裁决），零 Bukkit 运行时依赖，可单测。
-// 合并 OpenDreamCore/common 源码（零 MC 依赖部分），服务端与客户端共用同一份协议实现。
+// core：纯逻辑（协议/页面/裁决），零 Bukkit 运行时依赖。
+// 共享树不再塞源码编译——吃远古线 common-j8 模块烘好的成品 jar：
+// 主树源码经 Jabel 脱糖成 JDK8 字节码，插件这边 toolchain 8 只管用，
+// 高版本改了共享树，这里下次构建自动跟上，不再有"两棵树各漂各的"。
 plugins {
     id 'java-library'
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(8)
     }
 }
 
 repositories {
     mavenCentral()
-    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
 }
 
-sourceSets {
-    main {
-        java.srcDir '../../OpenDreamCore/common/src/main/java'
-    }
-}
+def commonJ8 = fileTree(dir: '../../OpenDreamCore-Legacy/common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
 
 dependencies {
-    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
-    // common 源码的运行时依赖（协议/配置/脚本）
+    // 成品 jar 用 api 露出去：plugin/nms 模块通过 project(':core') 直接拿到类
+    api commonJ8
+    // 共享树自身的运行时依赖（协议/配置/脚本）
     implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'org.yaml:snakeyaml:2.2'
-    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    // antlr-runtime 必须 api 透出：DreamLang 执行器是公共 API，
+    // 使用方（plugin/nms/附属）引用 DreamLangExecutor.Callable 时要解析
+    // antlr visitor 层级，不透出去会"找不到 ParseTreeVisitor"
+    api 'org.antlr:antlr4-runtime:4.13.1'
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -34,4 +35,13 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// jar 是另一个构建的产物，缺了别装死，当场说人话
+tasks.named('jar') {
+    doFirst {
+        if (commonJ8.files.isEmpty()) {
+            throw new GradleException('缺 opendreamcore-common-j8 jar：先在 OpenDreamCore-Legacy 跑 gradlew :common-j8:jar')
+        }
+    }
 }

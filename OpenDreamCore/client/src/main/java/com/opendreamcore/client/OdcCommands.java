@@ -11,19 +11,62 @@ import net.minecraft.client.Minecraft;
 import java.nio.file.Path;
 
 /**
- * /odc 客户端命令树（共享定义）。
+ * /codc 客户端命令树（共享定义）。
  * 全版本一个链路：分支结构、执行体、反馈文案都在这里；
  * 各 target 只需把 buildRoot().build() 注册进自家 dispatcher（泛型原生擦除，直接强转）。
- * 反馈走聊天栏（不依赖平台 Source 差异）；连服时子命令转发服务端。
+ * 反馈走聊天栏（不依赖平台 Source 差异）。
+ *
+ * 名字这条线别拧：模组端叫 codc，只在本地动作，碰都不碰网络；
+ * /odc 是服务器插件的地盘，想驱动服务器页面就去服务器那边装插件，
+ * 客户端别自作主张替人家转发——以前转发+拦截那套把 TAB 补全弄出双份，
+ * 还害得聊天历史抽风，早该切割干净了。
  */
 public final class OdcCommands {
 
     private OdcCommands() {
     }
 
-    // ---- 反馈：统一走聊天栏 ----
+    static {
+        // 核心自己也走命令注册表，跟附属模组一个待遇：先进表，后由注册点统一遍历取树
+        com.opendreamcore.client.api.CommandRegistry.register("codc", OdcCommands::buildRoot);
+        // /odc：客户端本地占位，进服后原样转发给服务器插件执行（单机提示用 /codc）
+        com.opendreamcore.client.api.CommandRegistry.register("odc", OdcCommands::buildServerForwardRoot);
+    }
+
+    /**
+     * 把命令注册表里登记的树全塞进自家 dispatcher。
+     * brigadier 泛型擦除后 register(LiteralArgumentBuilder) 直接调即可，
+     * 不再反射猜方法（各版本签名都是这一个，猜反而是事故源）。
+     * 返回成功注册的条数，0 说明表是空的（附属没注、核心也没注到）。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static int registerAll(com.mojang.brigadier.CommandDispatcher dispatcher) {
+        if (dispatcher == null) {
+            return 0;
+        }
+        int n = 0;
+        for (var node : com.opendreamcore.client.api.CommandRegistry.nodes()) {
+            try {
+                dispatcher.register(node.build());
+                n++;
+            } catch (Throwable t) {
+                ClientController.LOGGER.warn("命令 {} 注册失败: {}", node.name(), t.toString());
+            }
+        }
+        return n;
+    }
+
+    // 反馈：统一走聊天栏（displayClientMessage 全版本稳定，别碰 addMessage 的可变参数反射）
     private static void line(String msg) {
-        // 高版本 addMessage 签名带 GuiMessageTag 可变参数，走反射兼容各版本
+        var player = Minecraft.getInstance().player;
+        if (player != null) {
+            try {
+                player.displayClientMessage(Component.literal(msg), false);
+                return;
+            } catch (Throwable ignored) {
+                // 某些老版本签名不同，fallthrough 到反射兜底
+            }
+        }
         try {
             var chat = Minecraft.getInstance().gui.getChat();
             var comp = Component.literal(msg);
@@ -36,7 +79,6 @@ public final class OdcCommands {
                     }
                 }
             }
-            chat.getClass().getMethod("addMessage", comp.getClass()).invoke(chat, comp);
         } catch (Throwable ignored) {
         }
     }
@@ -49,20 +91,111 @@ public final class OdcCommands {
         line(msg);
     }
 
-    /** 构建完整 /odc 命令树。 */
+    /**
+     * /odc 服务器转发命令：客户端本地把整条原样发回服务器插件执行。
+     * 不加这个，上服裸敲 /odc 会在客户端本地解析就报"未知或不完整的命令"
+     * （服务器命令树根节点在客户端不可执行），子命令也不会自动补全。
+     * 转发只此一次、不叠加 vanilla 再发一遍，不会双份执行。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static LiteralArgumentBuilder buildServerForwardRoot() {
+        return (LiteralArgumentBuilder) ((LiteralArgumentBuilder) LiteralArgumentBuilder.literal("odc"))
+                .executes(ctx -> forwardOdc(""))
+                .then(RequiredArgumentBuilder.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> forwardOdc(StringArgumentType.getString(ctx, "args"))));
+    }
+
+    /** 转发护栏：sendCommand 兜底路径在 NeoForge 会再进客户端命令树，靠它截断防递归。 */
+    private static volatile boolean forwarding;
+
+    private static void logForward(String full) {
+        try {
+            ClientController.LOGGER.info("[odc] 客户端转发服务器命令: /{}", full);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static int forwardOdc(String args) {
+        if (forwarding) {
+            return 0; // 已在转发中（sendCommand 递归回来的那一脚），直接放弃避免栈溢出
+        }
+        var mc = Minecraft.getInstance();
+        var conn = mc.getConnection();
+        if (conn == null) {
+            line("§7[OpenDreamCore] §f没连服务器没有 /odc，本地命令用 §e/codc");
+            return 0;
+        }
+        forwarding = true;
+        try {
+            String full = "odc" + (args == null || args.isEmpty() ? "" : " " + args);
+            logForward(full);
+            sendChatCommandRaw(conn, full);
+            return Command.SINGLE_SUCCESS;
+        } catch (Throwable t) {
+            // 反射发包失败兜底：退回 sendCommand（NeoForge 会再进客户端命令树，护栏截断不递归）
+            try {
+                conn.sendCommand("odc" + (args == null || args.isEmpty() ? "" : " " + args));
+                return Command.SINGLE_SUCCESS;
+            } catch (Throwable t2) {
+                err("odc 转发失败: " + t2.toString());
+                return 0;
+            }
+        } finally {
+            forwarding = false;
+        }
+    }
+
+    /**
+     * 直发聊天命令包绕开客户端命令分发（sendCommand 会再进我们的树无限递归）。
+     * 跨版本：新版 ServerboundChatCommandPacket 有 (String) 单参构造；
+     * 1.20.1 及更早是 record 五参 (String, Instant, long, ArgumentSignatures, LastSeenMessages.Update)，
+     * 反射挑一个能用的，别在共享树里写死构造器签名。
+     */
+    private static void sendChatCommandRaw(Object conn, String command) throws Exception {
+        Class<?> cls = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket");
+        java.lang.reflect.Constructor<?> single = null;
+        java.lang.reflect.Constructor<?> any = null;
+        for (var c : cls.getConstructors()) {
+            if (any == null) {
+                any = c;
+            }
+            if (c.getParameterCount() == 1 && c.getParameterTypes()[0] == String.class) {
+                single = c;
+                break;
+            }
+        }
+        java.lang.reflect.Constructor<?> ctor = single != null ? single : any;
+        if (ctor == null) {
+            throw new IllegalStateException("ServerboundChatCommandPacket 没有可用构造器");
+        }
+        Object packet;
+        if (ctor == single) {
+            packet = ctor.newInstance(command);
+        } else {
+            // 老版 record：command + 时间戳 + 盐 + 空签名 + 空已读回执
+            Class<?> sigCls = Class.forName("net.minecraft.commands.arguments.ArgumentSignatures");
+            Class<?> luCls = Class.forName("net.minecraft.network.chat.LastSeenMessages$Update");
+            packet = ctor.newInstance(command, java.time.Instant.now(),
+                    new java.util.Random().nextLong(),
+                    sigCls.getField("EMPTY").get(null),
+                    luCls.getField("EMPTY").get(null));
+        }
+        Object connection = conn.getClass().getMethod("getConnection").invoke(conn);
+        connection.getClass().getMethod("send", net.minecraft.network.protocol.Packet.class)
+                .invoke(connection, packet);
+    }
+
+    /** 构建完整 /codc 命令树。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static LiteralArgumentBuilder buildRoot() {
         var cc = ClientController.get();
         return (LiteralArgumentBuilder) ((LiteralArgumentBuilder)
-                LiteralArgumentBuilder.literal("odc"))
-                // ---- open <page> ----
+                LiteralArgumentBuilder.literal("codc"))
+                // open <page>
                 .then(LiteralArgumentBuilder.literal("open")
                         .then(RequiredArgumentBuilder.argument("page", StringArgumentType.greedyString())
                                 .executes(ctx -> {
                                     String id = StringArgumentType.getString(ctx, "page");
-                                    if (cc.tryForwardOdcCommand("open " + id)) {
-                                        return Command.SINGLE_SUCCESS;
-                                    }
                                     Page page = cc.localPages().get(id);
                                     if (page == null) {
                                         err("没有这个页面: " + id);
@@ -71,21 +204,15 @@ public final class OdcCommands {
                                     cc.open(page);
                                     return Command.SINGLE_SUCCESS;
                                 })))
-                // ---- close ----
+                // close
                 .then(LiteralArgumentBuilder.literal("close")
                         .executes(ctx -> {
-                            if (cc.tryForwardOdcCommand("close")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
                             cc.close();
                             return Command.SINGLE_SUCCESS;
                         }))
-                // ---- hud ----
+                // hud
                 .then(LiteralArgumentBuilder.literal("hud")
                         .executes(ctx -> {
-                            if (cc.tryForwardOdcCommand("hud")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
                             if (cc.isHudOpen()) {
                                 cc.closeHud();
                                 ok("HUD 已关闭");
@@ -95,25 +222,15 @@ public final class OdcCommands {
                             }
                             return Command.SINGLE_SUCCESS;
                         }))
-                // ---- edit 子树 ----
+                // edit 子树
                 .then(buildEditSubtree())
-                // ---- reload ----
+                // reload（客户端本地全量：页面/字体/视觉规则/主题/标题；材质包归 Ctrl+R）
                 .then(LiteralArgumentBuilder.literal("reload")
                         .executes(ctx -> {
-                            if (cc.tryForwardOdcCommand("reload")) {
-                                return Command.SINGLE_SUCCESS;
-                            }
-                            Path uiDir = Minecraft.getInstance().gameDirectory.toPath()
-                                    .resolve("OpenDreamCore").resolve("UI");
-                            cc.localPages().load(uiDir);
-                            if (cc.isOpen()) {
-                                cc.refreshCurrent();
-                            }
-                            WindowBranding.reload();
-                            ok("本地页面已重载");
+                            cc.reloadAll();
                             return Command.SINGLE_SUCCESS;
                         }))
-                // ---- list ----
+                // list
                 .then(LiteralArgumentBuilder.literal("list")
                         .executes(ctx -> {
                             var msg = cc.isServerMode()
@@ -124,18 +241,33 @@ public final class OdcCommands {
                             ok(msg);
                             return Command.SINGLE_SUCCESS;
                         }))
-                // ---- 根帮助 ----
+                // state：本地会话/页面一览，纯本地不发包装
+                .then(LiteralArgumentBuilder.literal("state")
+                        .executes(ctx -> {
+                            for (String line : Diagnostics.state()) ok(line);
+                            return Command.SINGLE_SUCCESS;
+                        }))
+                // dump <page>：本地页面 YAML 转存，方便离线比对
+                .then(LiteralArgumentBuilder.literal("dump")
+                        .then(RequiredArgumentBuilder.argument("page", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    String msg = Diagnostics.dump(StringArgumentType.getString(ctx, "page"));
+                                    if (msg.startsWith("§c")) err(msg); else ok(msg);
+                                    return Command.SINGLE_SUCCESS;
+                                })))
+                // 根帮助
                 .executes(ctx -> {
                     ok("""
                             §e=== OpenDreamCore ===§r
-                            §f/odc open/close/hud/list/reload §7— 页面与常驻控制
-                            §f/odc edit §7— 编辑器帮助
-                            §7单人世界执行本地逻辑；连服自动转发服务端""");
+                            §f/codc open/close/hud/list/reload §7— 页面与常驻控制（全本地）
+                            §f/codc edit §7— 编辑器帮助
+                            §f/codc state/dump §7— 本地诊断与页面转存
+                            §7本命令只动本地页面；服务器页面走插件的 /odc""");
                     return Command.SINGLE_SUCCESS;
                 });
     }
 
-    /** /odc edit 子树。 */
+    /** /codc edit 子树：编辑器相关的都挤在这（语义和老 OpenDreamEditor 命令一致）。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static LiteralArgumentBuilder buildEditSubtree() {
         var cc = ClientController.get();
@@ -194,7 +326,7 @@ public final class OdcCommands {
                                     cc.setHudEditMode(true);
                                     ok("§aHUD 编辑模式已开启§f（拖动元素改位置 | ESC退出）");
                                 } else {
-                                    err("没有挂载的 HUD 页面（先 /odc hud）");
+                                    err("没有挂载的 HUD 页面（先 /codc hud）");
                                     return 0;
                                 }
                             }
@@ -244,21 +376,21 @@ public final class OdcCommands {
                 .executes(ctx -> {
                     ok("""
                             §e=== OpenDreamCore 编辑器 ===§r
-                            §f/odc edit <页面id> §7→ 打开页面 + 进入游戏内编辑
-                            §f/odc edit <页面id> external §7→ 外置编辑器打开 YAML
-                            §f/odc edit <页面id> with <编辑器> §7→ 指定编辑器(如 code, notepad++)
-                            §f/odc edit hud §7→ HUD 编辑模式
-                            §f/odc edit on/off §7→ 切换当前页面编辑模式
-                            §f/odc edit save §7→ 保存编辑
-                            §f/odc edit export §7→ 导出当前页面 YAML
-                            §f/odc edit lease/release <页面> §7→ 服务端编辑租约
+                            §f/codc edit <页面id> §7→ 打开页面 + 进入游戏内编辑
+                            §f/codc edit <页面id> external §7→ 外置编辑器打开 YAML
+                            §f/codc edit <页面id> with <编辑器> §7→ 指定编辑器(如 code, notepad++)
+                            §f/codc edit hud §7→ HUD 编辑模式
+                            §f/codc edit on/off §7→ 切换当前页面编辑模式
+                            §f/codc edit save §7→ 保存编辑
+                            §f/codc edit export §7→ 导出当前页面 YAML
+                            §f/codc edit lease/release <页面> §7→ 服务端编辑租约
                             §7保存 YAML 后游戏自动热重载""");
                     return Command.SINGLE_SUCCESS;
                 });
     }
 
     /**
-     * /odc edit <pageId> 核心逻辑：
+     * /codc edit <pageId> 核心逻辑：
      * 打开目标页（优先当前实例 > 服务端下发 > 本地文件）+ 进入编辑模式或外置编辑器打开。
      */
     @SuppressWarnings("unchecked")
@@ -299,7 +431,7 @@ public final class OdcCommands {
             if (opened) {
                 ok("§a外置编辑器已打开: §f" + file + "\n§7保存后游戏自动热重载");
             } else {
-                err("§c无法打开外置编辑器 §7(试试 /odc edit " + pageId + " with code)");
+                err("§c无法打开外置编辑器 §7(试试 /codc edit " + pageId + " with code)");
             }
             // 双窗口协作：同时进入游戏内编辑模式
             controller.toggleEdit(true);
@@ -307,7 +439,7 @@ public final class OdcCommands {
             controller.toggleEdit(true);
             ok("§a编辑模式已开启: §f" + pageId + "\n"
                     + "§7拖动元素 | Del删除 | Ctrl+C复制 | [ ]调Z | Ctrl+E导出YAML\n"
-                    + "§7/odc edit " + pageId + " external §8→ 外置编辑器");
+                    + "§7/codc edit " + pageId + " external §8→ 外置编辑器");
         }
         return Command.SINGLE_SUCCESS;
     }

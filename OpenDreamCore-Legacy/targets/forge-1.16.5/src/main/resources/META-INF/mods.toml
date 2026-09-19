@@ -1,0 +1,23 @@
+modLoader = "javafml"
+loaderVersion = "[36,)"
+license = "Apache-2.0"
+
+[[mods]]
+modId = "opendreamcore"
+version = "0.1.2"
+displayName = "OpenDreamCore"
+description = "老版本线：YAML 界面引擎（1.16.5）"
+
+[[dependencies.opendreamcore]]
+modId = "forge"
+mandatory = true
+versionRange = "[36,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.opendreamcore]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.16.5]"
+ordering = "NONE"
+side = "BOTH"

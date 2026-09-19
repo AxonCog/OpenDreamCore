@@ -1,0 +1,97 @@
+// OpenDreamCore-Legacy 根工程：编排各 target 的独立 Gradle 构建，外加一道 J8 语法门禁。
+//
+// 跟现代线（OpenDreamCore/）同一套路：settings.gradle 里没有 include 共享树，
+// common-legacy / common-legacy-jdk8-pure / client-legacy 只是被各 target 用
+// srcDirs 直接吃进去的源目录，不是 Gradle 子项目。根工程只做编排与门禁。
+//
+// 各 target 的 Gradle 版本不一样（1.16.5 是 7.6，1.12.2 是 4.10.3），
+// 所以跑子构建一律优先用 target 自带的 gradlew.bat，根 wrapper 只在没有自带时兜底。
+//
+// 1.7.10（Gradle 2.14）/ 1.6.4（Gradle 1.x）走老 ForgeGradle，进不了 7.6 的评估，
+// 也不在 settings.gradle 里，只能各自进目录手工构建。
+
+// 共享树的 JDK8 门禁现在在 common-j8 模块里：主树源码 release 8 + Jabel 脱糖，
+// verifyBytecodeLevel 验每个 class 都是 major 52。以前那棵手工抄的
+// common-legacy-jdk8-pure 连同 verifyJ8 任务一起退役了——源头只有一份，漂移无处发生。
+
+def targetBuilds = [
+        'forge-1.16.5': 'targets/forge-1.16.5',
+        'forge-1.12.2': 'targets/forge-1.12.2',
+]
+
+def activeTargets = targetBuilds.findAll { name, dir -> file("${dir}/build.gradle").exists() }
+
+// 优先 target 自带 wrapper，没有再用根的
+def gradlewFor(String dir) {
+    def own = file("${dir}/gradlew.bat")
+    own.exists() ? own.absolutePath : "${rootDir.absolutePath}\\gradlew.bat"
+}
+
+// 构建任务名：forge-1.16.5 -> buildForge1165
+def taskNameFor = { String targetName -> 'buildForge' + targetName.replace('forge-', '').replace('.', '') }
+
+activeTargets.each { targetName, dir ->
+    tasks.register(taskNameFor(targetName), Exec) {
+        group = 'build'
+        description = "Builds ${targetName} in its independent Gradle project."
+        workingDir rootDir
+        commandLine 'cmd', '/c', gradlewFor(dir), '-p', dir.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
+    }
+}
+
+tasks.register('build') {
+    group = 'build'
+    description = 'Builds all active legacy targets.'
+    dependsOn activeTargets.keySet().collect { taskNameFor(it) }
+}
+
+tasks.register('listTargets') {
+    group = 'help'
+    description = 'Lists all configured legacy targets and how each one builds.'
+    doLast {
+        targetBuilds.each { name, dir ->
+            println "${name}: ${dir} [${activeTargets.containsKey(name) ? 'ACTIVE' : 'placeholder'}]"
+        }
+        println 'forge-1.7.10: targets/forge-1.7.10 [external: Gradle 2.14 + JDK 1.8.0_181，进目录跑 build_legacy.bat]'
+        println 'forge-1.6.4:  targets/forge-1.6.4  [external: Gradle 1.x，进目录跑 run_compile.bat]'
+    }
+}
+
+// verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总
+// 用法：gradlew.bat verifyMatrix [-PmatrixContinue=true]
+tasks.register('verifyMatrix') {
+    group = 'verification'
+    description = 'Runs compileJava in every active legacy target and prints a green/red summary.'
+    // 四个 target 都吃这个 jar，先把它烘出来再进各家编译
+    dependsOn ':common-j8:jar'
+    doLast {
+        def continueOnFail = providers.gradleProperty('matrixContinue').map { it.toBoolean() }.orElse(false)
+        def results = [:]
+        activeTargets.each { name, dir ->
+            def logFile = file("${rootDir}/../_verify_${name}.log")
+            if (logFile.exists()) { logFile.delete() }
+            def pb = new ProcessBuilder(['cmd', '/c', gradlewFor(dir),
+                                         '-p', dir.replace('/', '\\').toString(),
+                                         'compileJava', '--console', 'plain', '--no-daemon'])
+            pb.directory(rootDir)
+            pb.redirectErrorStream(true)
+            def proc = pb.start()
+            // 先排空再取 exitValue，否则子进程输出塞满缓冲区会死锁
+            proc.inputStream.eachLine { line -> logFile.append(line + '\n') }
+            results[name] = (proc.exitValue() == 0)
+        }
+        println '---- legacy compile matrix ----'
+        def failed = []
+        results.each { name, ok ->
+            println "${ok ? 'GREEN' : 'RED  '}  ${name}"
+            if (!ok) failed << name
+        }
+        println "------------------------ ${results.values().count(true)}/${results.size()} green"
+        if (failed && !continueOnFail) {
+            throw new GradleException("legacy compile matrix RED: ${failed.join(', ')}")
+        }
+    }
+}
+
+// verifyJ8 退役：它证明的是手工 pure 树的 JDK8 纯度，那棵树已删。
+// 现在由 :common-j8:compileJava（release 8 + Jabel）与 :common-j8:verifyBytecodeLevel 把关。

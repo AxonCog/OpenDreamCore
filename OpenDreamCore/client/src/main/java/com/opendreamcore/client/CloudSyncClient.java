@@ -129,7 +129,20 @@ public final class CloudSyncClient {
 
     /** 防路径穿越：只允许落在缓存目录内。 */
     private Path safeResolve(String path) {
-        Path resolved = cacheDir().resolve(path).normalize();
+        // 哈希命名：
+        // 文件名 = SHA-256(会话key ∥ 相对路径)，保留目录层级与扩展名。
+        // 没有 key 无法算出名字——磁盘上既看不到原始路径，也无法枚举内容；
+        // 读取时用同一把 key 重算定位即可。未就绪（无 key）时回退原路径。
+        Path resolved;
+        if (sessionKey == null || sessionKey.length == 0) {
+            resolved = cacheDir().resolve(path).normalize();
+        } else {
+            String name = com.opendreamcore.visual.CacheNames.forPath(sessionKey, path);
+            int slash = path.lastIndexOf('/');
+            String dirPart = slash >= 0 ? path.substring(0, slash) : "";
+            resolved = (dirPart.isEmpty() ? cacheDir() : cacheDir().resolve(dirPart))
+                    .resolve(name).normalize();
+        }
         if (!resolved.startsWith(cacheDir())) {
             throw new IllegalArgumentException("非法资源路径: " + path);
         }

@@ -11,8 +11,8 @@ import java.util.function.Consumer;
 /**
  * 脚本调度器（Script.延迟执行 / 计划执行 / 防抖 / 节流 / Screen.延迟变量）。
  *
- * <p>从 ClientController 抽出的纯调度逻辑：任务存储、到期判定、防抖/节流合并、
- * 页面级清理。与控制器状态的交互经 {@link Host} 回调，保持本类零 MC 依赖可单测。</p>
+ * 从 ClientController 抽出的纯调度逻辑：任务存储、到期判定、防抖/节流合并、
+ * 页面级清理。与控制器状态的交互经 Host 回调，保持本类零 MC 依赖可单测。
  */
 public final class ScriptScheduler {
 
@@ -76,7 +76,7 @@ public final class ScriptScheduler {
         this.host = host;
     }
 
-    /** 调度脚本执行；intervalMs = 0 一次性，&gt;0 循环。返回任务 id（任务数超上限返回 -1）。 */
+    /** 调度脚本执行；intervalMs = 0 一次性，>0 循环。返回任务 id（任务数超上限返回 -1）。 */
     public long scheduleScript(String script, long delayMs, long intervalMs) {
         return scheduleTask(0, script, delayMs, intervalMs, null, null);
     }

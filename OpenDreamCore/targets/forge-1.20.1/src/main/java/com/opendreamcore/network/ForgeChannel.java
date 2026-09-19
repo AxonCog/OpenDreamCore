@@ -73,6 +73,9 @@ public final class ForgeChannel {
                 ClientController.get().handlePageControl(PageControl.decode(reader(data))));
         register(Protocol.PAGE_SYNC, data ->
                 ClientController.get().storeServerPage(PageSync.decode(reader(data))));
+        register(Protocol.VISUAL_RULES, data ->
+                ClientController.get().handleVisualRules(
+                        com.opendreamcore.protocol.message.VisualRulesSync.decode(reader(data))));
         register(Protocol.CLOUD_MANIFEST, data ->
                 ClientController.get().cloud().handleManifest(CloudManifest.decode(reader(data))));
         register(Protocol.CLOUD_FILE, data ->

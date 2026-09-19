@@ -166,6 +166,16 @@ public final class UiRenderer {
         double scale = node.scale();
         double alpha = node.opacity();
         double rotation = node.rotation();
+        // 主题里 ":hover {scale: 1.05}" 这类声明在这里实时兑现，无需重排
+        try {
+            double[] rt = com.opendreamcore.client.style.StyleStateService.get()
+                    .applyRootTransform(node, scale, alpha, rotation);
+            scale = rt[0];
+            alpha = rt[1];
+            rotation = rt[2];
+        } catch (Exception ignored) {
+            // 样式层任何异常不阻断渲染
+        }
         if (anim != null) {
             scale *= anim[2];
             alpha *= anim[3];
@@ -243,6 +253,10 @@ public final class UiRenderer {
             case "suggestion" -> InputDraws.drawSuggestion(g, font, node, state, mouseX, mouseY);
             case "card" -> CardDraws.drawCard(g, font, node, pageVars);
             case "flip_card" -> CardDraws.drawFlipCard(g, font, node, state, pageVars);
+            case "entity", "model" -> com.opendreamcore.client.entity.EntityViewComponent.draw(
+                    g, node, mouseX, mouseY, pageVars);
+            case "item_model", "item_3d" -> com.opendreamcore.client.entity.ItemModelComponent.draw(
+                    g, node, mouseX, mouseY, pageVars);
             case "chart" -> ChartDraws.drawChart(g, font, node);
             case "compass" -> WorldMiscDraws.drawCompass(g, font, node, pageVars);
             case "direction" -> WorldMiscDraws.drawDirection(g, font, node);
@@ -454,7 +468,7 @@ public final class UiRenderer {
         return new BorderSpec(UiStyle.color(raw, 0), widthDefault, false, 0xFFFFFFFF);
     }
 
-    // ---------- 圆角/描边矩形（三角剖分） ----------
+    // 圆角/描边矩形（三角剖分）
 
     /** 圆角矩形：外圈 border 层 + 内缩 fill 层；radius=0 且 border=0 走普通 fillRect。 */
     public static void drawRoundedRect(GuiGraphics g, RenderNode node, double radius,
@@ -873,7 +887,7 @@ public final class UiRenderer {
         }
     }
 
-    // ---------- 逐字揭示（text.reveal） ----------
+    // 逐字揭示（text.reveal）
     /** 逐字动画状态（scope+元素 id → 首次渲染毫秒 + 内容快照，内容变化重触发）。 */
     public static final java.util.Map<String, TextElements.RevealState> textRevealState = new java.util.concurrent.ConcurrentHashMap<>();
     public static final int REVEAL_PRUNE_THRESHOLD = 800;
@@ -883,9 +897,9 @@ public final class UiRenderer {
         textRevealState.keySet().removeIf(k -> k.startsWith(prefix));
     }
 
-    // ---------- 角标 / 状态图标（badge / statusIcon） ----------
+    // 角标 / 状态图标（badge / statusIcon）
 
-    // ---------- 仪表盘 / 环形滑块（弧形渲染） ----------
+    // 仪表盘 / 环形滑块（弧形渲染）
 
     /** 槽位里的物品图标（item: "minecraft:diamond_sword"，可带数量 "id x64"；支持 {{vars.xxx}} 插值）。 */
     public static void drawItemIcon(GuiGraphics g, Font font, RenderNode node, Object raw, boolean big,
@@ -933,6 +947,8 @@ public final class UiRenderer {
         if (count > 1) {
             g.renderItemDecorations(font, stack, 0, 0);
         }
+        // ItemIcon 皮肤覆盖：规则命中就把图标盖成自定义贴图（静态走散装注册表，gif 走 GifPlayer）
+        overlayItemSkin(g, id);
         CompatRender.posePop(pose);
     }
 
@@ -968,16 +984,45 @@ public final class UiRenderer {
         CompatRender.poseTranslate(pose, -icon / 2.0, -icon / 2.0);
         g.renderItem(stack, 0, 0);
         if (count > 1) g.renderItemDecorations(font, stack, 0, 0);
+        // ItemIcon 皮肤覆盖（旋转展示同款待遇）
+        overlayItemSkin(g, id);
         CompatRender.posePop(pose);
     }
 
-    // ========== 输入类：area_input / suggestion ==========
+    /**
+     * ItemIcon 皮肤覆盖：规则命中就在原版图标上盖自定义贴图（所有物品图标绘制都经过这）。
+     * 静态图走 LooseResourceLoader 注册表（资源云/托管目录都算），gif 走 GifPlayer 的当前帧。
+     * 无规则命中或贴图还没就位就什么都不画——原版图标垫底，天然回落。
+     */
+    private static void overlayItemSkin(GuiGraphics g, String itemId) {
+        String tex = com.opendreamcore.client.visual.VisualItemSkins.textureFor(itemId);
+        if (tex == null) {
+            return;
+        }
+        boolean gif = tex.toLowerCase().endsWith(".gif");
+        net.minecraft.resources.ResourceLocation rl = gif ? gifFrame(tex)
+                : com.opendreamcore.client.resources.LooseResourceLoader.lookup(tex);
+        if (rl == null && gif) {
+            rl = gifFrame(tex);
+        }
+        if (rl != null) {
+            CompatRender.blit(g, rl, 0, 0, 16, 16, 0, 0, 16, 16, 16, 16);
+        }
+    }
 
-    // ========== 展示类：card / flip_card / chart ==========
+    /** GIF 当前帧贴图；未就绪/文件缺失返回 null。 */
+    private static net.minecraft.resources.ResourceLocation gifFrame(String path) {
+        var player = com.opendreamcore.client.GifPlayer.of(path);
+        return player == null ? null : player.currentTexture();
+    }
 
-    // ========== 方位类：compass / direction ==========
+    // 输入类：area_input / suggestion
 
-    // ========== 画布：canvas ==========
+    // 展示类：card / flip_card / chart
+
+    // 方位类：compass / direction
+
+    // 画布：canvas
 
     public static int lerpColor(int from, int to, double t) {
         int a = (int) (((from >>> 24) & 0xFF) + (((to >>> 24) & 0xFF) - ((from >>> 24) & 0xFF)) * t);
@@ -987,9 +1032,9 @@ public final class UiRenderer {
         return (a << 24) | (r << 16) | (gr << 8) | b;
     }
 
-    // ========== 顶部 Boss 条：boss_bar ==========
+    // 顶部 Boss 条：boss_bar
 
-    // ========== 运行时嵌入：embed ==========
+    // 运行时嵌入：embed
 
     /** 嵌入深度防护（嵌入页再嵌入 → 死循环）。 */
     public static final ThreadLocal<Integer> EMBED_DEPTH = ThreadLocal.withInitial(() -> 0);
@@ -1060,7 +1105,15 @@ public final class UiRenderer {
 
     public static Map<?, ?> propsMap(RenderNode node, String key) {
         Object raw = node.props().get(key);
-        return raw instanceof Map<?, ?> map ? map : Map.of();
+        Map<?, ?> base = raw instanceof Map<?, ?> map ? map : Map.of();
+        // 状态覆盖层 + 过渡插值在取值口统一叠加，所有渲染器无感知受益。
+        // 没有主题命中时 styledSpec 原样返回，零开销。
+        try {
+            return com.opendreamcore.client.style.StyleStateService.get()
+                    .styledSpec(node, key, base);
+        } catch (Exception e) {
+            return base; // 样式层任何异常不阻断渲染
+        }
     }
 
     public static String str(Object v) {
@@ -1090,7 +1143,7 @@ public final class UiRenderer {
         g.fill(r[0], r[1], r[2], r[3], color);
     }
 
-    // ---- 公共 API 转发（实现移至 ScreenElements → elements/ 组件族，round 6 / C2）----
+    // 公共 API 转发（实现移至 ScreenElements → elements/ 组件族，round 6 / C2）
     public static String suggestionValue(Object s) {
         return InputDraws.suggestionValue(s);
     }

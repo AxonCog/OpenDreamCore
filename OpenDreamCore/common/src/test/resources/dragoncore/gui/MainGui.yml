@@ -1,0 +1,182 @@
+allowEscClose: false
+Functions:
+  open: |-
+    界面变量.执行操作 = 'prelogin';
+    方法.发包('DragonCoreLogin', 'prelogin');
+  登录模式: |-
+    登录注册按钮.text = '确定登录';
+    登录标题.texts = '登录系统';
+    登录提示.texts = '&c当前账号已被注册!';
+    重复密码框.visible = false;
+    密码框.y = '背景.y + 背景.height*0.35';
+    界面变量.执行操作 = 'login';
+    小字.visible = 'true';
+  注册模式: |-
+    登录注册按钮.text = '注册账号';
+    登录标题.texts = '注册账号';
+    登录提示.texts = '标语：请先进行注册！';
+    按钮1.visible = 'false';
+    按钮2.visible = 'false';
+    界面变量.执行操作 = 'register';
+    界面变量.确定按钮 = true;
+    密码框.y = '背景.y + 背景.height*0.3';
+    重复密码框.visible = true;
+    小字.visible = false;
+  密码位数错误: 密码框.text = '§c密码必须为 4-30 位 请重新输入!';
+  密码错误: 密码框.text = '§c密码错误 请重新输入!';
+  keyPress: |-
+    方法.取当前按下键 == "RETURN" && 修改密码按钮.visible == false ? {
+      方法.执行方法('执行登录注册');
+    } : 0;
+    方法.取当前按下键 == "RETURN" && 修改密码按钮.visible == true ? {
+      方法.聊天(方法.合并文本('/changepassword ',密码框.text,' ',重复密码框.text));
+    } : 0;
+  执行登录注册: |-
+    密码框.text == "" ? return 密码框.text = "§c请输入密码..." : 0;
+    密码框.text == "§c请输入密码..." ? return 0 : 0;
+    密码框.text == "§c密码必须为 4-30 位 请重新输入!" ? return 0 : 0;
+    密码框.text == "§c密码错误 请重新输入!" ? return 0 : 0;
+    界面变量.执行操作 == "register" && 密码框.text != 重复密码框.text ? return 重复密码框.text = "§c两次输入的密码不一致!" : 0;
+    方法.发包('DragonCoreLogin', 界面变量.执行操作, 密码框.text);
+背景:
+  type: texture
+  x: (w - 背景.width)/2
+  y: (h - 背景.height)/2
+  width: h*0.75
+  height: h*0.67
+  texture: 50,50,50,250
+  alpha: 方法.取界面存活时间/100
+左侧背景:
+  type: texture
+  x: 背景.x + 背景.width*0.015
+  y: 背景.y + 背景.height*0.015
+  width: h*0.245
+  height: h*0.647
+  texture: 90,90,90,250
+  alpha: 方法.取界面存活时间/100
+按钮1:
+  type: texture
+  x: 背景.x + 背景.width*0.039
+  y: 背景.y + 背景.height*0.03
+  width: 背景.width*0.28
+  height: 按钮1.width* 30 / 100
+  texture: 30,30,10,800
+  textureHovered: 30,30,50,1500
+  text: 登录账号
+  actions:
+    click_left: (方法.取组件值('登录注册按钮','text') == '注册账号')?{方法.消息('&7[&6登录系统&7]&c 你尚未进行注册！');}:{
+      (方法.取组件值('登录注册按钮','text') == '改密系统')?{方法.消息('&7[&6登录系统&7]&c 你已完成了登录！');}:0;
+      (方法.取组件值('登录注册按钮','text') == '确定登录')?{ 登录提示.texts = '&c当前账号已被注册!'; 登录标题.texts
+      = '登录系统'; 重复密码框.visible = false; 登录注册按钮.visible = true; 登录提示.visible = true;
+      标题2内容.visible = false; 密码框.text = '§c请输入密码...'; 小字.visible = true; }:0; };
+  visible: 登录注册按钮.text != '注册账号' && 登录标题.texts == '登录系统'
+按钮2:
+  type: texture
+  x: 背景.x + 背景.width*0.039
+  y: 背景.y + 背景.height*0.14
+  width: 背景.width*0.28
+  height: 按钮1.width* 30 / 100
+  texture: 30,30,10,800
+  textureHovered: 30,30,50,1500
+  alpha: 方法.取界面存活时间/100
+  text: 修改密码
+  actions:
+    click_left: 登录提示.visible = false; 标题2内容.visible = true; 小字.visible = false;
+  visible: 登录注册按钮.text != '注册账号' && 登录标题.texts == '登录系统'
+离开按钮:
+  type: texture
+  x: 背景.x + 背景.width*0.039
+  y: 背景.y + 背景.height*0.87
+  width: 背景.width*0.28
+  height: 按钮1.width* 30 / 100
+  texture: 30,30,10,800
+  textureHovered: 30,30,50,1500
+  text: 退出游戏
+  actions:
+    click_left: 方法.退出游戏()
+模型:
+  type: entity
+  entity: owner
+  x: 背景.x + 背景.width*0.18
+  y: 背景.y + 背景.height*0.83
+  scale: 背景.height*0.006
+标题2内容:
+  type: label
+  x: 背景.x + 背景.width*0.40
+  y: 背景.y + 背景.height*0.83
+  texts:
+  - 标语:&C无法修改!
+  - '&C登录后&C按 &E&LC &C键修改密码'
+  visible: false
+  scale: 背景.height*0.007
+小字:
+  type: label
+  x: 背景.x + 背景.width*0.67
+  center: true
+  y: 背景.y + 背景.height*0.5
+  texts: §c如果你是第一次玩本服 说明用户名已被占用 请更换用户名
+  scale: 背景.height*0.003
+  visible: false
+玩家名称:
+  type: label
+  x: 背景.x + 背景.width*0.40
+  y: 背景.y + 背景.height*0.75
+  texts: '方法.合并文本(''&f玩家名: '',方法.取玩家名)'
+  scale: 背景.height*0.007
+登录提示:
+  type: label
+  x: 背景.x + 背景.width*0.40
+  y: 背景.y + 背景.height*0.83
+  texts: 标语：请记住自己的密码
+  scale: 背景.height*0.007
+登录标题:
+  type: label
+  x: 背景.x + 背景.width*0.68
+  y: 背景.y + 背景.height*0.15
+  texts: 改密系统
+  scale: 背景.height*0.007
+  center: true
+密码框:
+  type: textbox
+  x: 背景.x + 背景.width*0.41
+  y: 背景.y + 背景.height*0.35
+  width: 背景.height*0.6
+  height: 背景.height*0.07
+  drawBackground: true
+  text: §c请输入密码...
+  actions:
+    click_left: 方法.设置组件值('密码框','text','')
+重复密码框:
+  type: textbox
+  x: 背景.x + 背景.width*0.41
+  y: 背景.y + 背景.height*0.4
+  width: 背景.height*0.6
+  height: 背景.height*0.07
+  drawBackground: true
+  text: §c请再次输入密码...
+  actions:
+    click_left: 方法.设置组件值('重复密码框','text','')
+  visible: false
+登录注册按钮:
+  type: texture
+  x: 背景.x + 背景.width*0.45
+  y: 背景.y + 背景.height*0.60
+  texture: 30,30,10,800
+  textureHovered: 30,30,50,1500
+  text: 你已登录
+  width: 背景.height*0.49
+  height: 背景.height*0.07
+  actions:
+    click_left: 方法.执行方法('执行登录注册');
+修改密码按钮:
+  type: texture
+  x: 背景.x + 背景.width*0.45
+  y: 背景.y + 背景.height*0.60
+  texture: 30,30,10,800
+  textureHovered: 30,30,50,1500
+  text: 确认重置
+  width: 背景.height*0.49
+  height: 背景.height*0.07
+  actions:
+    click_left: 方法.聊天(方法.合并文本('/changepassword ',密码框.text,' ',重复密码框.text));
+  visible: 登录注册按钮.visible != true

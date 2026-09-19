@@ -1,10 +1,10 @@
 # 世界面板锚点演示：world.anchor 绝对坐标固定 + world.smooth 平滑跟随
 # 用法：/odc page open world_fixed（坐标按服务器实际场景修改）
 # 锚点模式：
-#   - 默认：相对玩家跟随（offsetX/Y/Z 相对偏移，随玩家移动）
-#   - world.anchor: {x, y, z} → 绝对世界坐标，面板固定不随玩家移动（billboard 始终面向相机）
-#   - world.follow: false → 打开瞬间的位置固定（pin 住）
-#   - world.smooth: 0~1 → 平滑跟随（每帧向目标插值，漂浮感；默认 0 = 刚性跟随）
+#   默认：相对玩家跟随（offsetX/Y/Z 相对偏移，随玩家移动）
+#   world.anchor: {x, y, z} → 绝对世界坐标，面板固定不随玩家移动（billboard 始终面向相机）
+#   world.follow: false → 打开瞬间的位置固定（pin 住）
+#   world.smooth: 0~1 → 平滑跟随（每帧向目标插值，漂浮感；默认 0 = 刚性跟随）
 title: 固定公告牌
 display: world
 options:

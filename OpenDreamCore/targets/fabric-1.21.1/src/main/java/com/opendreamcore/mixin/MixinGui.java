@@ -14,8 +14,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * hideVanilla 页面选项：
- * - all/true → 整层跳过原版 HUD（HEAD 取消 Gui.render，先画我们的 HUD）。
- * - 列表 → 逐层取消（层名 = 控制器 VANILLA_LAYER_NAMES 全名；方法名/签名按 fabric named jar 1.21.1
+ * all/true → 整层跳过原版 HUD（HEAD 取消 Gui.render，先画我们的 HUD）。
+ * 列表 → 逐层取消（层名 = 控制器 VANILLA_LAYER_NAMES 全名；方法名/签名按 fabric named jar 1.21.1
  *   核实：hotbar = renderItemHotbar、food = renderFood、无独立 air/subtitle 方法 → air 随
  *   player_health、subtitle 走 MixinSubtitleOverlay；boss_overlay/debug_overlay 无 Gui 方法仅 NeoForge）。
  */
@@ -46,7 +46,7 @@ public abstract class MixinGui {
         }
     }
 
-    // ---- 逐层（hideVanilla: [层列表]）----
+    // 逐层（hideVanilla: [层列表]）
     @Inject(method = "renderItemHotbar", at = @At("HEAD"), cancellable = true)
     private void odc$hideHotbar(GuiGraphics g, DeltaTracker dt, CallbackInfo ci) {
         cancelIf("minecraft:hotbar", ci);

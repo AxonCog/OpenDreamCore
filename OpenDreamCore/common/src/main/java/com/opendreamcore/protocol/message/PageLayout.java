@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -20,11 +22,11 @@ public final class PageLayout implements Message {
     private final List<Entry> entries;
 
     public PageLayout(String pageId, List<Entry> entries) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
         this.pageId = pageId;
-        this.entries = entries == null ? new ArrayList<>() : List.copyOf(entries);
+        this.entries = entries == null ? new ArrayList<>() : J8.listCopy(entries);
     }
 
     public String pageId() {

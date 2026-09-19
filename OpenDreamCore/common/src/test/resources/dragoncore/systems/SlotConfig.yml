@@ -1,0 +1,126 @@
+# 自定义的槽位必须填在此处，否则槽位将不允许点击操作
+
+额外槽位1:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit: [ ]
+额外槽位2:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit: [ ]
+额外槽位3:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit: [ ]
+额外槽位4:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit: [ ]
+额外槽位5:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit: [ ]
+
+吊坠槽位:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  # 本槽位是否启用时装兼容
+  skin: true
+  # 自定义槽位限制放入功能
+  limit:
+    # lorecontains|xxx   可以限制物品某行lore包含 xxx 才能放入【这个是要求某行lore包含指定文本就行】
+    # lore|xxx   可以限制物品需要有 xxx 这个lore才能放入【这个是要求完整匹配整行lore的】
+    # permission|xxx  可以限制玩家需要有 xxx 权限才可以放入
+    # skin|xxx   可以限制物品的时装类型必须是 xxx 才能放入,xxx若为*则是个时装都可以放入【此选项需要龙之时装付费版才可使用】
+    # emptyslot|xxx   可以限制只有当槽位xxx没有物品时，这个槽位才能放入
+    - "lore|吊坠"
+    - "permission|essentials.use"
+项链槽位:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit:
+    - "项链"
+戒指槽位:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit:
+    - "戒指"
+手镯槽位:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit:
+    - "手镯"
+护身符槽位:
+  # 本槽位是否启用属性兼容
+  attribute: true
+  limit:
+    - "护身符"
+
+
+
+# 脚本功能，不会改的不要乱改哦~
+Script:
+  # 用于判断物品的某行lore里是否包含了xxx
+  lorecontains: |-
+    function execute(player, itemStack, slotIdentifier, limitString){
+      limitString = limitString.replaceAll("&","§");
+      var lore = itemStack.getItemMeta().getLore();
+      if(lore!=null){
+        for(var i=0;i<lore.size();i++){
+          var line = lore.get(i).replaceAll(" ","");
+          if(line!=null && line.contains(limitString)){
+             return true;
+          }
+        }
+      }
+      player.sendMessage("§c该槽位需要Lore: "+limitString);
+      return false;
+    }
+  # 用于判断物品是否有一行lore为xxx
+  lore: |-
+    function execute(player, itemStack, slotIdentifier, limitString){
+      limitString = limitString.replaceAll("&","§");
+      var lore = itemStack.getItemMeta().getLore();
+      var result = lore != null && lore.contains(limitString);
+      if(!result){
+    	player.sendMessage("§c该槽位需要Lore: "+limitString);
+      }
+      return result;
+    }
+  # 用于判断玩家是否拥有权限xxx
+  permission: |-
+    function execute(player, itemStack, slotIdentifier, limitString){
+      var result = player.hasPermission(limitString);
+      if(!result){
+    	player.sendMessage("§6你需要有 §f"+limitString+" §6权限才可以使用该槽位")
+      }
+      return result;
+    }
+  # 用于判断玩家放入的时装是否为xx
+  skin: |-
+    function execute(player, itemStack, slotIdentifier, limitString) {
+        var itemSkinType = DragonAPI.static.getItemSkinType(itemStack);
+        if (itemSkinType != null) {
+            itemSkinType = itemSkinType.toLowerCase();
+        }
+        var result = (itemSkinType === limitString) || (itemSkinType != null && limitString=="*");
+        if (!result) {
+            player.sendMessage("§c当前槽位需要时装类型: §f" + limitString + "§c  你放入的物品时装类型是: §f" + itemSkinType);
+        }
+        return result;
+    }
+  # 用于判断其他槽位内是否不存在物品
+  emptyslot: |-
+    function execute(player, itemStack, slotIdentifier, limitString) {
+        var item = SlotAPI.static.getCacheSlotItem(player,limitString);
+        var result = item == null || item.getType().toString() == "AIR";
+        if(!result){
+            if(limitString=="额外槽位1"){
+               limitString = "英文名的话可以通过这个方式改成中文名提示玩家";
+            }else if(limitString=="额外槽位2"){
+               limitString = "英文名的话可以通过这个方式改成中文名提示玩家2333";
+            }
+            player.sendMessage("§c当前槽位与: §f" + limitString + "§c 冲突,您不能同时在两个槽位内放置物品");
+        }
+        return result;
+    }

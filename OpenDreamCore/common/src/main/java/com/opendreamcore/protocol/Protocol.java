@@ -14,6 +14,7 @@ public final class Protocol {
     public static final String READY = "ready";
     public static final String READY_ACK = "ready_ack";
     public static final String PAGE_SYNC = "page_sync";
+    public static final String VISUAL_RULES = "visual_rules";
     public static final String PAGE_CONTROL = "page_control";
     public static final String STATE_PATCH = "state_patch";
     public static final String GLOBAL_STATE = "global_state";
@@ -22,6 +23,21 @@ public final class Protocol {
     public static final String ITEM_ACTION = "item_action";
     public static final String ITEM_ACTION_RESULT = "item_action_result";
     public static final String CUSTOM_PACKET = "custom_packet";
+    // custom_packet 的保留通道名（视觉系统专用指令，不走脚本订阅）：
+    // sound / sound_stop —— SoundAPI.播放/停止 的下行（服务端只发键名，客户端查规则库执行）
+    public static final String CUSTOM_SOUND = "sound";
+    public static final String CUSTOM_SOUND_STOP = "sound_stop";
+    // 资源云管线（跟着服务端资源文件夹走，分片 base64 塞进 custom_packet 走天下）：
+    // resource_key      S→C 资源加密密码（同步开始时先发；客户端记住下次直接比 MD5）
+    // resource_report   C→S 客户端缓存清单上报（"name,md5;name,md5;"，GZIP+base64）
+    // resource_push     S→C 文件分片下发（"name|md5|seq/total|base64chunk"）
+    // resource_clear    S→C 要删除的过期缓存（"a.png,b.png"）
+    // resource_done     S→C 同步收工，客户端把新到的资源挂上（贴图/音频进注册表）
+    public static final String CUSTOM_RESOURCE_KEY = "resource_key";
+    public static final String CUSTOM_RESOURCE_REPORT = "resource_report";
+    public static final String CUSTOM_RESOURCE_PUSH = "resource_push";
+    public static final String CUSTOM_RESOURCE_CLEAR = "resource_clear";
+    public static final String CUSTOM_RESOURCE_DONE = "resource_done";
     public static final String CONTAINER_REGISTRY = "container_registry";
     public static final String CONTAINER_OPEN = "container_open";
     public static final String CONTAINER_OPEN_RESULT = "container_open_result";
@@ -40,6 +56,21 @@ public final class Protocol {
     public static final String PAGE_LAYOUT = "page_layout";
     public static final String CONTAINER_SYNC = "container_sync";
     public static final String PAGE_CLOSE = "page_close";
+    public static final String CHAT_MESSAGE = "chat_message";
+    public static final String UI_EFFECT = "ui_effect";
+    public static final String BOSS_BAR = "boss_bar";
+    public static final String NAME_TAG = "name_tag";
+    public static final String ITEM_TIP = "item_tip";
+    public static final String HUD_SYNC = "hud_sync";
+    public static final String MUSIC = "music";
+    public static final String CONFIG_PUSH = "config_push";
+    public static final String UI_ANIMATION = "ui_animation";
+    public static final String WORLD_TAB = "world_tab";
+    public static final String WORLD_ELEMENT_STATE = "world_element_state";
+    public static final String WINDOW_TITLE = "window_title";
+
+    // 大件专用通道：分片帧都走这里，帧头里带真实业务通道名
+    public static final String CHUNK = "chunk";
 
     /** 客户端需声明的下行通道（minecraft:register 载荷；Paper 对未声明通道静默丢包）。 */
     public static final String[] CLIENTBOUND_CHANNELS = {
@@ -47,7 +78,8 @@ public final class Protocol {
             CUSTOM_PACKET, CONTAINER_REGISTRY, CONTAINER_OPEN, CONTAINER_OPEN_RESULT,
             TOOLTIP_REGISTRY, TOOLTIP_RESYNC, CLOUD_MANIFEST, CLOUD_DIFF, CLOUD_FILE,
             CLOUD_DELETE, CLOUD_DONE, EDITOR_LEASE, EDITOR_SNAPSHOT, EDITOR_WORLD_ACK,
-            PAGE_LAYOUT, CONTAINER_SYNC, PAGE_CLOSE, "window_title",
+            PAGE_LAYOUT, CONTAINER_SYNC, PAGE_CLOSE, VISUAL_RULES, WINDOW_TITLE,
+            CHUNK,
     };
 
     /** 构造 minecraft:register 声明载荷（NUL 分隔的全限定通道名）。 */
@@ -61,18 +93,6 @@ public final class Protocol {
         }
         return sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
-    public static final String CHAT_MESSAGE = "chat_message";
-    public static final String UI_EFFECT = "ui_effect";
-    public static final String BOSS_BAR = "boss_bar";
-    public static final String NAME_TAG = "name_tag";
-    public static final String ITEM_TIP = "item_tip";
-    public static final String HUD_SYNC = "hud_sync";
-    public static final String MUSIC = "music";
-    public static final String CONFIG_PUSH = "config_push";
-    public static final String UI_ANIMATION = "ui_animation";
-    public static final String WORLD_TAB = "world_tab";
-    public static final String WORLD_ELEMENT_STATE = "world_element_state";
-    public static final String WINDOW_TITLE = "window_title";
 
     /** 能力位。 */
     public static final int CAPABILITY_LOCAL_UI = 1 << 0;

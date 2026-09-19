@@ -4,6 +4,7 @@ import com.opendreamcore.page.Element;
 import com.opendreamcore.page.Page;
 import com.opendreamcore.page.PageExporter;
 import com.opendreamcore.ui.RenderNode;
+import com.opendreamcore.ui.Viewport;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
@@ -18,7 +19,7 @@ import java.util.*;
  */
 public final class EditorPanels {
 
-    // ---- 面板几何 ----
+    // 面板几何
     static final int PALETTE_W = 130;
     static final int TREE_W = 160;
     static final int INSPECTOR_W = 220;
@@ -26,7 +27,7 @@ public final class EditorPanels {
     static final int ROW_H = 14;
     static final int HEADER_H = 16;
 
-    // ---- 调色板元素类型 ----
+    // 调色板元素类型
     private static final String[][] PALETTE = {
             {"布局", "layout", "rect", "container"},
             {"文本", "text", "button"},
@@ -36,7 +37,7 @@ public final class EditorPanels {
             {"高级", "embed", "scroll", "foreach", "flip_card", "table"},
     };
 
-    // ---- 状态 ----
+    // 状态
     private boolean showPalette = true;
     private boolean showTree = true;
     private boolean showInspector = true;
@@ -69,7 +70,7 @@ public final class EditorPanels {
     // 拖拽放置模式
     private boolean placing;
 
-    // ---- 元素树拖拽 ----
+    // 元素树拖拽
     /** 正在拖拽的元素 id（null = 非拖拽状态）。 */
     private String treeDragId;
     /** 拖拽按下时的屏幕 Y 坐标。 */
@@ -90,7 +91,7 @@ public final class EditorPanels {
     private String exportText;
     private boolean exportCopied;
 
-    // ---- 回调接口 ----
+    // 回调接口
     public interface Host {
         Page page();
         List<RenderNode> nodes();
@@ -167,7 +168,7 @@ public final class EditorPanels {
         return compactMode ? 0x90101418 : 0xE0101418;
     }
 
-    // ---- 渲染入口 ----
+    // 渲染入口
 
     public void render(GuiGraphics g, int mouseX, int mouseY) {
         drawToolbar(g);
@@ -179,7 +180,7 @@ public final class EditorPanels {
         if (showExport) drawExportPanel(g, mouseX, mouseY);
     }
 
-    // ---- 工具栏 ----
+    // 工具栏
 
     private void drawToolbar(GuiGraphics g) {
         int y = 0;
@@ -239,7 +240,7 @@ public final class EditorPanels {
         CUSTOM_PALETTE.add(new String[]{group, type});
     }
 
-    // ---- 调色板 ----
+    // 调色板
 
     private void drawPalette(GuiGraphics g, int mouseX, int mouseY) {
         int x = 0;
@@ -275,7 +276,7 @@ public final class EditorPanels {
         return rowY;
     }
 
-    // ---- 元素树 ----
+    // 元素树
 
     private void drawTree(GuiGraphics g, int mouseX, int mouseY) {
         int x = showPalette ? PALETTE_W : 0;
@@ -323,7 +324,7 @@ public final class EditorPanels {
         return rowY;
     }
 
-    // ---- 属性检查器 ----
+    // 属性检查器
 
     /** 属性行描述（渲染和点击共用同一数据源，保证显示/交互同步）。 */
     record InspectorRow(String section, String key, String path, String value, boolean editable) {}
@@ -436,7 +437,7 @@ public final class EditorPanels {
         return rowY + ROW_H;
     }
 
-    // ---- 对齐工具 ----
+    // 对齐工具
 
     private void drawAlignPanel(GuiGraphics g, int mouseX, int mouseY) {
         int pw = 120;
@@ -456,7 +457,7 @@ public final class EditorPanels {
         }
     }
 
-    // ---- 导出面板 ----
+    // 导出面板
 
     private void drawExportPanel(GuiGraphics g, int mouseX, int mouseY) {
         int pw = 400;
@@ -493,7 +494,7 @@ public final class EditorPanels {
         g.drawString(host.font(), "X", cx + 3, py + 4, 0xFFFF4444);
     }
 
-    // ---- 输入处理 ----
+    // 输入处理
 
     /** 树拖拽：鼠标按下记录起点（不激活，等位移超阈值）。 */
     private boolean treePressOnRow;
@@ -787,7 +788,7 @@ public final class EditorPanels {
         return true; // 模态：吞掉所有点击
     }
 
-    // ---- 键盘 ----
+    // 键盘
 
     public boolean keyPressed(int keyCode, int modifiers) {
         if (showExport) {
@@ -837,7 +838,7 @@ public final class EditorPanels {
         return false;
     }
 
-    // ---- 编辑操作 ----
+    // 编辑操作
 
     private void beginEditProp(String prop) {
         host.pushUndo();
@@ -855,8 +856,10 @@ public final class EditorPanels {
                     double v = Double.parseDouble(editBuffer.trim());
                     RenderNode node = host.findNode(host.selectedId());
                     if (node != null) {
-                        double x = "x".equals(prop) ? v : node.x();
-                        double y = "y".equals(prop) ? v : node.y();
+                        // 输入值按设计单位；回退基准反解（node 是投影后屏幕 rect）
+                        Viewport vp = Viewport.active();
+                        double x = "x".equals(prop) ? v : vp.unlayoutX(node.x());
+                        double y = "y".equals(prop) ? v : vp.unlayoutY(node.y());
                         host.setElementPos(host.selectedId(), x, y);
                     }
                 } catch (NumberFormatException ignored) {}
@@ -891,7 +894,9 @@ public final class EditorPanels {
                 case "bottom" -> y = ref.y() + ref.height() - node.height();
                 case "center_v" -> y = ref.y() + (ref.height() - node.height()) / 2;
             }
-            host.setElementPos(id, x, y);
+            // 屏幕空间算完再反解回设计（变换是仿射，先算后解等价；IDENTITY 直通）
+            Viewport vp = Viewport.active();
+            host.setElementPos(id, vp.unlayoutX(x), vp.unlayoutY(y));
         }
     }
 
@@ -909,7 +914,7 @@ public final class EditorPanels {
         }
     }
 
-    // ---- 工具方法 ----
+    // 工具方法
 
     private static boolean isGeometryProp(String key) {
         return "x".equals(key) || "y".equals(key) || "width".equals(key) || "height".equals(key)
@@ -952,7 +957,7 @@ public final class EditorPanels {
         return String.valueOf(v);
     }
 
-    // ---- 公开 API ----
+    // 公开 API
 
     public void reset() {
         multiSelect.clear();

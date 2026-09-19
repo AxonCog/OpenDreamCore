@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.7.11",
+  "package": "com.opendreamcore.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "client": [
+    "MixinTooltip",
+    "MixinCursor",
+    "MixinArmorLayer",
+    "MixinNameTag"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -12,6 +12,7 @@ import com.opendreamcore.protocol.message.UiEvent;
 import com.opendreamcore.ui.LayoutEngine;
 import com.opendreamcore.ui.RenderNode;
 import com.opendreamcore.ui.UiSession;
+import com.opendreamcore.ui.Viewport;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
@@ -34,11 +35,58 @@ public final class ClientController {
         void send(String channelPath, byte[] bytes);
     }
 
+    /** 分片重组后还原出来的一条消息：真实业务通道名 + 完整载荷。 */
+    public record ChunkResult(String path, byte[] payload) {
+    }
+
+    /**
+     * 大件分片的接收信箱：chunk 通道的帧都进这里凑，凑齐一条还一条。
+     * 连接断了里面的半截传输也就没意义了——下次连上对面会重发，信箱自然空。
+     */
+    private final com.opendreamcore.protocol.LegacyFraming.Assembler chunkInbox =
+            new com.opendreamcore.protocol.LegacyFraming.Assembler();
+
     public static final Logger LOGGER = LogUtils.getLogger();
 
     private static final ClientController INSTANCE = new ClientController();
     /** 客户端 mod 版本：首次使用时从加载器元数据读取（Fabric/Forge/NeoForge 反射择路）。 */
     private static volatile String CLIENT_VERSION;
+
+    /** 聊天栏提示（主线程安全；没进世界就静默丢）。 */
+    public static void chat(String text) {
+        try {
+            var mc = Minecraft.getInstance();
+            if (mc.player != null) {
+                mc.player.displayClientMessage(
+                        net.minecraft.network.chat.Component.literal(text), false);
+            }
+        } catch (Throwable ignored) {
+            // 没玩家/没启动完：静默，别拖垮调用方
+        }
+    }
+
+    /** 失败提示去重表：同一 key 只说一次，防每帧/每包刷屏。 */
+    private static final java.util.Set<String> CHAT_WARNED = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<>());
+
+    /** 带去重的失败提示（key 相同只发一次）。 */
+    public static void chatWarnOnce(String key, String text) {
+        if (CHAT_WARNED.size() > 256) {
+            CHAT_WARNED.clear(); // 防膨胀：刷满就重置，宁可多提醒也别永久哑巴
+        }
+        if (CHAT_WARNED.add(key)) {
+            chat(text);
+        }
+    }
+
+    /** 异常原因缩略：聊天栏一句话说清，别贴全文堆栈。 */
+    public static String shortReason(Throwable t) {
+        if (t == null) {
+            return "未知原因";
+        }
+        String s = String.valueOf(t);
+        return s.length() > 120 ? s.substring(0, 120) + "…" : s;
+    }
 
     private static String clientVersion() {
         String v = CLIENT_VERSION;
@@ -54,6 +102,33 @@ public final class ClientController {
         return v;
     }
 
+    /** 语义化版本比较：a<b 返回负，a>b 返回正，相等返回 0；非数字段按 0 算。 */
+    private static int compareVersions(String a, String b) {
+        if (a == null || b == null || a.isBlank() || b.isBlank()
+                || "unknown".equals(a) || "unknown".equals(b)) {
+            return 0; // 拿不到版本号时不乱提醒
+        }
+        String[] as = a.replaceFirst("^v", "").split("\\.");
+        String[] bs = b.replaceFirst("^v", "").split("\\.");
+        int len = Math.max(as.length, bs.length);
+        for (int i = 0; i < len; i++) {
+            int av = i < as.length ? parseIntSafe(as[i]) : 0;
+            int bv = i < bs.length ? parseIntSafe(bs[i]) : 0;
+            if (av != bv) {
+                return Integer.compare(av, bv);
+            }
+        }
+        return 0;
+    }
+
+    private static int parseIntSafe(String s) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     private static String detectModVersion() {
         // 方案1：Fabric
         try {
@@ -63,7 +138,14 @@ public final class ClientController {
                     .invoke(loader, "opendreamcore")).orElse(null);
             if (container != null) {
                 Object meta = container.getClass().getMethod("metadata").invoke(container);
-                return (String) meta.getClass().getMethod("getVersion").invoke(meta);
+                // 注意：Fabric 的 getVersion() 返回 Version 对象不是 String，别硬转，String.valueOf 兜底
+                Object ver = meta.getClass().getMethod("getVersion").invoke(meta);
+                if (ver != null) {
+                    String s = String.valueOf(ver);
+                    if (!s.isBlank()) {
+                        return s;
+                    }
+                }
             }
         } catch (Throwable ignored) { }
         // 方案2：Forge/NeoForge ModList
@@ -74,12 +156,19 @@ public final class ClientController {
                 Object container = ((java.util.Optional<?>) ml.getMethod("getModContainerById", String.class)
                         .invoke(modList, "opendreamcore")).orElse(null);
                 if (container != null) {
-                    // Forge: getModInfo().getVersion()
+                    Object info = container.getClass().getMethod("getModInfo").invoke(container);
+                    Object ver;
                     try {
-                        Object info = container.getClass().getMethod("getModInfo").invoke(container);
-                        return (String) info.getClass().getMethod("getVersion").invoke(info);
-                    } catch (Throwable ignored2) { }
-                    // NeoForge: getModInfo().getVersion() 同理但可能有差异
+                        // Forge：ModInfo.getVersion()
+                        ver = info.getClass().getMethod("getVersion").invoke(info);
+                    } catch (NoSuchMethodException nf) {
+                        // NeoForge 新一点：访问器叫 version()
+                        ver = info.getClass().getMethod("version").invoke(info);
+                    }
+                    // 注意：SemanticVersion/ModVersion 都不是 String，别硬转，String.valueOf 兜底
+                    if (ver != null && !String.valueOf(ver).isBlank()) {
+                        return String.valueOf(ver);
+                    }
                 }
             } catch (Throwable ignored) { }
         }
@@ -228,80 +317,54 @@ public final class ClientController {
         LOGGER.info("容器同步 {}（{} 个槽位）", sync.sessionId(), sync.slots().size());
     }
 
-    // ---------- 键鼠绑定（页面 keybinds/mousebinds 选项 → ui_event KEY 上报服务端） ----------
+    // 键鼠绑定（页面 keybinds/mousebinds 选项 → ui_event KEY 上报服务端）
 
-    private final Map<String, String> keyBinds = new ConcurrentHashMap<>();
-    private final Map<String, Integer> mouseBinds = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> mousePrev = new ConcurrentHashMap<>();
-    /** 全局热键（HUD 页面 keybinds/mousebinds：常驻生效，页面外也响应；经 HUD 会话路由）。 */
-    private final Map<String, String> globalKeyBinds = new ConcurrentHashMap<>();
-    private final Map<String, Integer> globalMouseBinds = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> globalMousePrev = new ConcurrentHashMap<>();
+    /** 键鼠绑定服务：绑定表与边沿检测在 BindingsService，上报经 Host 回调路由会话。 */
+    private final com.opendreamcore.client.controller.BindingsService bindingsService =
+            new com.opendreamcore.client.controller.BindingsService(
+                    new com.opendreamcore.client.controller.BindingsService.Host() {
+                        @Override
+                        public com.opendreamcore.ui.UiSession globalSession() {
+                            return hudSession;
+                        }
+
+                        @Override
+                        public com.opendreamcore.ui.UiSession pageSession() {
+                            return session;
+                        }
+
+                        @Override
+                        public boolean pageOpen() {
+                            return screen != null;
+                        }
+
+                        @Override
+                        public boolean serverMode() {
+                            return isServerMode();
+                        }
+
+                        @Override
+                        public void sendEvent(com.opendreamcore.protocol.message.UiEvent event) {
+                            ClientController.this.sendEvent(event);
+                        }
+                    });
 
     /** 应用页面键鼠绑定（打开页面时调用）。 */
     public void applyBindings(Map<String, Object> options) {
-        keyBinds.clear();
-        mouseBinds.clear();
-        mousePrev.clear();
-        if (options == null) {
-            return;
-        }
-        Object keys = options.get("keybinds");
-        if (keys instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                keyBinds.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
-            }
-        }
-        Object mouse = options.get("mousebinds");
-        if (mouse instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                Object button = e.getValue();
-                int b = button instanceof Number n ? n.intValue() : 0;
-                mouseBinds.put(String.valueOf(e.getKey()), b);
-            }
-        }
-        if (!keyBinds.isEmpty() || !mouseBinds.isEmpty()) {
-            LOGGER.info("页面键鼠绑定 {} 键 / {} 鼠标", keyBinds.size(), mouseBinds.size());
-        }
+        bindingsService.applyBindings(options);
     }
 
     /** 应用全局热键（HUD 页面挂载时调用；常驻生效，页面外也响应）。 */
     public void applyGlobalBindings(Map<String, Object> options) {
-        globalKeyBinds.clear();
-        globalMouseBinds.clear();
-        globalMousePrev.clear();
-        if (options == null) {
-            return;
-        }
-        Object keys = options.get("keybinds");
-        if (keys instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                globalKeyBinds.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
-            }
-        }
-        Object mouse = options.get("mousebinds");
-        if (mouse instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                Object button = e.getValue();
-                int b = button instanceof Number n ? n.intValue() : 0;
-                globalMouseBinds.put(String.valueOf(e.getKey()), b);
-            }
-        }
-        if (!globalKeyBinds.isEmpty() || !globalMouseBinds.isEmpty()) {
-            LOGGER.info("全局热键 {} 键 / {} 鼠标", globalKeyBinds.size(), globalMouseBinds.size());
-        }
+        bindingsService.applyGlobalBindings(options);
     }
 
     public void clearBindings() {
-        keyBinds.clear();
-        mouseBinds.clear();
-        mousePrev.clear();
+        bindingsService.clearBindings();
     }
 
     public void clearGlobalBindings() {
-        globalKeyBinds.clear();
-        globalMouseBinds.clear();
-        globalMousePrev.clear();
+        bindingsService.clearGlobalBindings();
     }
 
     /** 每 tick 检查绑定（边沿触发，一次按压只上报一次）。全局热键常驻；页面绑定仅页面打开时。 */
@@ -311,51 +374,8 @@ public final class ClientController {
         tickHudClicks();
         tickHudHover();
         tickHudEditKeys();
-        // 全局热键（HUD 页面声明，页面外也响应；经 HUD 会话路由）
-        if (hudSession != null) {
-            for (Map.Entry<String, String> e : globalKeyBinds.entrySet()) {
-                var mapping = ClientMethodSupport.keyMapping(e.getValue());
-                if (mapping != null && mapping.consumeClick()) {
-                    sendKeyEvent(hudSession, "key:" + e.getKey(), "keybind:" + e.getKey());
-                }
-            }
-            var handler = Minecraft.getInstance().mouseHandler;
-            for (Map.Entry<String, Integer> e : globalMouseBinds.entrySet()) {
-                boolean down = switch (e.getValue()) {
-                    case 1 -> handler.isRightPressed();
-                    case 2 -> handler.isMiddlePressed();
-                    default -> handler.isLeftPressed();
-                };
-                Boolean prev = globalMousePrev.get(e.getKey());
-                if (Boolean.TRUE.equals(down) && !Boolean.TRUE.equals(prev)) {
-                    sendKeyEvent(hudSession, "mouse:" + e.getKey() + ":" + e.getValue(),
-                            "mousebind:" + e.getKey());
-                }
-                globalMousePrev.put(e.getKey(), down);
-            }
-        }
-        if (screen == null) {
-            return;
-        }
-        for (Map.Entry<String, String> e : keyBinds.entrySet()) {
-            var mapping = ClientMethodSupport.keyMapping(e.getValue());
-            if (mapping != null && mapping.consumeClick()) {
-                sendKeyEvent("key:" + e.getKey(), "keybind:" + e.getKey());
-            }
-        }
-        var handler = Minecraft.getInstance().mouseHandler;
-        for (Map.Entry<String, Integer> e : mouseBinds.entrySet()) {
-            boolean down = switch (e.getValue()) {
-                case 1 -> handler.isRightPressed();
-                case 2 -> handler.isMiddlePressed();
-                default -> handler.isLeftPressed();
-            };
-            Boolean prev = mousePrev.get(e.getKey());
-            if (Boolean.TRUE.equals(down) && !Boolean.TRUE.equals(prev)) {
-                sendKeyEvent("mouse:" + e.getKey() + ":" + e.getValue(), "mousebind:" + e.getKey());
-            }
-            mousePrev.put(e.getKey(), down);
-        }
+        tickGlobalReloadKey();
+        bindingsService.tick();
     }
 
     /** HUD 左键按下边沿（tickHudClicks 用）。 */
@@ -377,6 +397,7 @@ public final class ClientController {
     /** HUD 编辑面板宿主（键盘轮询操作入口）。 */
     private HudEditorHost hudEditorHost;
     /** HUD 编辑键盘边沿状态。 */
+private boolean reloadKeyPrev;
     private boolean hudEditEscPrev;
     private boolean hudEditDelPrev;
     private boolean hudEditZPrev;
@@ -412,11 +433,12 @@ public final class ClientController {
                 hudEditSelectedId = hit == null ? null : hit.id();
                 if (hit != null) {
                     hudEditDragId = hit.id();
-                    // 记录拖动起点：相对增量拖动（元素跟随鼠标位移，而不是跳到鼠标坐标）
+                    // 记录拖动起点：相对增量拖动（元素跟随鼠标位移，而不是跳到鼠标坐标）。
+                    // 存层是设计坐标：起点反解、位移 /s（IDENTITY 下退化照旧）
                     hudEditDragStartMx = mx;
                     hudEditDragStartMy = my;
-                    hudEditDragOriginX = hit.x();
-                    hudEditDragOriginY = hit.y();
+                    hudEditDragOriginX = Viewport.active().unlayoutX(hit.x());
+                    hudEditDragOriginY = Viewport.active().unlayoutY(hit.y());
                 }
                 hudMousePrev = left;
                 return;
@@ -426,12 +448,15 @@ public final class ClientController {
                 hit = hudNodes.get(i).hitTest(mx, my);
             }
             if (hit != null && hit.source() != null && hit.enabled()) {
-                if (hudSession != null && isServerMode()) {
-                    sendEvent(hudSession.event(hit.id(), UiEvent.Trigger.CLICK, null));
+                Page owner = hudOwnerOf(hit);
+                UiSession sess = owner == null ? null
+                        : hudStackSessions.get(owner.id() == null ? "hud" : owner.id());
+                if (sess != null && isServerMode()) {
+                    sendEvent(sess.event(hit.id(), UiEvent.Trigger.CLICK, null));
                 } else {
                     String script = hit.source().actions().get("click");
                     if (script != null && !script.isBlank()) {
-                        runLocalAction(hudPage, script, null);
+                        runLocalAction(owner == null ? hudPage : owner, script, null);
                     }
                 }
             }
@@ -441,9 +466,10 @@ public final class ClientController {
             double mx = mouse.xpos();
             double my = mouse.ypos();
             String pid = hudPage.id() == null ? "hud" : hudPage.id();
+            double inv = 1.0 / Viewport.active().scale();
             elementEdits.set(pid, hudEditDragId,
-                    hudEditDragOriginX + (mx - hudEditDragStartMx),
-                    hudEditDragOriginY + (my - hudEditDragStartMy));
+                    hudEditDragOriginX + (mx - hudEditDragStartMx) * inv,
+                    hudEditDragOriginY + (my - hudEditDragStartMy) * inv);
             refreshHud();
         }
         if (!left) {
@@ -485,12 +511,15 @@ public final class ClientController {
         hudHoverId = id;
         hudHoverSince = System.currentTimeMillis();
         if (id != null) {
-            if (hudSession != null && isServerMode()) {
-                sendEvent(hudSession.event(id, UiEvent.Trigger.HOVER, null));
+            Page owner = hudOwnerOf(hit);
+            UiSession sess = owner == null ? null
+                    : hudStackSessions.get(owner.id() == null ? "hud" : owner.id());
+            if (sess != null && isServerMode()) {
+                sendEvent(sess.event(id, UiEvent.Trigger.HOVER, null));
             } else {
                 String script = hit.source().actions().get("hover");
                 if (script != null && !script.isBlank()) {
-                    runLocalAction(hudPage, script, null);
+                    runLocalAction(owner == null ? hudPage : owner, script, null);
                 }
             }
         }
@@ -610,13 +639,32 @@ public final class ClientController {
 
     private UiSession session;
     private OdcScreen screen;
-    private String serverVersion;
-    private int serverProtocol;
+
+    /** 握手服务：进服 ready 发送与版本状态记录都在 HandshakeService。 */
+    private final com.opendreamcore.client.controller.HandshakeService handshakeService =
+            new com.opendreamcore.client.controller.HandshakeService(
+                    new com.opendreamcore.client.controller.HandshakeService.Host() {
+                        @Override
+                        public String clientVersion() {
+                            return ClientController.clientVersion();
+                        }
+
+                        @Override
+                        public void sendRaw(String channelPath, byte[] bytes) {
+                            ClientController.this.sendRaw(channelPath, bytes);
+                        }
+                    });
 
     // HUD 常驻页面（display: hud 或 match: hud）
     private Page hudPage;
     private List<RenderNode> hudNodes;
     private UiSession hudSession;
+    /** HUD 叠加栈：多张 hud 页面同屏渲染（hud + hud_global + hud_hide + hud_promo ... 一起挂，
+     *  后开的画在上层、先开的垫底；服务端推送的 HUD 与本地自动挂载互不覆盖，叠加共存）。
+     *  hudPage/hudNodes/hudSession 保持"第一张页"兼容引用（编辑/悬停 tooltip/首帧诊断用）。 */
+    private final java.util.List<Page> hudStack = new java.util.ArrayList<>();
+    private final java.util.Map<String, UiSession> hudStackSessions = new java.util.HashMap<>();
+    private final java.util.Map<String, List<RenderNode>> hudStackNodes = new java.util.HashMap<>();
 
     // 世界全息页面（display: world 或 match: world）
     /** 世界面板列表（多面板同屏：每页一面板，独立锚点/页签/悬停/会话）。 */
@@ -1942,48 +1990,6 @@ public final class ClientController {
                 () -> com.opendreamcore.client.spi.ResourcePackInjector.current());
     }
 
-    /**
-     * 连服时把 /odc 子命令转发给服务端执行；单人世界返回 false 走本地命令。
-     * 反射适配两代命令包：1.21.2+ 单参构造 / 1.20.x 全参构造。
-     * 全壳共用本入口——各 target 不再自持转发实现（一个链路铁律）。
-     */
-    public boolean tryForwardOdcCommand(String subCommand) {
-        var conn = Minecraft.getInstance().getConnection();
-        if (conn == null) {
-            return false;
-        }
-        String cmd = subCommand == null || subCommand.isEmpty() ? "odc" : "odc " + subCommand;
-        try {
-            // 新版：ServerboundChatCommandPacket(String)
-            var pkt = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket")
-                    .getConstructor(String.class)
-                    .newInstance(cmd);
-            conn.send((net.minecraft.network.protocol.Packet<?>) pkt);
-            return true;
-        } catch (NoSuchMethodException legacy) {
-            try {
-                var cls = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket");
-                var pkt = cls.getConstructor(String.class, java.time.Instant.class, long.class,
-                                Class.forName("net.minecraft.commands.arguments.ArgumentSignatures"),
-                                Class.forName("net.minecraft.network.chat.LastSeenMessages$Update"))
-                        .newInstance(cmd, java.time.Instant.now(), 0L,
-                                Class.forName("net.minecraft.commands.arguments.ArgumentSignatures")
-                                        .getField("EMPTY").get(null),
-                                Class.forName("net.minecraft.network.chat.LastSeenMessages$Update")
-                                        .getConstructor(int.class, java.util.BitSet.class)
-                                        .newInstance(0, new java.util.BitSet()));
-                conn.send((net.minecraft.network.protocol.Packet<?>) pkt);
-                return true;
-            } catch (Throwable t) {
-                LOGGER.warn("命令转发失败: {}", t.toString());
-                return false;
-            }
-        } catch (Throwable t) {
-            LOGGER.warn("命令转发失败: {}", t.toString());
-            return false;
-        }
-    }
-
     /** 托管材质包目录创建+扫描注入；入口期传加载器 gameDir 立即执行，未传则首帧兜底。 */
     public synchronized void ensureManagedPacks(java.nio.file.Path gameDir) {
         if (managedPacksDone) {
@@ -1997,20 +2003,73 @@ public final class ClientController {
             if (n > 0) {
                 LOGGER.info("本地材质包预置完成：{} 个", n);
             }
+            // 散装贴图注册：字符替换/物品图标/世界贴图的 texture 引用都走这个注册表。
+            // 这方法之前没人调，注册表一直是空的——字符替换配了 PNG 也显示不出来。
+            com.opendreamcore.client.resources.LooseResourceLoader.loadAll(dir);
+            // 渲染线程冲刷（Worker 线程扫描时由 renderHud 的每帧兜底接管）
+            com.opendreamcore.client.resources.LooseResourceLoader.flushPending();
+            // 本地视觉规则（单机无服务端也能用；进服后服务端下发会整体覆盖）
+            loadLocalVisualRules();
+            // 各系统消费器重解析（字符替换/字形叠加/物品图标/音效）
+            com.opendreamcore.client.visual.VisualItemSkins.refresh();
+            com.opendreamcore.client.visual.VisualSoundStore.refresh();
+            com.opendreamcore.client.visual.VisualFontOverride.refresh();
+            com.opendreamcore.client.visual.VisualFontReplace.refresh();
+        com.opendreamcore.client.visual.VisualItemEffects.refresh();
+        com.opendreamcore.client.visual.VisualArmorLayer.refresh();
+        com.opendreamcore.client.visual.VisualNameTags.refresh();
         } catch (Throwable t) {
             LOGGER.warn("本地材质包预置失败: {}", t.toString());
         }
     }
 
-    /** 发送协议消息（target 网络层转发到对应通道）。 */
+    /**
+     * 发送协议消息（target 网络层转发到对应通道）。
+     *
+     * 上行的 32767 这条线 Mojang 从 1.7 画到现在，八年没挪过窝——1.13 只
+     * 放开了下行，上行纹丝不动。编辑器随手存个正经的世界布局就能撞线，
+     * 撞了服务器直接踢人，连句解释都没有。所以超限的大件在这几自动切块，
+     * 走 chunk 通道分批运，对面拼好再当一条消息处理。十二个 target 共用
+     * 这个收口，改一处全亮。
+     */
     public void sendRaw(String channelPath, byte[] bytes) {
         UiSender s = sender;
-        if (s != null) {
-            s.send(channelPath, bytes);
+        if (s == null) {
+            return;
         }
+        if (bytes != null && bytes.length > com.opendreamcore.protocol.LegacyFraming.MAX_CHUNK_PAYLOAD) {
+            for (byte[] frame : com.opendreamcore.protocol.LegacyFraming.frames(
+                    channelPath, bytes, com.opendreamcore.protocol.LegacyFraming.MAX_CHUNK_PAYLOAD)) {
+                s.send(com.opendreamcore.protocol.Protocol.CHUNK, frame);
+            }
+            return;
+        }
+        s.send(channelPath, bytes);
     }
 
-    // ---------- 自定义双向通道（custom_packet：Network.发送 / 订阅 / 取消订阅） ----------
+    /**
+     * 下行入口分拣：target 的网络层收到任何 opendreamcore:* 包都先走这里。
+     *
+     * chunk 通道的包在这里解帧、凑包，凑齐了换回真实通道名交出去；普通
+     * 包原样放行。返回 null 表示还没凑齐（或者坏帧），调用方直接丢手。
+     */
+    public ChunkResult routeInbound(String channelPath, byte[] data) {
+        if (!com.opendreamcore.protocol.Protocol.CHUNK.equals(channelPath)) {
+            return new ChunkResult(channelPath, data);
+        }
+        com.opendreamcore.protocol.LegacyFraming.Frame frame = com.opendreamcore.protocol.LegacyFraming.parse(data);
+        if (frame == null) {
+            LOGGER.warn("收到一帧读不懂的分片包，丢弃（{} 字节）", data == null ? 0 : data.length);
+            return null;
+        }
+        byte[] payload = chunkInbox.offer(frame);
+        if (payload == null) {
+            return null;
+        }
+        return new ChunkResult(frame.path, payload);
+    }
+
+    // 自定义双向通道（custom_packet：Network.发送 / 订阅 / 取消订阅）
 
     /** 上行：客户端 → 服务端自定义通道（无连接时丢弃）。 */
     public boolean sendCustomPacket(String channel, String payload) {
@@ -2035,14 +2094,112 @@ public final class ClientController {
             com.opendreamcore.packs.PackInstaller.installFromPayload(payload);
             return;
         }
-        try {
-            com.opendreamcore.script.EventBus.publish("custom:" + channel, payload);
-        } catch (Exception e) {
-            LOGGER.warn("custom_packet 分发失败: {}", e.toString());
+        // 视觉音效系统保留通道：SoundAPI.播放/停止 的下行指令
+        // （通道常量在 Protocol，两端共用；视觉系统是 ODC 协议自身能力，走保留通道不走脚本订阅）
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_SOUND.equals(channel)) {
+            handleSoundPlay(payload);
+            return;
+        }
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_SOUND_STOP.equals(channel)) {
+            com.opendreamcore.client.visual.VisualSoundStore.stopLoop(payload);
+            return;
+        }
+        // 资源云管线专属通道：加密钥匙/分片下发/删过期/收工挂载，见 ResourceCacheStore
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_RESOURCE_KEY.equals(channel)) {
+            com.opendreamcore.client.ResourceCacheStore.get().receiveKey(payload);
+            return;
+        }
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_RESOURCE_PUSH.equals(channel)) {
+            com.opendreamcore.client.ResourceCacheStore.get().receivePush(payload);
+            return;
+        }
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_RESOURCE_CLEAR.equals(channel)) {
+            com.opendreamcore.client.ResourceCacheStore.get().receiveClear(payload);
+            return;
+        }
+        if (com.opendreamcore.protocol.Protocol.CUSTOM_RESOURCE_DONE.equals(channel)) {
+            com.opendreamcore.client.ResourceCacheStore.get().receiveDone();
+            return;
+        }
+        // 交桥事件总线：脚本侧（Network.订阅）和附属 Java 侧（BridgeEvents.on）同一个话题，
+        // 不再两边各发一遍
+        com.opendreamcore.client.api.BridgeEvents.post("custom:" + channel, payload);
+    }
+
+    /**
+     * 视觉音效播放指令：payload = "音效键[|音量[|音调]]"。
+     * 规则库没有的键静默忽略（服务端只下发，客户端裁决"有没有这个音效"）。
+     */
+    private void handleSoundPlay(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return;
+        }
+        String[] parts = payload.split("\\|");
+        String key = parts[0].trim();
+        float[] override = null;
+        if (parts.length > 1) {
+            override = new float[2];
+            try {
+                override[0] = Float.parseFloat(parts[1].trim());
+                override[1] = parts.length > 2 ? Float.parseFloat(parts[2].trim()) : 1f;
+            } catch (NumberFormatException e) {
+                override = null; // 参数坏了就用规则默认值，不让坏指令炸音效
+            }
+        }
+        com.opendreamcore.client.visual.VisualSoundStore.play(key, override);
+    }
+
+    /**
+     * run:/event: 语法增量（九系统通用，规则里可选声明）。
+     *
+     * 规则里写：
+     *   run: "Chat.发送消息(\"规则已加载\")"   # 规则入库时执行的 DreamLang 脚本
+     *   event: "规则加载"                     # 规则入库时发布到 EventBus 的事件名
+     *
+     * 客户端入库时（visual_rules_sync 应用后）执行一次——页面级的 open/close
+     * 生命周期由 functions 承担，视觉规则级的一次性逻辑走这两个键，
+     * 服务端对应在 KeyConfig/SlotConfig 触发时执行（见各自执行器）。
+     */
+    private void applyRuleScripts(Map<String, Map<String, String>> bundles) {
+        for (Map.Entry<String, Map<String, String>> sys : bundles.entrySet()) {
+            for (Map.Entry<String, String> rule : sys.getValue().entrySet()) {
+                String run = null;
+                String event = null;
+                try {
+                    Map<String, Object> ir = new com.opendreamcore.config.YamlParser().parse(rule.getValue());
+                    if (ir == null) {
+                        continue;
+                    }
+                    // 单规则单条形态：键内就是规则体；找 run:/event: 键（顶层）
+                    run = ir.get("run") == null ? null : String.valueOf(ir.get("run"));
+                    event = ir.get("event") == null ? null : String.valueOf(ir.get("event"));
+                } catch (Exception e) {
+                    continue; // 解析失败的规则不触发脚本——别的系统已经各自处理过了
+                }
+                if (event != null && !event.isBlank()) {
+                    try {
+                        com.opendreamcore.script.EventBus.publish(event.trim(),
+                                sys.getKey(), rule.getKey());
+                    } catch (Exception e) {
+                        LOGGER.warn("视觉规则事件发布失败 {}/{}: {}", sys.getKey(), rule.getKey(), e.toString());
+                    }
+                }
+                if (run != null && !run.isBlank()) {
+                    try {
+                        com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                        scope.assignVar("system", sys.getKey());
+                        scope.assignVar("rule_id", rule.getKey());
+                        com.opendreamcore.script.DreamLang.execute(
+                            com.opendreamcore.adapter.AdapterChain.rewriteScript(run.trim()), scope);
+                    } catch (Exception e) {
+                        LOGGER.warn("视觉规则脚本执行失败 {}/{}: {}", sys.getKey(), rule.getKey(), e.toString());
+                    }
+                }
+            }
         }
     }
 
-    // ---------- 页面 ----------
+    // 页面
 
     /** 打开页面（本地或服务端下发）。 */
     public void open(Page page) {
@@ -2146,9 +2303,9 @@ public final class ClientController {
         return screen != null;
     }
 
-    // ---------- HUD 常驻 ----------
+    // HUD 常驻
 
-    /** 打开 HUD 页面（覆盖旧 HUD）。 */
+    /** 打开 HUD 页面（叠加：同 id 覆盖内容，不同 id 追加到栈顶，多页并存）。 */
     public void openHud(Page page) {
         openHud(page, null);
     }
@@ -2159,27 +2316,49 @@ public final class ClientController {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
-        double w = mc.getWindow().getGuiScaledWidth();
-        double h = mc.getWindow().getGuiScaledHeight();
-        hudPage = page;
-        hudNodes = layoutPage(page, w, h);
-        hudSession = serverSessionId == null
-                ? new UiSession(page.id() == null ? "hud" : page.id())
-                : new UiSession(page.id() == null ? "hud" : page.id(), serverSessionId);
+        String id = page.id() == null ? "hud" : page.id();
+        boolean fresh = true;
+        for (int i = 0; i < hudStack.size(); i++) {
+            Page p = hudStack.get(i);
+            if ((p.id() == null ? "hud" : p.id()).equals(id)) {
+                hudStack.set(i, page); // 同 id 覆盖内容（重新挂载/服务端刷新）
+                fresh = false;
+                break;
+            }
+        }
+        if (fresh) {
+            hudStack.add(page);
+            hudStackSessions.put(id, serverSessionId == null
+                    ? new UiSession(id)
+                    : new UiSession(id, serverSessionId));
+            runLifecycle(page, "open");
+        }
+        hudPage = hudStack.get(0); // 主力页兼容引用
+        hudSession = hudStackSessions.get(hudPage.id() == null ? "hud" : hudPage.id());
+        rebuildHudLayout();
         applyGlobalBindings(page.options()); // HUD keybinds/mousebinds → 全局热键（页面外常驻）
-        updateVanillaHide(page); // hideVanilla 选项 → 隐藏原版 HUD 层（NeoForge 逐层 / Fabric 整层）
-        runLifecycle(page, "open");
-        LOGGER.info("HUD 页面已挂载 {}（{}）", page.id(), serverSessionId == null ? "本地" : "服务端");
+        updateVanillaHide(hudPage); // hideVanilla 选项 → 隐藏原版 HUD 层（NeoForge 逐层 / Fabric 整层）
+        LOGGER.info("HUD 页面已挂载 {}（{}，共 {} 张叠加）", id,
+                serverSessionId == null ? "本地" : "服务端", hudStack.size());
     }
 
     public void closeHud() {
-        if (hudPage != null) {
-            runLifecycle(hudPage, "close");
+        if (hudStack.isEmpty()) {
+            hudPage = null;
+            hudNodes = null;
+            hudSession = null;
+            return;
+        }
+        for (Page p : hudStack) {
+            runLifecycle(p, "close");
         }
         String hudPageId = hudPage == null ? null : hudPage.id();
         hudPage = null;
         hudNodes = null;
         hudSession = null;
+        hudStack.clear();
+        hudStackSessions.clear();
+        hudStackNodes.clear();
         clearGlobalBindings(); // 全局热键随 HUD 卸载失效
         vanillaHiddenLayers.clear(); // HUD 关闭 → 原版 HUD 恢复
         cancelScriptsForPage(hudPageId); // HUD 关闭 → 其定时任务清理
@@ -2189,7 +2368,12 @@ public final class ClientController {
         return hudPage != null;
     }
 
-    // ---------- 隐藏原版 HUD 层（hideVanilla 页面选项） ----------
+    /** HUD 常驻页的 id（没开时 null；codc state 报状态用）。 */
+    public String hudPageId() {
+        return hudPage == null ? null : hudPage.id();
+    }
+
+    // 隐藏原版 HUD 层（hideVanilla 页面选项）
 
     /** 需要隐藏的原版 HUD 层（ResourceLocation 全名；"*" = 全部）。 */
     private final java.util.Set<String> vanillaHiddenLayers = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -2281,6 +2465,15 @@ public final class ClientController {
 
     /** HUD 渲染回调（RenderGuiEvent 里调用）。 */
     public void renderHud(net.minecraft.client.gui.GuiGraphics g) {
+        // 散装资源纹理注册冲刷（渲染线程）：启动重载的 Worker 线程只解码入队，这儿统一注册
+        com.opendreamcore.client.resources.LooseResourceLoader.flushPending();
+        // 每帧入口先检测窗口缩放：design 页的 s/ox/oy 每帧都依赖 GUI 尺寸，
+        // 变了不重布就会整页错位（缓存 key 带尺寸，重布只在真变了一次时发生）。
+        // 无 HUD 也要查——否则 F11 全屏切换后屏幕页会错位。
+        checkViewportResize();
+        if (!hudStack.isEmpty() && (hudNodes == null || hudPage == null)) {
+            rebuildHudLayout();
+        }
         if (hudNodes == null || hudPage == null) {
             return;
         }
@@ -2301,13 +2494,25 @@ public final class ClientController {
         } else if (Boolean.TRUE.equals(hudBg)) {
             g.fill(0, 0, (int) g.guiWidth(), (int) g.guiHeight(), 0xA0000000);
         }
-        // HUD 页面动画注册（自动播放 + 命名动画，服务端 ui_animation 远程触发）
-        AnimationEngine.get().tick(hudPage.id(), hudPage.options(), hudPage.variables());
+        // 逐张叠加页：动画各自 tick，内容按页变量/作用域渲染（后开的层级更高）
+        for (int si = 0; si < hudStack.size(); si++) {
+            Page hp = hudStack.get(si);
+            String hid = hp.id() == null ? "hud" : hp.id();
+            AnimationEngine.get().tick(hid, hp.options(), hp.variables());
+        }
         Minecraft mc = Minecraft.getInstance();
         double scale = mc.getWindow().getGuiScaledWidth() / (double) mc.getWindow().getScreenWidth();
         int mouseX = (int) mc.mouseHandler.xpos(); // xpos() 已是 GUI 坐标(修复 GUI 缩放≠1 时双重缩放)
         int mouseY = (int) mc.mouseHandler.ypos();
-        UiRenderer.draw(g, mc.font, hudNodes, mouseX, mouseY, null, hudPage.variables(), hudPage.id());
+        for (int si = 0; si < hudStack.size(); si++) {
+            Page hp = hudStack.get(si);
+            String hid = hp.id() == null ? "hud" : hp.id();
+            List<RenderNode> ns = hudStackNodes.get(hid);
+            if (ns == null) {
+                continue;
+            }
+            UiRenderer.draw(g, mc.font, ns, mouseX, mouseY, null, hp.variables(), hid);
+        }
         renderWorldUi(g); // Boss 条 + 物品提示（无页面时也显示）
         renderHudTooltip(g, mc, mouseX, mouseY); // HUD 悬停 tooltip（服务端注册表/静态 tooltip 同管线）
         // HUD 编辑模式覆盖层
@@ -2349,12 +2554,48 @@ public final class ClientController {
 
     /** 刷新 HUD 布局（编辑后重布局）。 */
     public void refreshHud() {
-        if (hudPage == null) return;
+        rebuildHudLayout();
+    }
+
+    /** 重建全部叠加 HUD 布局：窗口尺寸/变量/编辑刷新共用（叠加栈序 = 渲染层序，后开的在上）。 */
+    private void rebuildHudLayout() {
+        if (hudStack.isEmpty()) {
+            hudNodes = null;
+            return;
+        }
         Minecraft mc = Minecraft.getInstance();
         double w = mc.getWindow().getGuiScaledWidth();
         double h = mc.getWindow().getGuiScaledHeight();
-        String id = hudPage.id() == null ? "hud" : hudPage.id();
-        hudNodes = layoutPage(hudPage, w, h);
+        hudStackNodes.clear();
+        java.util.List<RenderNode> merged = new java.util.ArrayList<>();
+        for (Page p : hudStack) {
+            String pid = p.id() == null ? "hud" : p.id();
+            java.util.List<RenderNode> ns = layoutPage(p, w, h);
+            hudStackNodes.put(pid, ns);
+            if (ns != null) {
+                merged.addAll(ns);
+            }
+        }
+        hudNodes = merged;
+    }
+
+    /** 命中节点归属哪张叠加页（交互路由：事件/脚本按页会话发，不串台）。 */
+    private Page hudOwnerOf(RenderNode node) {
+        if (node == null || hudStack.isEmpty()) {
+            return hudPage;
+        }
+        for (Page p : hudStack) {
+            String pid = p.id() == null ? "hud" : p.id();
+            List<RenderNode> ns = hudStackNodes.get(pid);
+            if (ns != null) {
+                for (RenderNode r : ns) {
+                    if (r == node) {
+                        return p;
+                    }
+                }
+            }
+        }
+        return hudPage;
     }
 
     /** 切换 HUD 编辑模式。 */
@@ -2721,9 +2962,10 @@ public final class ClientController {
                         + "（" + els.size() + " 个元素；保存写为独立页面）"), false);
     }
 
-    /** 进服时按 match 自动挂载 HUD 页面（本地仓库）。 */
-    public void autoMountHud() {        Page hud = localPages.match("hud", null, com.opendreamcore.page.DisplayMode.HUD);
-        if (hud != null) {
+    /** 进服时按 match 自动挂载全部 HUD 页面（本地仓库，多页叠加）。 */
+    public void autoMountHud() {
+        java.util.List<Page> huds = localPages.matchAll("hud", null, com.opendreamcore.page.DisplayMode.HUD);
+        for (Page hud : huds) {
             openHud(hud);
         }
         Page world = localPages.match("world", null, com.opendreamcore.page.DisplayMode.WORLD);
@@ -2732,7 +2974,7 @@ public final class ClientController {
         }
     }
 
-    // ---------- 世界全息 ----------
+    // 世界全息
 
     /** 打开世界全息页面（同 id 重开 = 原位刷新；不同 id = 追加新面板，多面板同屏）；
      *  serverSessionId 非空 = 服务端页面（事件上报裁决）。打开后聚焦该面板。 */
@@ -2803,6 +3045,11 @@ public final class ClientController {
                 return;
             }
         }
+    }
+
+    /** 关闭指定页面 id 的世界面板（视觉规则重载清场用；无此面板静默）。 */
+    public void closeWorldPage(String pageId) {
+        closeWorldPanel(pageId);
     }
 
     /** 关闭指定页面 id 的世界面板。 */
@@ -2967,9 +3214,9 @@ public final class ClientController {
 
     /**
      * 每帧更新各面板锚点：
-     * - world.anchor: {x,y,z} → 绝对世界坐标（不跟随玩家）
-     * - world.follow: false → 打开瞬间的位置固定（pin）
-     * - world.smooth: 0~1 → 平滑跟随（每帧向目标插值，漂浮感）
+     * world.anchor: {x,y,z} → 绝对世界坐标（不跟随玩家）
+     * world.follow: false → 打开瞬间的位置固定（pin）
+     * world.smooth: 0~1 → 平滑跟随（每帧向目标插值，漂浮感）
      */
     void updateWorldPanelAnchors(net.minecraft.client.Camera camera) {
         for (WorldPanel panel : worldPanels) {
@@ -3123,7 +3370,7 @@ public final class ClientController {
 
     /** 下拉点击：切到下一个选项并上报 INPUT（选项值）。 */
 
-    // ---------- 世界页签（tabs 元素 + 元素 tab 属性） ----------
+    // 世界页签（tabs 元素 + 元素 tab 属性）
 
     /** 当前激活页签名（无本地状态 → 页签元素定义值/第一个选项；无 tabs 元素返回 null；按页隔离）。 */
     public String worldTabActive(String pageId) {
@@ -5087,7 +5334,7 @@ public final class ClientController {
                 && Boolean.parseBoolean(String.valueOf(bm.get("flowReverse")));
     }
 
-    // ---- 色板当前档回显读取（速度/样式/段长/透明度/颜色，默认值与渲染侧一致） ----
+    // 色板当前档回显读取（速度/样式/段长/透明度/颜色，默认值与渲染侧一致）
 
     /** 当前流光速度（ms/圈；0 未设 = 默认 1200）。 */
     private long borderFlowSpeedOf(Element element) {
@@ -6211,7 +6458,7 @@ public final class ClientController {
         }
     }
 
-    // ---------- 世界面板 WYSIWYG 编辑 ----------
+    // 世界面板 WYSIWYG 编辑
 
     /** 编辑模式：方向键微调选中元素（←→ = x，↑↓ = y，Shift+↑↓ = z，按住 200ms 自动重复；锁定元素除外）。 */
 
@@ -6886,7 +7133,7 @@ public final class ClientController {
 
     /**
      * 模板块递归展开（模板嵌套）：块内特殊键
-     * {@code __template: <名称>} 引用其它模板（可配 {@code __dx/__dy} 相对偏移，全部子元素整体平移），
+     * __template: <名称> 引用其它模板（可配 __dx/__dy 相对偏移，全部子元素整体平移），
      * 深度上限 4，链上环检测；失败（缺失/环/超深）记入 failed 并跳过该块。
      */
     void expandTemplateBlocks(Map<?, ?> allTemplates, String name, int depth,
@@ -6990,7 +7237,7 @@ public final class ClientController {
         return false;
     }
 
-    // ---------- 编辑撤消/重做（undo/redo） ----------
+    // 编辑撤消/重做（undo/redo）
 
     /** 撤消条目：元素在某个时间点的完整编辑状态快照。 */
 
@@ -7848,7 +8095,7 @@ public final class ClientController {
     /** 任意属性编辑面板：元素属性路径列表，点击打开值编辑（复用 applyWorldEditProp）；顶部过滤输入框。 */
 
     /** 批量属性面板：以首元素属性清单为模板，点击属性 → 整组快捷编辑（批量管线，一步撤消）；
-     *  组内值不一致的属性以 ⚠ 标注（差异高亮）。 */
+     *  组内值不一致的属性以 注意 标注（差异高亮）。 */
 
     /** 属性快捷编辑屏：颜色属性带调色板（点击即应用），枚举/数值属性带常用值按钮，任意值可手输。 */
 
@@ -7972,7 +8219,7 @@ public final class ClientController {
 
     /** 批量属性编辑：多个元素同一路径一次设置（一步撤消、逐个记入未保存、各自刷新 __create__）。 */
 
-    // ---------- 新增 / 删除元素（WYSIWYG 全流程） ----------
+    // 新增 / 删除元素（WYSIWYG 全流程）
 
     /** Ctrl 是否按下（拖拽复制用）。 */
     static boolean ctrlDown(Minecraft mc) {
@@ -9473,22 +9720,185 @@ public final class ClientController {
                 element.visibleWhen(), element.enabledWhen(), element.actions(), kids, element.parent());
     }
 
-    /** 布局入口：应用编辑模型（删除/复制/位置覆盖）后交给 LayoutEngine。 */
+    /** 布局入口：应用编辑模型（删除/复制/位置覆盖）后交给 LayoutEngine。
+     *
+     * w/h 是真实 GUI 窗口尺寸（世界面板固定 800x600 设计空间除外）：页面声明
+     * design:{width,height} 时在内层按设计画布布，产出节点投影回窗口坐标——
+     * 渲染/命中/动画层零改动。未声明 design 的页面逐帧与旧版一致。 */
+    /**
+     * HUD 全局基准（1920×1080 等比自适的一键开关）：
+     * 服务端 config.yml 的 hud-baseline 段下发（odc.properties），
+     * 或客户端本地 odc.properties 手动写。页面显式 design 优先于它。
+     */
+    public record HudBaseline(boolean enabled, double width, double height, String fit) {
+    }
+
+    private volatile HudBaseline hudBaseline;
+
+    /** HUD 基准应用：值变化时顺手重布当前 HUD 与开屏页（新基准当场生效）。 */
+    public void setHudBaseline(HudBaseline baseline) {
+        boolean changed = !java.util.Objects.equals(this.hudBaseline, baseline);
+        this.hudBaseline = baseline;
+        if (changed && (hudPage != null || screen != null)) {
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            double gw = mc.getWindow().getGuiScaledWidth();
+            double gh = mc.getWindow().getGuiScaledHeight();
+            if (screen != null) {
+                screen.refresh(layoutPage(screen.page(), gw, gh));
+            }
+            if (!hudStack.isEmpty()) {
+                rebuildHudLayout();
+            }
+        }
+    }
+
+    /** 从 key=value 表解析 hud-baseline 段（odc.properties / CONFIG_PUSH 合并后调用）。 */
+    public void applyHudBaseline(Map<String, String> props) {
+        if (props == null || props.isEmpty()) {
+            return;
+        }
+        String enabled = props.get("hud-baseline.enabled");
+        if (enabled == null) {
+            return; // 没下发这玩意就不动现状
+        }
+        boolean on = Boolean.parseBoolean(enabled.trim());
+        double w = com.opendreamcore.client.UiRenderer.num(props.get("hud-baseline.width"), 1920);
+        double h = com.opendreamcore.client.UiRenderer.num(props.get("hud-baseline.height"), 1080);
+        String fit = props.getOrDefault("hud-baseline.fit", "anchor_top_left");
+        setHudBaseline(new HudBaseline(on, w, h, fit));
+    }
+
+    /** 本地 odc.properties 读一遍（进服早于 CONFIG_PUSH 就能先有基准）。 */
+    private static Map<String, String> readOdcProperties() {
+        java.nio.file.Path file = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("config").resolve("opendreamcore").resolve("odc.properties");
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (java.nio.file.Files.isRegularFile(file)) {
+            try {
+                for (String line : java.nio.file.Files.readAllLines(file)) {
+                    int eq = line.indexOf('=');
+                    if (eq > 0) {
+                        out.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return out;
+    }
+
     List<RenderNode> layoutPage(Page page, double w, double h) {
         String pageId = page.id() == null ? "page" : page.id();
-        String key = layoutKey(page);
+        // 画布参数化：同页复用于不同画布（横/竖屏两套）时缓存必须区分坐标系
+        String key = layoutKey(page) + "@" + (int) w + "x" + (int) h;
         // 布局缓存：变量/编辑覆盖 hash 不变时直接复用（state_patch 高频/拖拽提交提速）
         String hash = layoutHash(page, pageId);
         Object[] cached = layoutCache.get(key);
         if (cached != null && hash.equals(cached[0])) {
+            // 命中缓存也要刷新当帧视口：文本层按 active 视口取缩放/反解
+            Viewport vp = effectiveViewport(page, w, h);
+            if (!vp.isIdentity()) {
+                Viewport.setActive(vp);
+            }
             return (List<RenderNode>) cached[1];
         }
-        List<RenderNode> nodes = LayoutEngine.layout(editedPage(page), w, h, elementEdits.forPage(pageId));
+        // 屏幕/HUD 画布入口按真实窗口尺寸布；世界面板固定 800x600 设计空间不叠加
+        Viewport vp = effectiveViewport(page, w, h);
+        double bw = w, bh = h;
+        if (!vp.isIdentity()) {
+            bw = vp.designWidth();
+            bh = vp.designHeight();
+        }
+        Viewport.setActive(vp);
+        List<RenderNode> designNodes = LayoutEngine.layout(editedPage(page), bw, bh, elementEdits.forPage(pageId), vp);
+        List<RenderNode> nodes = LayoutEngine.projectTree(designNodes, vp);
+        if (Viewport.debug()) {
+            dumpLayout(pageId, bw, bh, designNodes, nodes); // debug：逐元素设计 rect 与屏幕 rect 对照
+        }
         // 根层按 z 升序稳定排序（与 RenderNode 子节点排序同规则）：z 大画在上面、同 z 保持声明顺序。
         // 屏幕/HUD/世界全部节点列表的唯一出口 —— 绘制层迭确定，不受 YAML 书写顺序影响。
         nodes = UiRenderer.zSorted(nodes);
         layoutCache.put(key, new Object[]{hash, nodes});
         return nodes;
+    }
+
+    /**
+     * 页面视口决策：页面显式 design 优先（含自定义 fit 策略）；没声明且 HUD 全局基准
+     * （config hud-baseline / 本地 odc.properties）开着 → 用基准造视口。
+     * 两个都没有 → IDENTITY，老包一帧不挪。
+     */
+    private Viewport effectiveViewport(Page page, double w, double h) {
+        Viewport vp = LayoutEngine.viewportFor(page, w, h);
+        if (!vp.isIdentity()) {
+            return vp;
+        }
+        HudBaseline b = hudBaseline;
+        if (b != null && b.enabled) {
+            return com.opendreamcore.ui.ViewportStrategies.get(b.fit)
+                    .build(b.width, b.height, w, h);
+        }
+        return vp;
+    }
+
+    /** debug 打印：每元素设计 rect（layout 原值）与投影后屏幕 rect 逐行对照。 */
+    private static void dumpLayout(String pageId, double bw, double bh,
+                                   List<RenderNode> design, List<RenderNode> screen) {
+        Viewport vp = Viewport.active();
+        System.out.println("[ODC layout] page=" + pageId + " design=" + (int) bw + "x" + (int) bh
+                + " s=" + vp.scale() + " ox=" + (int) vp.offsetX() + " oy=" + (int) vp.offsetY());
+        dumpLayoutNodes(design, screen, "  ");
+    }
+
+    /** 两棵树同序（projectTree 保孩子序），配对逐行打；结构对不上时退到只打设计侧。 */
+    private static void dumpLayoutNodes(List<RenderNode> design, List<RenderNode> screen, String ind) {
+        for (int i = 0; i < design.size(); i++) {
+            RenderNode d = design.get(i);
+            RenderNode s = screen != null && i < screen.size() ? screen.get(i) : null;
+            System.out.println(ind + d.id()
+                    + " design=" + fmt(d) + (s == null ? "" : " screen=" + fmt(s)));
+            dumpLayoutNodes(d.children(), s == null ? null : s.children(), ind + "  ");
+        }
+    }
+
+    private static String fmt(RenderNode n) {
+        return String.format(java.util.Locale.ROOT, "%.1f,%.1f %.1fx%.1f",
+                n.x(), n.y(), n.width(), n.height());
+    }
+
+    /** 上一次页面/HUD 布局用的 GUI 尺寸（窗口缩放变化检测）。 */
+    private int lastLayoutGuiW = -1;
+    private int lastLayoutGuiH = -1;
+
+    /** 渲染路径每帧调（廉价）：GUI 尺寸变了就重布当前页面与 HUD（design 页的
+     *  s/ox/oy 每帧都依赖窗口尺寸，不重布会整页错位/越界）。 */
+    public void checkViewportResize() {
+        // 没 HUD 也没开屏时直接返：窗口尺寸变了也无页可重布
+        if (hudPage == null && screen == null) {
+            return;
+        }
+        try {
+            var win = Minecraft.getInstance().getWindow();
+            int gw = win.getGuiScaledWidth();
+            int gh = win.getGuiScaledHeight();
+            if (gw == lastLayoutGuiW && gh == lastLayoutGuiH) {
+                return;
+            }
+            lastLayoutGuiW = gw;
+            lastLayoutGuiH = gh;
+            if (hudPage != null) {
+                hudNodes = layoutPage(hudPage, gw, gh);
+            }
+            if (screen != null && !screenStack.isEmpty()) {
+                for (OdcScreen s : screenStack) {
+                    Page p = s.page();
+                    if (p != null) {
+                        s.refresh(layoutPage(p, gw, gh));
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // 尺寸重建异常不阻断渲染：下帧再试
+        }
     }
 
     /** 布局缓存键（页面对象身份；重建后自然 miss）。 */
@@ -9572,8 +9982,8 @@ public final class ClientController {
         if (screen != null) {
             screen.refresh(layoutPage(screen.page(), w, h));
         }
-        if (hudPage != null) {
-            hudNodes = layoutPage(hudPage, w, h);
+        if (!hudStack.isEmpty()) {
+            rebuildHudLayout();
         }
         if (worldPage != null) {
             worldNodes = layoutPage(worldPage, 800, 600);
@@ -9581,8 +9991,7 @@ public final class ClientController {
         LOGGER.info("服务端全局状态已更新 {} 项", state.values().size());
     }
 
-    // ================= 服务端窗口标题下发（window_title）=================
-
+    // 服务端窗口标题下发（window_title）
     private boolean hudDiagDone;
     private volatile boolean managedPacksDone;
 
@@ -9628,7 +10037,9 @@ public final class ClientController {
         try {
             com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
             page.variables().forEach(scope::assignVar);
-            com.opendreamcore.script.DreamLang.execute(script, scope);
+            // 方言脚本先进适配器链过一遍（生命周期脚本也可能是老龙核搬来的）
+            com.opendreamcore.script.DreamLang.execute(
+                    com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("页面 {} 生命周期 {} 脚本出错: {}", page.id(), name, e.toString());
         }
@@ -9650,7 +10061,8 @@ public final class ClientController {
             if (prevTab != null) {
                 scope.assignVar("prevTab", prevTab);
             }
-            com.opendreamcore.script.DreamLang.execute(script, scope);
+            com.opendreamcore.script.DreamLang.execute(
+                    com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("页面 {} onTabChange 脚本出错: {}", page.id(), e.toString());
         }
@@ -9664,14 +10076,14 @@ public final class ClientController {
         return n;
     }
 
-    // ---------- 事件发送 ----------
+    // 事件发送
 
     /** 是否有服务端连接（多人/局域网）。 */
     public boolean isServerMode() {
         return Minecraft.getInstance().getConnection() != null;
     }
 
-    // ---------- 脚本调度（委托 client/controller/ScriptScheduler，C6 拆分） ----------
+    // 脚本调度（委托 client/controller/ScriptScheduler，C6 拆分）
 
     private final com.opendreamcore.client.controller.ScriptScheduler scriptScheduler =
             new com.opendreamcore.client.controller.ScriptScheduler(new com.opendreamcore.client.controller.ScriptScheduler.Host() {
@@ -9794,7 +10206,8 @@ public final class ClientController {
                 scope.assignVar("event", data);
                 scope.assignVar("input", data);
             }
-            com.opendreamcore.script.DreamLang.execute(script, scope);
+            com.opendreamcore.script.DreamLang.execute(
+                    com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("本地脚本执行失败: {}", e.toString());
         }
@@ -9811,6 +10224,208 @@ public final class ClientController {
         };
     }
 
+    /**
+     * 收到服务端视觉规则同步：
+     * 九系统的规则 YAML 原文入库到客户端仓库，各渲染钩子按需读取。
+     * 解析失败的单条 warn 跳过——坏规则不影响其他系统。
+     */
+    public void handleVisualRules(com.opendreamcore.protocol.message.VisualRulesSync sync) {
+        try {
+            // 先解包成 bundle 视图：后续各系统消费器 + 脚本钩子 + 世界面板共用同一份
+            var bundles = sync.toBundles();
+            com.opendreamcore.client.visual.ClientVisualStore.get().apply(sync);
+            com.opendreamcore.client.visual.VisualItemSkins.refresh();
+            // 其余系统的规则入库重解析：Sounds/FontConfig 各自的客户端消费器
+            // （规则为空时 refresh 出空表，后续查询零开销直通）
+            com.opendreamcore.client.visual.VisualSoundStore.refresh();
+            com.opendreamcore.client.visual.VisualFontOverride.refresh();
+            com.opendreamcore.client.visual.VisualFontReplace.refresh();
+        com.opendreamcore.client.visual.VisualItemEffects.refresh();
+        com.opendreamcore.client.visual.VisualArmorLayer.refresh();
+        com.opendreamcore.client.visual.VisualNameTags.refresh();
+            LOGGER.info("视觉规则已应用：{} 个系统 / {} 条",
+                    sync.toBundles().size(), sync.entries().size());
+            // run:/event: 语法增量：规则入库时触发脚本与事件总线
+            // （九系统通用，规则里可选声明；客户端用客户端方法/总线执行）
+            applyRuleScripts(bundles);
+            // WorldTexture / HeadTag 规则 → 世界面板实例化（本地规则加载同用，见 applyVisualWorldPages）
+            applyVisualWorldPages(bundles);
+        } catch (Exception e) {
+            LOGGER.warn("视觉规则应用失败: {}", e.toString());
+        }
+    }
+
+    /**
+     * WorldTexture / HeadTag 规则 → 世界面板实例化（复用 openWorld 既有管线）。
+     * 重载先清旧的：规则集变化时旧面板可能已不匹配新规则，不清理会残留幽灵面板。
+     * handleVisualRules（服务端下发）与 reloadAll（本地规则）共用这一处。
+     */
+    private void applyVisualWorldPages(Map<String, Map<String, String>> bundles) {
+        if (bundles == null) {
+            return;
+        }
+        for (var sys : List.of("WorldTexture", "HeadTag")) {
+            // 收集本系统的全部页面 id（重载前逐个关闭，只关系统自己的，不误伤手动开的面板）
+            var ruleIds = bundles.getOrDefault(sys, Map.of()).keySet();
+            for (String rid : ruleIds) {
+                closeWorldPage(sys.toLowerCase() + "_" + rid);
+            }
+            for (var rule : bundles.getOrDefault(sys, Map.of()).entrySet()) {
+                try {
+                    String pageId = sys.toLowerCase() + "_" + rule.getKey();
+                    Map<String, Object> ir = new com.google.gson.internal.LinkedTreeMap<>();
+                    var parser = new com.opendreamcore.config.YamlParser().parse(rule.getValue());
+                    if (parser != null) {
+                        ir.putAll(parser);
+                    }
+                    // 走 VisualWorldPages 统一转换器：texture→image 元素、
+                    // HeadTag 的 entity/name/distance 匹配键剥掉留作档案
+                    Page p = sys.equals("WorldTexture")
+                            ? com.opendreamcore.client.visual.VisualWorldPages.worldTextureToPage(pageId, ir)
+                            : com.opendreamcore.client.visual.VisualWorldPages.headTagToPage(pageId, ir);
+                    if (p != null) {
+                        openWorld(p, null);
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("视觉规则页面生成失败 {}/{}: {}", sys, rule.getKey(), e.toString());
+                }
+            }
+        }
+    }
+
+    /**
+     * 全局 Ctrl+R 材质包重载：无屏幕（页面没开）时也能按。
+     * 边沿触发一次按压只触发一次；打开着页面时走 OdcScreen.keyPressed，
+     * 这里只管无 screen 场景，两条路不致重复。
+     */
+    private void tickGlobalReloadKey() {
+        var mc = Minecraft.getInstance();
+        if (mc == null || mc.getWindow() == null || mc.player == null) {
+            return;
+        }
+        // 注意：这里刻意不拦 mc.screen != null。GLFW 轮询读的是物理键盘状态，
+        // 任何 Screen 打开时照样能按（OdcScreen 也没设 Ctrl+R 分支，两条路不会撞）。
+        long win = mc.getWindow().getWindow();
+        boolean r = org.lwjgl.glfw.GLFW.glfwGetKey(win, org.lwjgl.glfw.GLFW.GLFW_KEY_R) == 1;
+        boolean ctrl = org.lwjgl.glfw.GLFW.glfwGetKey(win, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_CONTROL) == 1
+                || org.lwjgl.glfw.GLFW.glfwGetKey(win, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_CONTROL) == 1;
+        boolean pressed = r && ctrl;
+        if (pressed && !reloadKeyPrev) {
+            reloadResources();
+        }
+        reloadKeyPrev = pressed;
+    }
+
+    /**
+     * 材质包重载（Ctrl+R 专用）：只重装本地材质包 + 重注册散装贴图。
+     * 页面/视觉规则/字体/主题/标题不碰——那是服务端推送和 /codc reload 负责的事。
+     * 改完 png / gif / zip 按一下立生效，不用重启。
+     */
+    public void reloadResources() {
+        Path gameDir = Minecraft.getInstance().gameDirectory.toPath();
+        // 1. 本地材质包重装（resourcepacks/OpenDreamCore 下的 zip/文件夹/散图）
+        try {
+            com.opendreamcore.client.packs.LocalPackPreload.preload(gameDir);
+        } catch (Throwable t) {
+            LOGGER.warn("本地材质包重载失败: {}", t.toString());
+        }
+        // 2. 散装贴图重注册：先清后扫，改过的 png/gif 立刻换新、删掉的贴图不再残留
+        com.opendreamcore.client.resources.LooseResourceLoader.clear();
+        com.opendreamcore.client.resources.LooseResourceLoader.loadAll(gameDir);
+        com.opendreamcore.client.resources.LooseResourceLoader.flushPending();
+        var p = Minecraft.getInstance().player;
+        if (p != null) {
+            p.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                    "§a[OpenDreamCore] §f资源已重载"), false);
+        }
+    }
+
+    /**
+     * /codc reload：客户端本地全量重载（页面/字体/视觉规则/主题/标题）。
+     * 不动材质包——那是 Ctrl+R 的活。服务端模式下页面/规则以上级推送为准，
+     * 这条主要给单机/开发本地刷配置用。
+     */
+    public void reloadAll() {
+        Path gameDir = Minecraft.getInstance().gameDirectory.toPath();
+        // 1. 本地视觉规则（gameDir/OpenDreamCore/visual/*.yml，缺省建模板示例）
+        Map<String, Map<String, String>> localBundles = loadLocalVisualRules();
+        if (localBundles != null && !localBundles.isEmpty()) {
+            applyVisualWorldPages(localBundles); // 本地 HeadTag/WorldTexture 世界面板实例化
+        }
+        // 2. 各系统消费器重解析（字符替换/字形叠加/物品图标/音效）
+        com.opendreamcore.client.visual.VisualItemSkins.refresh();
+        com.opendreamcore.client.visual.VisualSoundStore.refresh();
+        com.opendreamcore.client.visual.VisualFontOverride.refresh();
+        com.opendreamcore.client.visual.VisualFontReplace.refresh();
+        com.opendreamcore.client.visual.VisualItemEffects.refresh();
+        com.opendreamcore.client.visual.VisualArmorLayer.refresh();
+        com.opendreamcore.client.visual.VisualNameTags.refresh();
+        // 3. 页面 + 字体 + 主题 + 标题
+        Path uiDir = gameDir.resolve("OpenDreamCore").resolve("UI");
+        localPages().load(uiDir);
+        if (isOpen()) {
+            refreshCurrent();
+        }
+        WindowBranding.reload();
+        var p = Minecraft.getInstance().player;
+        if (p != null) {
+            p.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                    "§a[OpenDreamCore] §f本地页面/字体/规则已重载"), false);
+        }
+    }
+
+    /**
+     * 本地视觉规则：单机（无服务端下发）也能用。
+     * 扫 gameDir/OpenDreamCore/visual/<系统名>.yml，规则集跟插件数据目录同形态——
+     * 服务端下发时 handleVisualRules 会整体覆盖（服务端优先），本地改动用 /codc reload 刷。
+     */
+    private Map<String, Map<String, String>> loadLocalVisualRules() {
+        Map<String, Map<String, String>> bundles = new java.util.LinkedHashMap<>();
+        try {
+            Path dir = Minecraft.getInstance().gameDirectory.toPath()
+                    .resolve("OpenDreamCore").resolve("visual");
+            java.nio.file.Files.createDirectories(dir);
+            var templates = com.opendreamcore.visual.VisualTemplates.all();
+            for (String sys : templates.keySet()) {
+                Path f = dir.resolve(sys + ".yml");
+                if (!java.nio.file.Files.isRegularFile(f)) {
+                    // 缺省生成模板示例（与插件 ensureDefault 同一套），用户没写就不生效
+                    try {
+                        com.opendreamcore.visual.VisualRules.ensureDefault(dir, sys, templates.get(sys));
+                    } catch (Exception ignored) {
+                    }
+                    continue;
+                }
+                String text = java.nio.file.Files.readString(f);
+                if (text == null || text.isBlank()) {
+                    continue;
+                }
+                Map<String, String> bundle = new java.util.LinkedHashMap<>();
+                bundle.put("_local", text);
+                bundles.put(sys, bundle);
+            }
+            if (!bundles.isEmpty()) {
+                com.opendreamcore.client.visual.ClientVisualStore.get()
+                        .apply(com.opendreamcore.protocol.message.VisualRulesSync
+                                .fromBundles(bundles, "local"));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("本地视觉规则加载失败: {}", e.toString());
+        }
+        return bundles;
+    }
+
+    /**
+     * 上报视觉系统按键组合触发。
+     * 服务端按 KeyConfig 规则执行命令/脚本；无会话时静默。
+     */
+    public void sendVisualKeyTrigger(UiSession session, String data) {
+        if (session == null || !isServerMode()) {
+            return;
+        }
+        sendEvent(session.event("keyconfig", UiEvent.Trigger.KEY, data));
+    }
+
     public void sendEvent(UiEvent event) {
         if (event == null) {
             return;
@@ -9820,7 +10435,7 @@ public final class ClientController {
         sendRaw(com.opendreamcore.protocol.Protocol.UI_EVENT, buf.toByteArray());
     }
 
-    // ---------- 服务端下发（page_control） ----------
+    // 服务端下发（page_control）
 
     /** 握手竞态回放：密钥已到，把暂存的页面/HUD/控制指令按原序补跑一遍。 */
     private void flushPendingHandshake() {
@@ -9978,6 +10593,8 @@ public final class ClientController {
                     LOGGER.debug("服务端页面 {} 密钥未到，暂存待回放", sync.pageId());
                 } else {
                     LOGGER.warn("服务端页面解析失败 {}", sync.pageId());
+                    chatWarnOnce("page-parse:" + sync.pageId(),
+                            "§c[OpenDreamCore] §f页面 " + sync.pageId() + " 解析失败，内容已忽略（详见日志）");
                 }
                 return;
             }
@@ -10003,6 +10620,8 @@ public final class ClientController {
             }
         } catch (Exception e) {
             LOGGER.warn("服务端页面解析失败 {}: {}", sync.pageId(), e.toString());
+            chatWarnOnce("page-parse-exc:" + sync.pageId(),
+                    "§c[OpenDreamCore] §f页面 " + sync.pageId() + " 解析失败: " + shortReason(e));
         }
     }
 
@@ -10043,55 +10662,30 @@ public final class ClientController {
             }
         } catch (Exception e) {
             LOGGER.warn("服务端 HUD 解析失败 {}: {}", sync.pageId(), e.toString());
+            chatWarnOnce("hud-parse:" + sync.pageId(),
+                    "§c[OpenDreamCore] §fHUD " + sync.pageId() + " 解析失败: " + shortReason(e));
         }
     }
 
-    // ---------- 背景音乐（页面 music 选项 + 服务端 MusicSync） ----------
+    // 背景音乐（页面 music 选项 + 服务端 MusicSync）
 
-    private volatile boolean musicConfigured;
+    /** 背景音乐服务：页面 music 选项与 MusicSync 指令的播放动作都在 MusicService。 */
+    private final com.opendreamcore.client.controller.MusicService musicService =
+            new com.opendreamcore.client.controller.MusicService();
 
     /** 页面音乐配置（music: 文件 或 {file, volume, loop}），打开页面时调用。 */
     public void applyMusic(Map<String, Object> options) {
-        musicConfigured = false;
-        if (options == null) {
-            return;
-        }
-        Object music = options.get("music");
-        if (music == null) {
-            return;
-        }
-        String file;
-        double vol = 0.8;
-        boolean loop = true;
-        if (music instanceof Map<?, ?> m) {
-            Object rawFile = m.get("file");
-            file = rawFile == null ? null : String.valueOf(rawFile);
-            vol = m.get("volume") instanceof Number n ? n.doubleValue() : 0.8;
-            loop = !(m.get("loop") instanceof Boolean b && !b);
-        } else {
-            file = String.valueOf(music);
-        }
-        if (file != null && !file.isBlank()) {
-            musicConfigured = true;
-            MusicPlayer.get().play(file, vol, loop);
-        }
+        musicService.applyMusic(options);
     }
 
     /** 页面音乐随页面关闭停止（仅停止本页配置的音乐）。 */
     public void stopPageMusic() {
-        if (musicConfigured) {
-            MusicPlayer.get().stop();
-            musicConfigured = false;
-        }
+        musicService.stopPageMusic();
     }
 
     /** 服务端背景音乐指令（music 通道）。 */
     public void handleMusicSync(com.opendreamcore.protocol.message.MusicSync sync) {
-        switch (sync.action()) {
-            case PLAY -> MusicPlayer.get().play(sync.file(), sync.volume(), sync.loop());
-            case STOP -> MusicPlayer.get().stop();
-            case VOLUME -> MusicPlayer.get().volume(sync.volume());
-        }
+        musicService.handleMusicSync(sync);
     }
 
     /** 服务端动画触发（ui_animation）：播放/停止/暂停/恢复命名动画。 */
@@ -10181,24 +10775,19 @@ public final class ClientController {
             StringBuilder sb = new StringBuilder();
             merged.forEach((k, v) -> sb.append(k).append('=').append(v).append('\n'));
             Files.writeString(file, sb.toString());
+            // 下发的 hud-baseline 段当场生效（重布 HUD/开屏页）
+            applyHudBaseline(merged);
             LOGGER.info("客户端配置已更新（{} 项，写入 {}）", merged.size(), file.getFileName());
         } catch (Exception e) {
             LOGGER.warn("配置写入失败: {}", e.toString());
         }
     }
 
-    // ---------- 握手与版本检查 ----------
+    // 握手与版本检查
 
-    /** 进服时发送 ready。 */
+    /** 进服时发送 ready（通道声明 + READY 载荷，动作在 HandshakeService）。 */
     public void sendReady() {
-        Ready ready = new Ready(com.opendreamcore.protocol.Protocol.VERSION, clientVersion(),
-                com.opendreamcore.protocol.Protocol.CAPABILITY_LOCAL_UI | com.opendreamcore.protocol.Protocol.CAPABILITY_CLOUD);
-        // 先声明下行通道（minecraft:register）：必须早于 READY——服务端收到 READY 即刻下发
-        // PAGE_SYNC，晚于声明会被 Paper 静默丢弃（首包竞态，1.20.1 实机实证）。
-        sendRaw("minecraft:register", com.opendreamcore.protocol.Protocol.clientboundRegisterPayload());
-        var buf = new com.opendreamcore.protocol.OdcByteArrayBuf();
-        ready.encode(buf);
-        sendRaw(com.opendreamcore.protocol.Protocol.READY, buf.toByteArray());
+        handshakeService.sendReady();
     }
 
     /**
@@ -10206,8 +10795,7 @@ public final class ClientController {
      * 协议+mod 全部一致 → 绿；协议一致但 mod 不同 → 黄提醒；协议不一致 → 红，enforce 时断开。
      */
     public void handleReadyAck(ReadyAck ack) {
-        serverVersion = ack.modVersion();
-        serverProtocol = ack.protocolVersion();
+        handshakeService.record(ack.modVersion(), ack.protocolVersion());
         cloud.onReadyAck(ack.resourceKey());
         flushPendingHandshake();
         Minecraft mc = Minecraft.getInstance();
@@ -10227,25 +10815,20 @@ public final class ClientController {
         boolean modOk = ack.modVersion().equals(clientVersion());
         boolean enforce = isEnforce();
         if (protoOk && modOk) {
-            // 全部一致：绿色
-            mc.player.displayClientMessage(Component.literal(
-                    "§a[OpenDreamCore] §fv" + CLIENT_VERSION + " §a-> §av" + ack.modVersion()
-                            + " §7(协议 §av" + ack.protocolVersion() + "§7)"), false);
+            // 两端一致就不刷屏：进服消息本来就多，版本对齐是常态不是新闻
             return;
         }
         if (protoOk) {
-            // 协议一致但 mod 版本不同（黄色提醒，不断开）
+            // 协议一致但 mod 版本不同（黄色提醒，不断开）——一行说清，不展开两行
             mc.player.displayClientMessage(Component.literal(
-                    "§e[OpenDreamCore] §ev" + CLIENT_VERSION + " §e-> §av" + ack.modVersion()
-                            + " §7(协议 §av" + ack.protocolVersion() + "§7)"), false);
-            mc.player.displayClientMessage(Component.literal(
-                    "§e[OpenDreamCore] §e建议更新客户端模组至 v" + ack.modVersion()), false);
+                    "§e[OpenDreamCore] §e客户端 v" + CLIENT_VERSION + " ↔ 服务端 v" + ack.modVersion()
+                            + " §7(协议一致，建议两端统一版本)"), false);
             return;
         }
         // 协议不一致：红色
         mc.player.displayClientMessage(Component.literal(
-                "§c[OpenDreamCore] §cv" + CLIENT_VERSION + " §e-> §av" + ack.modVersion()
-                        + " §7(协议 §cv" + com.opendreamcore.protocol.Protocol.VERSION + "§e->§av" + ack.protocolVersion() + "§7)"), false);
+                "§c[OpenDreamCore] §c协议版本不兼容：客户端 v" + com.opendreamcore.protocol.Protocol.VERSION
+                        + " ↔ 服务端 v" + ack.protocolVersion()), false);
         if (enforce) {
             mc.player.displayClientMessage(Component.literal("§c[OpenDreamCore] §c版本不匹配，已断开连接"), false);
             mc.player.connection.getConnection()
@@ -10391,7 +10974,7 @@ public final class ClientController {
         return true;
     }
 
-    // ---------- 动画变量（委托 client/controller/AnimateVarService，C6 拆分） ----------
+    // 动画变量（委托 client/controller/AnimateVarService，C6 拆分）
 
     private final com.opendreamcore.client.controller.AnimateVarService animateVarService =
             new com.opendreamcore.client.controller.AnimateVarService(new com.opendreamcore.client.controller.AnimateVarService.Host() {
@@ -10422,7 +11005,7 @@ public final class ClientController {
     private void tickAnimateValues() {
         animateVarService.tick();
     }
-    // ---------- 组件方法（动态改元素属性） ----------
+    // 组件方法（动态改元素属性）
 
     /** 按路径设置元素属性（"text.content"/"button.label"/"color" 等），返回是否找到元素。 */
     public boolean setElementProp(Page page, String elementId, String path, Object value) {
@@ -10466,7 +11049,7 @@ public final class ClientController {
         return cur;
     }
 
-    // ---------- 组件动态操作（显隐/存在/悬停/创建） ----------
+    // 组件动态操作（显隐/存在/悬停/创建）
 
     /** 运行时隐藏元素（会话级；立即刷新布局）。 */
     public boolean hideElement(String elementId) {
@@ -11001,7 +11584,12 @@ public final class ClientController {
     }
 
     public String serverVersion() {
-        return serverVersion;
+        return handshakeService.serverVersion();
+    }
+
+    /** 服务端协议版本（未握手前 -1）。 */
+    public int serverProtocol() {
+        return handshakeService.serverProtocol();
     }
 
     /** 进服时长（秒，脚本 Player.在线时长 用）。 */
@@ -11011,5 +11599,18 @@ public final class ClientController {
 
     public void markLogin() {
         loginTime = System.currentTimeMillis();
+        // 本地 odc.properties 的 hud-baseline 先进来（CONFIG_PUSH 到达前 HUD 就有基准可依）
+        try {
+            applyHudBaseline(readOdcProperties());
+        } catch (Exception ignored) {
+        }
+        // 进服顺手把资源缓存仓库收拾出来：定目录、扫一遍已有的缓存，
+        // 服务端 resource_key 一到就能直接报清单对账
+        try {
+            com.opendreamcore.client.ResourceCacheStore.get().init(
+                    net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath());
+        } catch (Exception ignored) {
+            // 缓存目录起不来不影响进服，顶多这轮资源全靠现下
+        }
     }
 }

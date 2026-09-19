@@ -20,16 +20,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * 未安装 JavaCV 时回退帧序列方案（{@link VideoPlayer}）。
  *
  * 能力：
- * - 本地文件（assets/videos/x.mp4）与远程 URL（https://...，直连流式解码，走 SSRF 防护）
- * - 后台线程按视频帧率解码 → 最新帧换到渲染线程上传纹理（帧缓存，不卡主线程）
- * - loop 循环 / 单次播放（video: {src: "...", loop: false}）
- * - fit: contain 按原比例居中显示（未取到尺寸前先拉伸）
+ * 本地文件（assets/videos/x.mp4）与远程 URL（https://...，直连流式解码，走 SSRF 防护）
+ * 后台线程按视频帧率解码 → 最新帧换到渲染线程上传纹理（帧缓存，不卡主线程）
+ * loop 循环 / 单次播放（video: {src: "...", loop: false}）
+ * fit: contain 按原比例居中显示（未取到尺寸前先拉伸）
  *
  * 无音频（视频轨仅画面；音频由 Music.播放 单独配 BGM）。
  */
 public final class FfmpegVideoPlayer {
 
-    // ---- JavaCV 反射句柄（类缺失 = 未启用） ----
+    // JavaCV 反射句柄（类缺失 = 未启用）
     private static final boolean AVAILABLE;
     private static final Constructor<?> GRABBER_CTOR; // FFmpegFrameGrabber(String)
     private static final Method START;
@@ -148,7 +148,7 @@ public final class FfmpegVideoPlayer {
         return elementId == null ? null : REGISTRY.get(elementId);
     }
 
-    // ---------- 播放控制 ----------
+    // 播放控制
 
     /** 暂停解码（画面冻结在最后一帧）。 */
     public void pause() {

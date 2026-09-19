@@ -61,9 +61,12 @@ OpenDreamCore 不是一个单纯的 UI 模组。
 | 网络协议（二进制握手 + 下发 + 裁决 + 加密） | ✅ 可用 |
 | 脚本语言 DreamLang（中英双语） | ✅ 可用 |
 | 服务端插件（Paper 容器裁决 + 资源云） | ✅ 可用 |
+| 字符替换与位图字体（含 gif 动画） | ✅ 可用 |
+| HUD 多页叠加 | ✅ 可用 |
+| 资源云管线（图片/音频/字体增量同步） | ✅ 可用 |
+| 多版本覆盖（1.6.4 ~ 26.1.2，16 个 target） | ✅ 可用 |
 | 模型渲染引擎 | 🔄 迁移中 |
 | 动作/动画系统 | 🔄 迁移中 |
-| 多版本覆盖（1.6.4 ~ 26.1.2） | 🔄 迁移中 |
 
 ## 它能干什么
 
@@ -76,8 +79,10 @@ OpenDreamCore 不是一个单纯的 UI 模组。
 - YAML 写页面，改文件即生效，不用重启
 - 热插拔插件目录，丢文件夹就是一套新玩法
 - 资源云下发，图片/音频/字体自动同步，增量加密传输
-- PlaceholderAPI 自动桥接，没有也能用内置引擎
+- PlaceholderAPI 自动桥接，没有也能用内置引擎；player/query/system 变量客户端本地解析
 - 游戏内可视化编辑器：拖拖拽拽就能改界面
+- 字符替换配一张贴图/gif，"肝"都能换成你的动画
+- HUD 多张叠挂、世界全息面板、NPC 对话气泡，一页配置一页界面
 
 ### 给开发者
 - DreamLang 脚本语言：中英双语关键字，类/模块/异常/异步齐全
@@ -103,45 +108,54 @@ OpenDreamCore 不是一个单纯的 UI 模组。
 
 | 目录 | 说明 | 状态 |
 |---|---|---|
-| `OpenDreamCore/` | 客户端模组（common + targets） | 1.21.1 双平台测试中 |
-| `OpenDreamCore-Plugin/` | 服务端 Bukkit/Paper 插件 | 1.21.1 测试中 |
-| `OpenDreamCore-Legacy/` | 远古版本线（1.6.4–1.16.5 Forge） | 占位，逐步迁移 |
+| `OpenDreamCore/` | 客户端模组（common + 12 个现代 target） | ✅ 全版本可用 |
+| `OpenDreamCore-Plugin/` | 服务端 Bukkit/Paper 插件（整包 Java 8 字节码） | ✅ 可用 |
+| `OpenDreamCore-Legacy/` | 远古版本线（1.6.4–1.16.5 Forge） | ✅ 整体迁移完成 |
 
 ## 文档
 
 - [`docs/YAML语法.md`](docs/YAML语法.md) — UI 配置语法
 - [`docs/协议.md`](docs/协议.md) — 自研二进制协议
+- [`docs/DreamLang语言参考手册.md`](docs/DreamLang语言参考手册.md) — 脚本语言参考
+- [`docs/主题系统Wiki.md`](docs/主题系统Wiki.md) — 主题换皮
+- [`docs/梦想核心语法适配Wiki.md`](docs/梦想核心语法适配Wiki.md) — 龙核语法迁移指南
+- [`docs/附属开发指南.md`](docs/附属开发指南.md) — 给配套插件作者的手册
 
-其他内部文档暂不上传，需要可以找我要。
+内部设计与实施文档随仓库放在 `dev/docs/` 下一起维护。
+
+示例页面在 [xamples/](examples/) 目录（模组示例 + 服务端插件示例）。
 
 ## 构建
 
 ```powershell
-# 客户端模组（在 OpenDreamCore/ 下）
-.\gradlew.bat -p targets/neoforge-1.21.1 build
+# 一条命令全量构建（16 target + 插件 + common 测试，全绿后自动收口）
+pwsh dev\build_matrix.ps1
+
+# 单独构建某个 target
 .\gradlew.bat -p targets/fabric-1.21.1 build
 
 # 服务端插件（在 OpenDreamCore-Plugin/ 下）
 .\gradlew.bat build
 ```
 
-构建产物自动收集到 `output/` 目录。
+构建产物统一收进 `output/all/`：16 个版本客户端的 jar 加服务端插件，一个目录备齐，直接分发。
 
 ## 版本覆盖
 
 | 版本 | 平台 | 状态 |
 |---|---|---|
-| 1.21.1 | NeoForge + Fabric | ✅ 测试中 |
-| 1.20.1 | Fabric | 🔄 迁移中 |
-| 1.21.4 | NeoForge + Fabric | 🔄 迁移中 |
-| 1.21.8 | NeoForge + Fabric | 🔄 迁移中 |
-| 26.1.2 | NeoForge + Fabric | 🔄 迁移中 |
-| 1.16.5 | Forge | 🔄 迁移中 |
-| 1.12.2 | Forge | 🔄 迁移中 |
-| 1.7.10 | Forge | 🔄 迁移中 |
-| 1.6.4 | Forge | 🔄 迁移中 |
+| 1.20.1 | Forge + Fabric | ✅ 可用 |
+| 1.21.1 | Forge + Fabric + NeoForge | ✅ 可用 |
+| 1.21.4 | Fabric + NeoForge | ✅ 可用 |
+| 1.21.8 | Fabric + NeoForge | ✅ 可用 |
+| 1.21.11 | Fabric + NeoForge | ✅ 可用 |
+| 26.1.2 | Fabric + NeoForge | ✅ 可用 |
+| 1.16.5 | Forge | ✅ 可用 |
+| 1.12.2 | Forge | ✅ 可用 |
+| 1.7.10 | Forge | ✅ 可用 |
+| 1.6.4 | Forge | ✅ 可用 |
 
-> 四年积累，全版本早已覆盖。当前工作是把已验证的功能迁移到开源架构——加版本 = 新写一个平台层，核心代码零改动。
+> 16 个 target 全矩阵构建绿。远古版跟新版跑同一套页面格式、同一套协议、同一套脚本能力，行为一致；加版本 = 新写一个平台层，核心代码零改动。
 
 ## 参与贡献
 
@@ -206,10 +220,13 @@ PRs, Issues, ideas — all welcome.
 ## Build
 
 ```powershell
-.\gradlew.bat -p targets/neoforge-1.21.1 build
-.\gradlew.bat -p targets/fabric-1.21.1 build
-.\gradlew.bat build  # Server plugin
+pwsh dev\build_matrix.ps1  # full matrix: 16 targets + server plugin + tests
+.\gradlew.bat build        # or build a single target / the server plugin
 ```
+
+Artifacts are collected into `output/all/`.
+
+All 16 targets (Minecraft 1.6.4 → 26.1.2) build green and behave the same from the same page format, protocol and scripting engine.
 
 ## Community
 

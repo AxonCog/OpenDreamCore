@@ -41,6 +41,9 @@ public final class FabricChannel {
             var sync = com.opendreamcore.protocol.message.PageSync.decode(reader(data));
             ClientController.get().storeServerPage(sync);
         });
+        register(Protocol.VISUAL_RULES, data ->
+                ClientController.get().handleVisualRules(
+                        com.opendreamcore.protocol.message.VisualRulesSync.decode(reader(data))));
         register(Protocol.CLOUD_MANIFEST, data ->
                 ClientController.get().cloud().handleManifest(
                         com.opendreamcore.protocol.message.CloudManifest.decode(reader(data))));
@@ -71,16 +74,31 @@ public final class FabricChannel {
         register(Protocol.WINDOW_TITLE, data ->
                 ClientController.get().handleWindowTitle(
                         com.opendreamcore.protocol.message.WindowTitlePush.decode(reader(data))));
+        // 分片通道：凑包与换名路由都在 register 的进口逻辑里，这里挂个位子让接收器注册上
+        register(Protocol.CHUNK, data -> { });
     }
 
-    /** 注册一个接收通道：缓冲必须同步读完（netty 线程），处理丢到渲染线程。 */
+    /** 通道名 → 处理人。分片凑齐换回真实通道名后，得靠这张表找对真正的处理人。 */
+    private static final java.util.Map<String, java.util.function.Consumer<byte[]>> HANDLERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 注册一个接收通道：缓冲必须同步读完（netty 线程），处理丢到渲染线程，进口先过分片分拣。 */
     private static void register(String path, java.util.function.Consumer<byte[]> handler) {
+        HANDLERS.put(path, handler);
         ClientPlayNetworking.registerGlobalReceiver(channel(path), (client, netHandler, buf, responseSender) -> {
             byte[] data = new byte[buf.readableBytes()];
             buf.readBytes(data);
             client.execute(() -> {
                 try {
-                    handler.accept(data);
+                    ClientController.ChunkResult routed = ClientController.get().routeInbound(path, data);
+                    if (routed == null) {
+                        // 分片还没凑齐，等下一帧；坏帧则已被丢弃
+                        return;
+                    }
+                    java.util.function.Consumer<byte[]> real = HANDLERS.get(routed.path());
+                    if (real != null) {
+                        real.accept(routed.payload());
+                    }
                 } catch (Exception e) {
                     LOGGER.warn("通道处理失败 {}: {}", path, e.toString());
                 }
@@ -94,17 +112,36 @@ public final class FabricChannel {
 
     /** 发送协议消息（ClientController.UiSender 实现）。 */
     public static void send(String channelPath, byte[] bytes) {
-        if (net.minecraft.client.Minecraft.getInstance().getConnection() != null) {
-            // 通道名可能带完整命名空间（如 minecraft:register），必须拆分，否则整串塞进 path 会因非法字符抛异常
-            ResourceLocation id;
-            int i = channelPath.indexOf(':');
-            if (i >= 0) {
-                id = new ResourceLocation(channelPath.substring(0, i), channelPath.substring(i + 1));
-            } else {
-                id = new ResourceLocation(Protocol.NAMESPACE, channelPath);
+        // minecraft:register：1.20.1 的 fabric（networking-api 1.3.x）没有 RegistrationPayload 类，
+        // 载荷格式同 AbstractChanneledNetworkAddon.createRegistrationPacket：
+        // NUL 分隔的 channel toString（US-ASCII）。ClientPlayNetworking.send(id, buf)
+        // 在该版即直发 vanilla custom payload（不校验命名空间），与 fabric 自身首发注册包一致。
+        if (channelPath.equals("minecraft:register")) {
+            if (net.minecraft.client.Minecraft.getInstance().getConnection() == null) {
+                return;
             }
-            FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
-            ClientPlayNetworking.send(id, buf);
+            StringBuilder sb = new StringBuilder();
+            for (String c : Protocol.CLIENTBOUND_CHANNELS) {
+                if (sb.length() > 0) {
+                    sb.append((char) 0);
+                }
+                int j = c.indexOf(':');
+                sb.append(j >= 0 ? c : Protocol.NAMESPACE + ':' + c);
+            }
+            ClientPlayNetworking.send(new ResourceLocation("minecraft", "register"),
+                    new FriendlyByteBuf(Unpooled.wrappedBuffer(
+                            sb.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII))));
+            return;
         }
+        // 通道名可能带完整命名空间，必须拆分，否则整串塞进 path 会因非法字符抛异常
+        ResourceLocation id;
+        int i = channelPath.indexOf(':');
+        if (i >= 0) {
+            id = new ResourceLocation(channelPath.substring(0, i), channelPath.substring(i + 1));
+        } else {
+            id = new ResourceLocation(Protocol.NAMESPACE, channelPath);
+        }
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
+        ClientPlayNetworking.send(id, buf);
     }
 }

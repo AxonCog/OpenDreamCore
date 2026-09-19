@@ -6,20 +6,49 @@ plugins {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        // jabel 要求 javac 17+ 跑插件本体，字节码目标在下面 compileArgs 里锁 8
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    maven { url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/' }
     maven { url = 'https://repo.dmulloy2.net/repository/public/' }
 }
 
 dependencies {
     implementation project(':core')
-    implementation project(':nms-v1_21_R1')
-    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+    // 跨版本铁律：纯 Bukkit API（Java 8 字节码），不依赖 NMS / paper-api——
+    // 编译期塞高版本字节码 jar 会让 --release 8 读不动，插件得跑得了所有服。
+    // /odc 的服务器转发在客户端侧解决（OdcCommands.buildServerForwardRoot）。
+    compileOnly 'org.spigotmc:spigot-api:1.16.5-R0.1-SNAPSHOT'
+    // 锁老版 spigot api：它的 classfile 是 52 号，配合 --release 8 才读得动；
+    // 用到的都是全版本都有的经典 bukkit 接口，现代服跑起来没差别
+    compileOnly 'org.jetbrains:annotations:23.0.0'
+
+    // 语法降级器：record/箭头 switch/文本块这些按 8 号字节码出，API 层还是得自己写老写法
+    annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
+    compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
+}
+
+// nms 模块是 Java21 字节码，本模块目标 8：Gradle 按 org.gradle.jvm.version
+// 属性选变体会卡住。消费侧把属性提到 21——高版本消费低版本产物本来就合法
+// （core 是 8 的字节码，21 的 JVM 照样跑），编译选项不受影响还是 jabel release 8
+import org.gradle.api.attributes.java.TargetJvmVersion
+
+configurations.configureEach {
+    attributes {
+        attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 21)
+    }
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+    options.release = 8
+    options.compilerArgs += ['-Xplugin:jabel']
 }
 
 tasks.named('shadowJar') {
@@ -27,6 +56,16 @@ tasks.named('shadowJar') {
     archiveClassifier = ''
     // ProtocolLib / Paper API 不打进 jar（服务器已有）
     relocate 'com.opendreamcore.protocol', 'com.opendreamcore.plugin.protocol'
+    // 老 Bukkit 的插件类加载器是先悶全局（其他插件+服务器自身），最后才看
+    // 自己 jar：服务器自带的 snakeyaml/gson 会抢在我们捆的新版之前被加载，
+    // API 差异直接 NoSuchMethodError（1.12.2 实机炸过 SafeConstructor）。
+    // 搬进自家包名后全局永远没有，只能用我们自己的版本
+    relocate 'org.yaml.snakeyaml', 'com.opendreamcore.libs.yaml'
+    relocate 'com.google.gson', 'com.opendreamcore.libs.gson'
+    // 老 Bukkit/FML 的 ASM 不认 multi-release jar：META-INF/versions 里的
+    // module-info 会让整包被标 corrupt 然后被丢弃（1.12.2 实机踩过这坑）
+    exclude 'META-INF/versions/**'
+    exclude 'module-info.class'
 }
 
 tasks.named('build') {
@@ -36,15 +75,16 @@ tasks.named('build') {
 
 tasks.register('collectOutput') {
     group = 'build'
-    description = 'Collects the plugin fat jar into ../../output.'
+    description = 'Collects the plugin fat jar into ../../output/server.'
     doLast {
-        def out = file('../../output')
+        def out = file('../../output/server')
         out.mkdirs()
         // 只收集当前版本的 fat jar，并清掉 output 里旧版本残留，避免误用陈旧构建
         def cur = "OpenDreamCore-Plugin-${version}.jar"
         file('build/libs').listFiles()?.each { f ->
             if (f.name == cur) {
                 copy { from f; into out }
+                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
                 println "collected ${f.name} -> ${out.absolutePath}"
             }
         }

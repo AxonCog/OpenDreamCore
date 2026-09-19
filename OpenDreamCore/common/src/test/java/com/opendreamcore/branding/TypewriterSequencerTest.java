@@ -68,6 +68,7 @@ class TypewriterSequencerTest {
         cfg.holdMs = 100;
         cfg.loop = false;
         var seq = new TypewriterSequencer(cfg);
+        seq.tick(0);                    // 从时间线起点起播（喂入式契约：首次 tick 即开播）
         assertTrue(seq.isFinished(1_000_000));
         assertEquals("唯一", seq.tick(1_000_000));
     }

@@ -14,6 +14,9 @@
   "authors": [
     "梦幻"
   ],
+  "mixins": [
+    "opendreamcore.mixins.json"
+  ],
   "entrypoints": {
     "main": [
       "com.opendreamcore.FabricOpenDreamCore"

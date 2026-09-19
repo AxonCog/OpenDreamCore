@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * 世界面板预设布局模板（/odc world template &lt;页面id&gt; &lt;board|menu|shop&gt;）：
+ * 世界面板预设布局模板（/odc world template <页面id> <board|menu|shop>）：
  * 一键生成扁平语法世界页面（match: world 进服自动打开，射线交互开箱即用），
  * 生成后可用 /odc edit world 进入 WYSIWYG 微调。
  */
@@ -24,7 +24,7 @@ public final class WorldTemplates {
         };
     }
 
-    /** 写入 UI/&lt;页面&gt;.yaml（已存在不覆盖），返回是否成功。 */
+    /** 写入 UI/<页面>.yaml（已存在不覆盖），返回是否成功。 */
     public static boolean write(Path uiDir, String pageId, String type) {
         String yaml = build(pageId, type);
         if (yaml == null) {
@@ -36,7 +36,7 @@ public final class WorldTemplates {
                 return false;
             }
             Files.createDirectories(file.getParent());
-            Files.writeString(file, yaml, StandardCharsets.UTF_8);
+            java.nio.file.Files.write(file, (yaml).getBytes(StandardCharsets.UTF_8));
             return true;
         } catch (Exception e) {
             return false;
@@ -44,7 +44,7 @@ public final class WorldTemplates {
     }
 
     private static String board(String pageId) {
-        return """
+        return String.format("""
                 # 世界公告板模板（/odc world template %s board）
                 # 特性：进服自动打开 / 射线交互 / 全元素可拖（多玩家同步+持久化）/ 页签 / 物品展示
                 match: world
@@ -123,11 +123,11 @@ public final class WorldTemplates {
                     tab: "商店"
                     hologram: {x: 0.6, y: -1.1, z: 0, scale: 0.015}
                     text: {content: "商店物品（仅商店页签可见）", color: "#90CAF9"}
-                """.formatted(pageId);
+                """, pageId);
     }
 
     private static String menu(String pageId) {
-        return """
+        return String.format("""
                 # 世界菜单模板（/odc world template %s menu）
                 # 特性：进服自动打开 / 射线交互 / 按钮点击打开服务端页面
                 match: world
@@ -173,11 +173,11 @@ public final class WorldTemplates {
                     actions:
                       click: |-
                         Screen.关闭页面(player.name)
-                """.formatted(pageId);
+                """, pageId);
     }
 
     private static String shop(String pageId) {
-        return """
+        return String.format("""
                 # 世界商店模板（/odc world template %s shop）
                 # 特性：进服自动打开 / 物品展示（NBT 组件）/ 购买按钮 / 余额显示
                 match: world
@@ -226,6 +226,6 @@ public final class WorldTemplates {
                     actions:
                       click: |-
                         Screen.关闭页面(player.name)
-                """.formatted(pageId);
+                """, pageId);
     }
 }

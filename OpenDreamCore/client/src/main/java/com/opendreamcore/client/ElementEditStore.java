@@ -13,10 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 元素级编辑记忆（P3-18 扩展）：
- * - 位置覆盖：页面 id → 元素 id → {x, y}（拖动/属性面板改坐标，持久化）
- * - 删除：页面 id → 被删元素 id 集合（持久化；布局时过滤）
- * - 复制：页面 id → 追加元素列表（仅会话内，不持久化）
- * - 隐藏：页面 id → 运行时隐藏元素 id 集合（仅会话内；Screen.隐藏元素/显示元素 用）
+ * 位置覆盖：页面 id → 元素 id → {x, y}（拖动/属性面板改坐标，持久化）
+ * 删除：页面 id → 被删元素 id 集合（持久化；布局时过滤）
+ * 复制：页面 id → 追加元素列表（仅会话内，不持久化）
+ * 隐藏：页面 id → 运行时隐藏元素 id 集合（仅会话内；Screen.隐藏元素/显示元素 用）
  */
 public final class ElementEditStore {
 
@@ -41,7 +41,7 @@ public final class ElementEditStore {
         hidden.remove(pageId);
     }
 
-    // ---- 删除 ----
+    // 删除
 
     /** 标记元素删除（含子元素由布局过滤递归处理）。 */
     public void markDeleted(String pageId, String elementId) {
@@ -53,7 +53,7 @@ public final class ElementEditStore {
         return deleted.get(pageId);
     }
 
-    // ---- 隐藏（会话内，运行时显隐） ----
+    // 隐藏（会话内，运行时显隐）
 
     public void markHidden(String pageId, String elementId) {
         hidden.computeIfAbsent(pageId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(elementId);
@@ -82,7 +82,7 @@ public final class ElementEditStore {
         return set != null && !set.isEmpty();
     }
 
-    // ---- 复制（会话内） ----
+    // 复制（会话内）
 
     public void addCopy(String pageId, com.opendreamcore.page.Element element) {
         copies.computeIfAbsent(pageId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(element);

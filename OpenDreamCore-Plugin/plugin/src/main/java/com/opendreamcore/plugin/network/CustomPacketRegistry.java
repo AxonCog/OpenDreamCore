@@ -11,10 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 自定义双向通道（custom_packet）服务端注册表：
- * - 第三方插件：registerHandler(通道, (player, payload) -> ...) 接收客户端上行；
+ * 第三方插件：registerHandler(通道, (player, payload) -> ...) 接收客户端上行；
  *   send(plugin, player, 通道, 内容) 下行推送。
- * - 服务端脚本：Network.发送 / Network.广播 下行；上行分发同时发布到
- *   EventBus "custom:&lt;通道&gt;"（参数 = 玩家名, 内容），脚本用 Event.订阅 接收。
+ * 服务端脚本：Network.发送 / Network.广播 下行；上行分发同时发布到
+ *   EventBus "custom:<通道>"（参数 = 玩家名, 内容），脚本用 Event.订阅 接收。
  * 分发在 Bukkit 主线程执行。
  */
 public final class CustomPacketRegistry {
@@ -27,7 +27,7 @@ public final class CustomPacketRegistry {
 
     /** 注册通道处理器（同名覆盖；null 移除）。 */
     public static void registerHandler(String channel, java.util.function.BiConsumer<Player, String> handler) {
-        if (channel == null || channel.isBlank()) {
+        if (channel == null || (channel).trim().isEmpty()) {
             return;
         }
         if (handler == null) {
@@ -44,14 +44,14 @@ public final class CustomPacketRegistry {
 
     /** 服务端 → 客户端下行（指定玩家）。 */
     public static void send(OpenDreamCorePlugin plugin, Player player, String channel, String payload) {
-        if (plugin == null || player == null || channel == null || channel.isBlank()) {
+        if (plugin == null || player == null || channel == null || (channel).trim().isEmpty()) {
             return;
         }
         try {
             var buf = new OdcByteArrayBuf();
             new CustomPacket(channel, payload).encode(buf);
-            player.sendPluginMessage(plugin, Protocol.NAMESPACE + ":" + Protocol.CUSTOM_PACKET,
-                    buf.toByteArray());
+            // 通道名映射（老服单通道）交给协议层，这里只管编码
+            plugin.networkLayer().sendRaw(player, Protocol.CUSTOM_PACKET, buf.toByteArray());
         } catch (Exception e) {
             plugin.getLogger().warning("custom_packet 下行失败 (" + player.getName() + "): " + e);
         }

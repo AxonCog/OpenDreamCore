@@ -2,6 +2,4 @@ rootProject.name = 'OpenDreamCore-Plugin'
 
 include 'core'
 include 'plugin'
-
-// NMS 适配模块（每 MC 版本一个，Java 17+）
-include 'nms-v1_21_R1'
+// 不使用 NMS：纯 Bukkit/Paper API 保证跨版本（nms 适配模块已彻底移除）

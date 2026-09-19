@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
  * 服务端窗口标题下发服务（C6 自 ClientController 抽出）：
  * window_title 消息处理、覆盖语义挂接（WindowBranding）、按服务器地址的磁盘缓存维护。
  *
- * 缓存文件：&lt;gameDir&gt;/OpenDreamCore/cache/title_cache.json
+ * 缓存文件：<gameDir>/OpenDreamCore/cache/title_cache.json
  * 磁盘缓存：哈希去重 + LRU；进服先预载缓存消除首包前空窗；
  * RESET/断线删除条目并还原本地 branding。
  */

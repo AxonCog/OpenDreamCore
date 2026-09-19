@@ -5,7 +5,6 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.world.entity.PlayerRideableJumping;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -14,10 +13,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * hideVanilla 页面选项：
- * - all/true → 整层跳过原版 HUD（HEAD 取消 Gui.render，先画我们的 HUD）。
- * - 列表 → 逐层取消（层名 = 控制器 VANILLA_LAYER_NAMES 全名；方法名/签名按 fabric named jar 1.21.1
- *   核实：hotbar = renderItemHotbar、food = renderFood、无独立 air/subtitle 方法 → air 随
- *   player_health、subtitle 走 MixinSubtitleOverlay；boss_overlay/debug_overlay 无 Gui 方法仅 NeoForge）。
+ * all/true → 整层跳过原版 HUD（HEAD 取消 Gui.render，先画我们的 HUD）。
+ * 列表 → 逐层取消（层名 = 控制器 VANILLA_LAYER_NAMES 全名）。
+ * 注入目标按 fabric named jar 1.21.8 的 Gui 真实方法名逐个 javap 核对过：
+ *   这版体验条（experience_bar）和跳跃计（jump_meter）并进 renderHotbarAndDecorations 里了，
+ *   Gui 上已经没有独立方法，想按层关就得注那个合并方法（见下）；
+ *   boss/debug/subtitle 三层从 1.21.8 起有自己的渲染方法（均为 private），直接注；
+ *   没有独立方法的：air_level 气泡随 player_health 关（renderAirBubbles 归在血条族里）。
  */
 @Mixin(Gui.class)
 public abstract class MixinGui {
@@ -46,10 +48,19 @@ public abstract class MixinGui {
         }
     }
 
-    // ---- 逐层（hideVanilla: [层列表]）----
+    // 逐层（hideVanilla: [层列表]）
     @Inject(method = "renderItemHotbar", at = @At("HEAD"), cancellable = true)
     private void odc$hideHotbar(GuiGraphics g, DeltaTracker dt, CallbackInfo ci) {
         cancelIf("minecraft:hotbar", ci);
+    }
+
+    /** 体验条/跳跃计在 1.21.8 挪进这个合并方法了，要关这俩层就关它（顺带把装饰一起掐了，能接受）。 */
+    @Inject(method = "renderHotbarAndDecorations", at = @At("HEAD"), cancellable = true)
+    private void odc$hideHotbarDecorations(GuiGraphics g, DeltaTracker dt, CallbackInfo ci) {
+        if (ClientController.get().isVanillaLayerHidden("minecraft:experience_bar")
+                || ClientController.get().isVanillaLayerHidden("minecraft:jump_meter")) {
+            ci.cancel();
+        }
     }
 
     @Inject(method = "renderCrosshair", at = @At("HEAD"), cancellable = true)
@@ -75,16 +86,6 @@ public abstract class MixinGui {
     @Inject(method = "renderVehicleHealth", at = @At("HEAD"), cancellable = true)
     private void odc$hideVehicleHealth(GuiGraphics g, CallbackInfo ci) {
         cancelIf("minecraft:vehicle_health", ci);
-    }
-
-    @Inject(method = "renderExperienceBar", at = @At("HEAD"), cancellable = true)
-    private void odc$hideExperienceBar(GuiGraphics g, int i, CallbackInfo ci) {
-        cancelIf("minecraft:experience_bar", ci);
-    }
-
-    @Inject(method = "renderJumpMeter", at = @At("HEAD"), cancellable = true)
-    private void odc$hideJumpMeter(PlayerRideableJumping rideable, GuiGraphics g, int i, CallbackInfo ci) {
-        cancelIf("minecraft:jump_meter", ci);
     }
 
     @Inject(method = "renderChat", at = @At("HEAD"), cancellable = true)
@@ -141,4 +142,13 @@ public abstract class MixinGui {
     private void odc$hideSavingIndicator(GuiGraphics g, DeltaTracker dt, CallbackInfo ci) {
         cancelIf("minecraft:saving_indicator", ci);
     }
+
+    // 1.21.8 起从 Gui.render 里拆出来的独立覆盖层
+    @Inject(method = "renderBossOverlay", at = @At("HEAD"), cancellable = true)
+    private void odc$hideBossOverlay(GuiGraphics g, DeltaTracker dt, CallbackInfo ci) {
+        cancelIf("minecraft:boss_overlay", ci);
+    }
+
+    // debug_overlay 不注：1.21.11 签名变了（见 1.21.11 版说明），调试栏不藏也罢；
+    // subtitle_overlay 不注：已有 MixinSubtitleOverlay 在 SubtitleOverlay.render 里关，避免重复
 }

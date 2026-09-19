@@ -11,9 +11,9 @@ import java.util.Map;
  * 服务端标题磁盘缓存的内容存储（纯逻辑，可单测）。
  *
  * 标题缓存按服务器分条目：
- * - 每个服务器一个条目（key = 服务器地址串），值 = 配置哈希 + 标题配置；
- * - put 时哈希去重：与已存哈希相同则跳过（返回 false），不同才更新；
- * - 容量上限 {@value #MAX_ENTRIES}，超出按 LRU（访问序）淘汰最旧条目。
+ * 每个服务器一个条目（key = 服务器地址串），值 = 配置哈希 + 标题配置；
+ * put 时哈希去重：与已存哈希相同则跳过（返回 false），不同才更新；
+ * 容量上限 {@value #MAX_ENTRIES}，超出按 LRU（访问序）淘汰最旧条目。
  *
  * 持久化由客户端侧完成（Gson 序列化 {@link #snapshot()}/{@link #restore(Map)} 到
  * OpenDreamCore/cache/title_cache.json）；本类不做文件 IO 以保持可测性。

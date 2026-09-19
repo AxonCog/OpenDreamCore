@@ -34,8 +34,24 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
+        // 观测：谁敲了什么（配合客户端转发日志，一端到一端一眼定位）
+        plugin.getLogger().info(sender.getName() + "(" + sender.getClass().getSimpleName()
+                + ") 执行 /odc " + (args.length == 0 ? "" : String.join(" ", args)));
+        // 权限判定：只有 open（打开页面，玩家自助行为）对普通玩家开放，
+        // 其余子命令都要 console/op/或持 opendreamcore.admin。
+        // 命令本身已去 permission 门（Paper brigadier 对未定义权限命令直接"未知"），
+        // 所以判定挪到这儿，否认也给明确提示。
+        String subCmd = args.length == 0 ? "" : args[0].toLowerCase();
+        boolean openPublic = "open".equals(subCmd);
+        if (!(sender instanceof org.bukkit.command.ConsoleCommandSender)
+                && !openPublic && !sender.isOp() && !sender.hasPermission("opendreamcore.admin")) {
+            sender.sendMessage("§c你没有权限使用 /odc" + (subCmd.isEmpty() ? "" : " " + subCmd)
+                    + "（只有 §e/odc open <页面id> §c对普通玩家开放）");
+            return true;
+        }
         if (args.length == 0) {
-            sender.sendMessage("用法: /odc open <页面id> | close | list | reload");
+            // 不用敲 help 才看得到列表——高版本习惯是裸 /odc 直接弹提示
+            printHelp(sender);
             return true;
         }
         switch (args[0].toLowerCase()) {
@@ -88,7 +104,8 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage("没有这个页面: " + id + "（用 /odc list 查看）");
                     return true;
                 }
-                network.openPage(player, id, yaml);
+                // 显式 open = 允许重开（force 跳过本连接同页去重，不然二开哑火）
+                network.openPage(player, id, yaml, true);
                 sender.sendMessage("已下发页面 " + id);
             }
             case "close" -> {
@@ -107,8 +124,11 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                 }
             }
             case "reload" -> {
-                pages.load();
-                sender.sendMessage("页面已重载: " + pages.ids().size() + " 个");
+                // 全语义重载：页面+tooltip+别名+视觉规则+主题一并重读，
+                // 并把视觉规则重推给全部已握手玩家（与文件监听共用一套逻辑）
+                plugin.watcher().reload();
+                sender.sendMessage("已重载：页面 " + pages.ids().size()
+                        + " 个（config.yml 一并重读），视觉规则与主题已同步推送");
             }
             case "world" -> {
                 if (args.length < 2) {
@@ -241,9 +261,23 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                     default -> sender.sendMessage("未知编辑子命令: " + args[1]);
                 }
             }
-            default -> sender.sendMessage("未知子命令: " + args[0]);
+            case "help" -> printHelp(sender);
+            default -> sender.sendMessage("未知子命令: " + args[0] + "（/odc help 看全部）");
         }
         return true;
+    }
+
+    /** 子命令清单：裸 /odc 和 /odc help 共用一份。 */
+    private void printHelp(CommandSender sender) {
+        sender.sendMessage("/odc 子命令一览:");
+        sender.sendMessage("  open <页面id> [玩家] - 打开页面");
+        sender.sendMessage("  close [玩家]        - 关闭当前页面");
+        sender.sendMessage("  list                - 服务端页面清单");
+        sender.sendMessage("  version [玩家]      - 客户端版本");
+        sender.sendMessage("  stats               - 会话/事件/脚本统计");
+        sender.sendMessage("  reload              - config.yml + 页面重载");
+        sender.sendMessage("  world list|reset|template [页面] [元素]");
+        sender.sendMessage("  edit list|grant|world|revoke ...");
     }
 
     @Override
@@ -251,7 +285,7 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                                                 @NotNull String alias, @NotNull String[] args) {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
-            for (String sub : new String[]{"open", "close", "list", "reload", "world", "edit", "stats", "version"}) {
+            for (String sub : new String[]{"open", "close", "list", "reload", "world", "edit", "stats", "version", "help"}) {
                 if (sub.startsWith(args[0])) {
                     out.add(sub);
                 }

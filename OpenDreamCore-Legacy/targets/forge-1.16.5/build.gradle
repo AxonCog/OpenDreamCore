@@ -1,0 +1,96 @@
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:5.1.+'
+    }
+}
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'java'
+
+version = '0.1.2'
+group = 'com.opendreamcore'
+archivesBaseName = 'OpenDreamCore-Legacy-forge-1.16.5'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenLocal()
+    maven { url 'https://maven.aliyun.com/repository/public' }
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.16.5-36.2.39'
+    implementation 'org.yaml:snakeyaml:1.27'
+    // mixin 全局字体替换（1.16.5 mc.font 是 final 字段，换实例没戏，注解注入 draw）
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    // 共享树吃 common-j8 成品 jar，本 target 自己的编译链用不着 Jabel 了
+    implementation fileTree(dir: '../../common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.16.5'
+    runs {
+        client {
+            workingDirectory project.file('run')
+        }
+    }
+}
+
+// 共享树已换成 common-j8 成品 jar；这里只留 client-legacy 接线层和本 target 入口
+sourceSets.main.java.srcDirs = ['src/main/java', '../../client-legacy/src/main/java']
+
+jar {
+    manifest {
+        attributes 'MixinConfigs': 'opendreamcore.mixins.json'
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath
+                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('common-j8') }
+                .collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    // module-info 会摇 fml 的 asm 报 jar 损坏，随依赖揸进来的也要剔
+    exclude 'META-INF/versions/**'
+    exclude '**/module-info.class'
+    finalizedBy 'reobfJar'
+}
+// 编译完把成品收到 output/legacy，发布面只认这一处
+task collectLegacyOutput {
+    doLast {
+        def out = file('../../../output/legacy')
+        out.mkdirs()
+        file("${buildDir}/libs").listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-nolib')) {
+                copy { from f; into out }
+                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        // 顺手清掉 legacy 和 all 里的非当前版本残留
+        [out, file(out.parentFile.path + "/all")].each { d ->
+            d.listFiles()?.each { f ->
+                if (f.name.startsWith("OpenDreamCore-Legacy-") && f.name.endsWith('.jar')
+                        && !f.name.contains("-${version}.jar")) {
+                    delete f
+                }
+            }
+        }
+    }
+}
+build.dependsOn collectLegacyOutput

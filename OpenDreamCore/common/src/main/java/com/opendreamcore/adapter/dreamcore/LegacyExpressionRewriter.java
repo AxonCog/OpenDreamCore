@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore;
 
+import com.opendreamcore.util.J8;
+
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,7 +24,7 @@ public final class LegacyExpressionRewriter {
     }
 
     /** 旧作用域前缀 → 新页面变量名前缀。 */
-    private static final Map<String, String> SCOPE_PREFIX = Map.of(
+    private static final Map<String, String> SCOPE_PREFIX = J8.map(
             "界面变量", "odc_ui_",
             "用户变量", "odc_user_",
             "variable", "odc_dyn_",
@@ -55,7 +57,7 @@ public final class LegacyExpressionRewriter {
             return script;
         }
         String out = script;
-        // 1) 赋值行 → Screen.设置变量(...)
+        // 赋值行 → Screen.设置变量(...)
         Matcher m = ASSIGNMENT.matcher(out);
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
@@ -67,7 +69,7 @@ public final class LegacyExpressionRewriter {
         }
         m.appendTail(sb);
         out = sb.toString();
-        // 2) 剩余读取点
+        // 剩余读取点
         out = rewriteReads(out);
         return out;
     }
@@ -116,7 +118,7 @@ public final class LegacyExpressionRewriter {
         }
     }
 
-    private static final java.util.Set<String> EXPRESSION_KEYS = java.util.Set.of(
+    private static final java.util.Set<String> EXPRESSION_KEYS = J8.set(
             "x", "y", "width", "height", "z", "scale", "opacity", "rotation",
             "limitX", "limitY", "limitWidth", "limitHeight", "maxDistanceY", "maxDistanceX",
             "src", "hoverSrc");

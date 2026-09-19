@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -43,7 +45,7 @@ public final class PageControl implements Message {
         if (action == null) {
             throw new IllegalArgumentException("页面动作不能为空");
         }
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
         this.action = action;

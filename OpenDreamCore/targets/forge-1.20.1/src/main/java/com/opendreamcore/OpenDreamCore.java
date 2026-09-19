@@ -31,6 +31,12 @@ public final class OpenDreamCore {
 
     private void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
+            // 实体渲染桥（entity/model 组件 GUI 渲染）
+            com.opendreamcore.client.entity.EntityViews.register(
+                    new com.opendreamcore.client.entity.EntityRenderBridgeImpl());
+            // 物品 3D 展示桥（item_model 组件）
+            com.opendreamcore.client.entity.ItemModelViews.register(
+                    new com.opendreamcore.client.entity.ItemModelRenderBridgeImpl());
             com.opendreamcore.script.CommonMethods.registerAll();
             ClientPlaceholders.registerAll();
             ClientEvents.registerScriptMethods();

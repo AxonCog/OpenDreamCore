@@ -110,6 +110,23 @@ ElementAPI.INSTANCE.setProp(player, "buy", "button.background", "#FF0000");
 | `register(namespace, method, handler)` | 注册脚本方法 |
 | `registerAlias(namespace, handler, names...)` | 多别名注册 |
 
+### 窗口标题 (title)
+
+服务端接管客户端窗口标题（打字机/轮播/随机）。配置驱动的进服自动下发见 config.yml `client-title` 段。
+
+| 方法 | 说明 |
+|---|---|
+| `push(player, text)` | 单文本直设 |
+| `push(player, text, titles, typewriter, random, speed, interval, holdMs, loop)` | 完整配置推送 |
+| `reset(player)` | 解除覆盖，还原客户端本地标题 |
+| `pushAll(text)` / `resetAll()` | 全体广播（逐发） |
+
+```java
+// 打字机轮播：每句打完后停留 3 秒循环
+OpenDreamCoreAPI.title().push(player, "", List.of("欢迎来到梦幻小屋", "QQ群 1105028422"),
+        true, false, 120, 3000, -1, true);
+```
+
 ## 事件
 
 所有事件在主线程触发。`ButtonEvent` 可取消（取消后不执行 actions 脚本）。

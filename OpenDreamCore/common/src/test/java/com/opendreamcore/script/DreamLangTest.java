@@ -67,13 +67,19 @@ class DreamLangTest {
     void methodCall() {
         Scope scope = new Scope();
         AtomicReference<String> received = new AtomicReference<>();
-        MethodRegistry.register("发送消息", args -> {
+        // 全量跑时 LegacyMethodsTest 会先往注册表灌旧方法，"发送消息"这种常用名可能已被占用；
+        // 用专属名字 + registerOrReplace（幂等），测完清理不留痕——用例之间互不依赖顺序。
+        String name = "__dl_test_echo__";
+        MethodRegistry.registerOrReplace(name, args -> {
             received.set(String.valueOf(args[0]));
             return null;
         });
-
-        DreamLang.execute("方法.发送消息(\"你好\")", scope);
-        assertEquals("你好", received.get());
+        try {
+            DreamLang.execute("方法." + name + "(\"你好\")", scope);
+            assertEquals("你好", received.get());
+        } finally {
+            MethodRegistry.unregister(name);
+        }
     }
 
     @Test

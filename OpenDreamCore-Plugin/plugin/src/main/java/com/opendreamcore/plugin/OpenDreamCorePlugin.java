@@ -6,9 +6,12 @@ import com.opendreamcore.plugin.network.ProtocolListener;
 import com.opendreamcore.plugin.page.ServerPageManager;
 import com.opendreamcore.plugin.server.MatchListener;
 import com.opendreamcore.plugin.server.ServerMethods;
+import com.opendreamcore.plugin.server.visual.VisualRuleManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * 服务端插件入口：协议通道 + 页面仓库 + 命令 + match 触发。
@@ -21,11 +24,34 @@ public class OpenDreamCorePlugin extends JavaPlugin {
 
     private ProtocolListener network;
     private ServerPageManager pages;
+
+    /** 视觉规则管理器。 */
+    private com.opendreamcore.plugin.server.visual.VisualRuleManager visualRules;
     private com.opendreamcore.plugin.server.EditorManager editors;
     private com.opendreamcore.plugin.container.ContainerRegistry containers;
     private com.opendreamcore.plugin.hud.HudRegistry hud;
     private com.opendreamcore.plugin.server.TooltipManager tooltips;
     private com.opendreamcore.plugin.server.UiWatcher watcher;
+
+    /** 服务端资源云（DragonCoreResource 文件夹 + MD5 对账 + 分片下发）。 */
+    private com.opendreamcore.plugin.server.resource.ServerResourcePipeline resourcePipeline;
+
+    /** 资源云访问器（协议层/重载链用）。 */
+    public com.opendreamcore.plugin.server.resource.ServerResourcePipeline resourcePipeline() {
+        return resourcePipeline;
+    }
+
+    /** 文件监听器访问器（/odc reload 与文件监听共用同一套重载逻辑）。 */
+    public com.opendreamcore.plugin.server.UiWatcher watcher() {
+        return watcher;
+    }
+
+    /** DreamLang 扩展装载器（extensions/ 目录，reload 随视觉规则重载）。 */
+    public com.opendreamcore.plugin.server.ExtensionLoader extensions() {
+        return extensions;
+    }
+
+    private com.opendreamcore.plugin.server.ExtensionLoader extensions;
 
     /** 供脚本方法等静态入口取网络层。 */
     public static OpenDreamCorePlugin get() {
@@ -45,6 +71,11 @@ public class OpenDreamCorePlugin extends JavaPlugin {
     /** 页面仓库（脚本方法取编译后 YAML 用）。 */
     public ServerPageManager pageManager() {
         return pages;
+    }
+
+    /** 视觉规则管理器访问器（附属/协议层用）。 */
+    public com.opendreamcore.plugin.server.visual.VisualRuleManager visualRules() {
+        return visualRules;
     }
 
     /** tooltips 管理器（文件监听自动重载用）。 */
@@ -180,6 +211,68 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         pages = new ServerPageManager(this);
         pages.load();
 
+        // 视觉规则管理器：
+        // 九系统的规则 YAML 装载与 ready 时下发；目录缺失自动生成默认示例
+        visualRules = new com.opendreamcore.plugin.server.visual.VisualRuleManager(
+                getDataFolder().toPath());
+        // 服务器装了龙核的话，plugins/DragonCore/ 下的原生配置一并翻译并入
+        // （规则 id 会带 dc/ 前缀，见 DreamCoreBridge/VisualRuleManager#mergeExternal）
+        java.nio.file.Path dragonCoreDir = getDataFolder().toPath().getParent() == null
+                ? null
+                : getDataFolder().toPath().getParent().resolve("DragonCore");
+        if (dragonCoreDir != null && Files.isDirectory(dragonCoreDir)) {
+            visualRules.setExternalRoot(dragonCoreDir);
+        }
+        int visualCount = visualRules.reload();
+        if (visualCount > 0) {
+            getLogger().info("已装载 " + visualCount + " 条视觉规则（ItemIcon/ItemEffect/HeadTag 等）");
+        }
+        // DreamLang 扩展装载器（R3）：extensions/ 目录的脚本与方言适配器。
+        // 必须在 visualRules.reload() 之后：reload 清脚本适配器，扩展装载负责重登
+        extensions = new com.opendreamcore.plugin.server.ExtensionLoader(getDataFolder().toPath());
+        int extCount = extensions.loadAll();
+        if (extCount > 0) {
+            getLogger().info("已装载 " + extCount + " 个 DreamLang 扩展（extensions/）");
+        }
+
+        // 资源云（服务端资源管线）：读 config 里的目录/密码 → 建文件夹 → 扫清单。
+        // 玩家 ready 或文件变化时走 MD5 对账，缺啥补啥；上行清单在这注册路由。
+        resourcePipeline = new com.opendreamcore.plugin.server.resource.ServerResourcePipeline(this);
+        // 服主从龙核迁过来？config.yml 里那三样家当（Password/ResourcePack/syncResource）
+        // 搬进我们的 config，没显式写过就自动继承，写过就尊重本地的
+        try {
+            java.nio.file.Path dcRoot = getDataFolder().getParentFile().toPath().resolve("DragonCore");
+            var dcSettings = com.opendreamcore.adapter.dragoncore.DragonCoreConfigImport.read(dcRoot);
+            if (dcSettings != null) {
+                if (!getConfig().contains("resource-password") && dcSettings.password != null) {
+                    getConfig().set("resource-password", dcSettings.password);
+                }
+                if (!getConfig().contains("resource-pack") && dcSettings.resourcePack != null
+                        && !dcSettings.resourcePack.trim().isEmpty()) {
+                    getConfig().set("resource-pack", dcSettings.resourcePack);
+                }
+                if (!getConfig().contains("resource-sync")) {
+                    getConfig().set("resource-sync", dcSettings.syncResource);
+                }
+                getLogger().info("已延续龙核资源云设置（密码/目录/同步开关）");
+            }
+        } catch (Exception ignored) {
+            // 没有龙核或它的 config 读不动——咱们的默认值照样干活
+        }
+        resourcePipeline.configure();
+        resourcePipeline.reload();
+        com.opendreamcore.plugin.network.CustomPacketRegistry.registerHandler(
+                com.opendreamcore.protocol.Protocol.CUSTOM_RESOURCE_REPORT,
+                (player, payload) -> resourcePipeline.handleReport(player, payload));
+
+        // 主题目录自加载：
+        // 服务端自己的 themes/ 目录也进库——附属用 ThemeAPI 注册、
+        // 或服主直接丢文件都行；服务端侧页面编译/校验即用即取。
+        Path themeDir = getDataFolder().toPath().resolve("themes");
+        try { Files.createDirectories(themeDir); } catch (Exception ignored) {}
+        int themeCount = com.opendreamcore.api.ThemeAPI.get().loadFromDir(themeDir);
+        getLogger().info("主题已加载 " + themeCount + " 个 (" + themeDir + ")");
+
         containers = new com.opendreamcore.plugin.container.ContainerRegistry();
         hud = new com.opendreamcore.plugin.hud.HudRegistry();
 
@@ -202,14 +295,28 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         OdcCommand command = new OdcCommand(this, pages, network);
         getCommand("odc").setExecutor(command);
         getCommand("odc").setTabCompleter(command);
+        getLogger().info("命令 /odc 已就绪（executor/tabcompleter 就位；permissionless 直发，权限在 onCommand 自查）");
 
-        // 文件监听自动热重载（UI / resources / tooltips 目录）
+        // 文件监听自动热重载（UI / resources / tooltips / themes / 视觉九系统）
         if (getConfig().getBoolean("file-watcher.enabled", true)) {
             watcher = new com.opendreamcore.plugin.server.UiWatcher(this,
                     getConfig().getLong("file-watcher.debounce-ms", 300));
             watcher.watch(getDataFolder().toPath().resolve("UI"));
             watcher.watch(getDataFolder().toPath().resolve("resources"));
             watcher.watch(getDataFolder().toPath().resolve("tooltip"));
+            watcher.watch(getDataFolder().toPath().resolve("themes"));
+            for (String sys : VisualRuleManager.SYSTEMS) {
+                watcher.watch(getDataFolder().toPath().resolve(sys));
+            }
+            // 扩展目录（R3：DreamLang 扩展脚本/页面包，附属开发者的投放点）
+            watcher.watch(getDataFolder().toPath().resolve("extensions"));
+            // 统一规则库目录（九系统的同名文件夹形态之外的根文件形态）
+            watcher.watch(getDataFolder().toPath().resolve("systems"));
+            // 龙核配置目录也监听：服主改 DragonCore 的 yml，九系统跟着热重载
+            Path watchedDragonCore = visualRules.getExternalRoot();
+            if (watchedDragonCore != null) {
+                watcher.watch(watchedDragonCore);
+            }
             watcher.watch(getDataFolder().toPath());
             watcher.start();
         }
@@ -251,7 +358,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
                 .replace("§e", ODC_ESC + "[33;1m")
                 .replace("§r", ODC_ESC + "[0m");
         // 末尾复位，防止颜色状态泄漏到后续日志行
-        return s.isBlank() ? s : s + ODC_ESC + "[0m";
+        return (s).trim().isEmpty() ? s : s + ODC_ESC + "[0m";
     }
 
     /** 从 type-aliases.yml 加载自定义 type 别名（热加载用） */

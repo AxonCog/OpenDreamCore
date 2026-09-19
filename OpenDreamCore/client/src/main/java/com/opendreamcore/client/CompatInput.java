@@ -5,9 +5,9 @@ import java.lang.reflect.Method;
 /**
  * 键盘修饰键状态查询的版本自适应垫片。
  *
- * <p>mojmap 漂移：1.21.8 及以前是 {@code Screen.hasShiftDown()/hasControlDown()} 静态方法；
- * 1.21.9+ 移到 {@code Minecraft} 实例方法（Screen 上的静态形态被移除）。
- * 共享客户端树必须同时编译两代 API，故经反射择路：优先实例形态，回退静态形态。</p>
+ * mojmap 漂移：1.21.8 及以前是 Screen.hasShiftDown()/hasControlDown() 静态方法；
+ * 1.21.9+ 移到 Minecraft 实例方法（Screen 上的静态形态被移除）。
+ * 共享客户端树必须同时编译两代 API，故经反射择路：优先实例形态，回退静态形态。
  */
 public final class CompatInput {
 

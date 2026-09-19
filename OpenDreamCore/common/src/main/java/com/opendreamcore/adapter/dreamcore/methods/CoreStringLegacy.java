@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 public final class CoreStringLegacy {
@@ -13,8 +15,8 @@ public final class CoreStringLegacy {
         LegacyMethods.register("length", a -> (double) s(a, 0).length());
         LegacyMethods.register("isEmpty", a -> s(a, 0).isEmpty());
         LegacyMethods.register("is_empty", a -> s(a, 0).isEmpty());
-        LegacyMethods.register("isBlank", a -> s(a, 0).isBlank());
-        LegacyMethods.register("is_blank", a -> s(a, 0).isBlank());
+        LegacyMethods.register("isBlank", a -> J8.isBlank(s(a, 0)));
+        LegacyMethods.register("is_blank", a -> J8.isBlank(s(a, 0)));
         LegacyMethods.register("indexOf", a -> (double) s(a, 0).indexOf(s(a, 1)));
         LegacyMethods.register("indexof", a -> (double) s(a, 0).indexOf(s(a, 1)));
         LegacyMethods.register("lastindexof", a -> (double) s(a, 0).lastIndexOf(s(a, 1)));
@@ -63,7 +65,7 @@ public final class CoreStringLegacy {
             }
             return start <= src.length() ? src.substring(start) : "";
         });
-        LegacyMethods.register("split", a -> java.util.List.of(s(a, 0).split(java.util.regex.Pattern.quote(s(a, 1)))));
+        LegacyMethods.register("split", a -> J8.list(s(a, 0).split(java.util.regex.Pattern.quote(s(a, 1)))));
         LegacyMethods.register("join", a -> {
             Object sep = arg(a, 0);
             StringBuilder sb = new StringBuilder();

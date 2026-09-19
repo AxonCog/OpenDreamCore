@@ -31,6 +31,27 @@ public final class TextElements {
     private TextElements() {}
 
     public static void drawText(GuiGraphics g, Font font, RenderNode node, java.util.Map<String, Object> pageVars, String scope) {
+        // 文本随设计画布整体缩放：design 页（s≠1）下包一层 pose scale，
+        // 几何按 1/s 转回设计系绘制（字号不动、折行/测量同口径，整数倍 s 下最锐）。
+        // IDENTITY（s=1）直接直通，老包一帧不挪、零开销。
+        double s = com.opendreamcore.ui.Viewport.active().scale();
+        if (s != 1.0 && s > 0) {
+            var pose = g.pose();
+            CompatRender.posePush(pose);
+            CompatRender.poseTranslate(pose, node.x(), node.y());
+            CompatRender.poseScale(pose, (float) s, (float) s);
+            RenderNode designNode = new RenderNode(node.id(), node.type(), node.source(),
+                    node.x() / s, node.y() / s, node.width() / s, node.height() / s,
+                    node.visible(), node.enabled(), node.children(), node.props());
+            drawTextInner(g, font, designNode, pageVars, scope);
+            CompatRender.posePop(pose);
+            return;
+        }
+        drawTextInner(g, font, node, pageVars, scope);
+    }
+
+    /** 文本绘制主体（坐标/尺寸按传入节点所在坐标系，默认屏幕系；design 页由外层缩放包装喂设计系）。 */
+    private static void drawTextInner(GuiGraphics g, Font font, RenderNode node, java.util.Map<String, Object> pageVars, String scope) {
         Map<?, ?> spec = UiRenderer.propsMap(node, "text");
         String content = UiRenderer.interpolate(node, UiRenderer.str(spec.get("content")), pageVars);
         if (content == null || content.isEmpty()) {
@@ -58,7 +79,15 @@ public final class TextElements {
         } else {
             lines = content.split("\n", -1);
         }
-        TtfRenderer custom = CustomFonts.get(UiRenderer.str(node.props().get("font")));
+        String fontName = UiRenderer.str(node.props().get("font"));
+        TtfRenderer custom;
+        if (fontName == null || fontName.isBlank()) {
+            // FontConfig 全局字体（ttf: 键 = 用户指定的路径）回退；getByPath 按路径解析
+            String defTtf = com.opendreamcore.client.visual.VisualFontReplace.defaultTtf();
+            custom = defTtf == null || defTtf.isBlank() ? null : CustomFonts.getByPath(defTtf);
+        } else {
+            custom = CustomFonts.get(fontName);
+        }
         double x = node.x();
         double y = node.y();
         if (custom != null) {
@@ -84,11 +113,7 @@ public final class TextElements {
                 x += (int) (node.width() - font.width(content));
             }
             drawTextStroke(g, font, content, (int) x, (int) y, strokeColor, strokeWidth);
-            if (shadow) {
-                g.drawString(font, content, (int) x, (int) y, UiRenderer.alphaColor(color), true);
-            } else {
-                g.drawString(font, content, (int) x, (int) y, UiRenderer.alphaColor(color));
-            }
+            drawWithGlyphOverlay(g, font, content, (int) x, (int) y, color, shadow);
             return;
         }
         for (int i = 0; i < lines.length; i++) {
@@ -104,11 +129,77 @@ public final class TextElements {
             }
             double ly = y + i * lineHeight;
             drawTextStroke(g, font, line, (int) lx, (int) ly, strokeColor, strokeWidth);
-            if (shadow) {
-                g.drawString(font, line, (int) lx, (int) ly, UiRenderer.alphaColor(color), true);
-            } else {
-                g.drawString(font, line, (int) lx, (int) ly, UiRenderer.alphaColor(color));
+            drawWithGlyphOverlay(g, font, line, (int) lx, (int) ly, color, shadow);
+        }
+    }
+
+    /**
+     * FontConfig 挂点：文本绘制口。
+     * 有字符替换规则（单字符/range/match，见 VisualFontReplace）就逐字符扫着画：
+     * 普通段批画、命中字符贴图顶替；没规则直通 drawString（零开销快路径）。
+     * 画完查字形叠加（VisualFontOverride）贴右侧装饰。
+     */
+    private static void drawWithGlyphOverlay(GuiGraphics g, Font font, String text,
+                                             int x, int y, int color, boolean shadow) {
+        if (com.opendreamcore.client.visual.VisualFontReplace.hasAny()) {
+            drawCharReplaced(g, font, text, x, y, color, shadow);
+        } else if (shadow) {
+            g.drawString(font, text, x, y, UiRenderer.alphaColor(color), true);
+        } else {
+            g.drawString(font, text, x, y, UiRenderer.alphaColor(color));
+        }
+        var glyph = com.opendreamcore.client.visual.VisualFontOverride.overlayFor(text);
+        if (glyph == null) {
+            return;
+        }
+        // 颜色：规则没声明就跟随正文色；声明了用规则色（parse 时已转 ARGB）
+        int gc = glyph.color() < 0 ? color : glyph.color();
+        g.drawString(font, glyph.overlay(), x + font.width(text), y,
+                UiRenderer.alphaColor(gc), shadow);
+    }
+
+    /** 逐字符替换绘制：普通段批画、命中字符贴图顶替，占宽各算各的。 */
+    private static void drawCharReplaced(GuiGraphics g, Font font, String text,
+                                         int x, int y, int color, boolean shadow) {
+        int cx = x;
+        StringBuilder plain = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            var glyph = com.opendreamcore.client.visual.VisualFontReplace.glyphFor(c);
+            if (glyph == null) {
+                plain.append(c);
+                continue;
             }
+            if (plain.length() > 0) {
+                drawStringPlain(g, font, plain.toString(), cx, y, color, shadow);
+                cx += font.width(plain.toString());
+                plain.setLength(0);
+            }
+            var rl = com.opendreamcore.client.resources.LooseResourceLoader.lookup(glyph.texture());
+            if (rl != null) {
+                int imgW = 16;
+                int imgH = 16;
+                var sz = com.opendreamcore.client.resources.LooseResourceLoader.sizeOf(glyph.texture());
+                if (sz != null) {
+                    imgW = sz.width();
+                    imgH = sz.height();
+                }
+                CompatRender.blit(g, rl, cx, y, glyph.width(), glyph.height(),
+                        glyph.u(), glyph.v(), glyph.frameW(), glyph.frameH(), imgW, imgH);
+            }
+            cx += glyph.fontWidth();
+        }
+        if (plain.length() > 0) {
+            drawStringPlain(g, font, plain.toString(), cx, y, color, shadow);
+        }
+    }
+
+    private static void drawStringPlain(GuiGraphics g, Font font, String seg,
+                                        int x, int y, int color, boolean shadow) {
+        if (shadow) {
+            g.drawString(font, seg, x, y, UiRenderer.alphaColor(color), true);
+        } else {
+            g.drawString(font, seg, x, y, UiRenderer.alphaColor(color));
         }
     }
 

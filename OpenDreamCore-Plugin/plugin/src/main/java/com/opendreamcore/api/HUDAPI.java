@@ -15,7 +15,7 @@ public final class HUDAPI {
     private HUDAPI() {
     }
 
-    // ---- HUD 三型 ----
+    // HUD 三型
 
     /** 挂载个人 HUD（按玩家编译，进服自动重挂）。 */
     public boolean mountHud(Player player, String pageId) {
@@ -90,7 +90,7 @@ public final class HUDAPI {
         }
     }
 
-    // ---- Boss 条 ----
+    // Boss 条
 
     /** 显示 Boss 条（target null = 全体）。 */
     public boolean showBossBar(Player target, String id, String text, double progress, String color) {
@@ -127,7 +127,7 @@ public final class HUDAPI {
         return true;
     }
 
-    // ---- 头顶名牌 ----
+    // 头顶名牌
 
     /** 给目标玩家设置头顶名牌（全体可见；文字支持颜色码）。 */
     public boolean setNameTag(String playerName, String text, String color) {
@@ -146,7 +146,7 @@ public final class HUDAPI {
         return setNameTag(playerName, "", "#FFFFFF");
     }
 
-    // ---- 物品提示 ----
+    // 物品提示
 
     /** 屏幕中央物品浮窗（图标 + 名字，尾段淡出）。 */
     public boolean showItemTip(Player player, String itemId, int count, int durationMs) {
@@ -159,7 +159,7 @@ public final class HUDAPI {
         return true;
     }
 
-    // ---- 背景音乐 ----
+    // 背景音乐
 
     /** 播放背景音乐（文件在客户端 OpenDreamCore/music/ 或云端 music/；target null = 全体）。 */
     public boolean playMusic(Player target, String file, double volume, boolean loop) {
@@ -197,7 +197,7 @@ public final class HUDAPI {
         return true;
     }
 
-    // ---- 屏幕特效 ----
+    // 屏幕特效
 
     /** 屏幕震动（强度, 时长 ms）。 */
     public boolean shake(Player player, double strength, int durationMs) {

@@ -1,5 +1,7 @@
 package com.opendreamcore.ui;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.page.Element;
 
 import java.util.ArrayList;
@@ -47,7 +49,7 @@ public final class RenderNode {
         this.height = height;
         this.visible = visible;
         this.enabled = enabled;
-        this.children = sortByZ(children == null ? new ArrayList<>() : List.copyOf(children));
+        this.children = sortByZ(children == null ? new ArrayList<>() : J8.listCopy(children));
         this.props = props == null ? new LinkedHashMap<>() : props;
         this.z = intProp(props, "z", 0);
         this.opacity = doubleProp(props, "opacity", 1);
@@ -60,7 +62,7 @@ public final class RenderNode {
     private static List<RenderNode> sortByZ(List<RenderNode> nodes) {
         List<RenderNode> sorted = new ArrayList<>(nodes);
         sorted.sort(Comparator.comparingInt(RenderNode::z));
-        return List.copyOf(sorted);
+        return J8.listCopy(sorted);
     }
 
     public String id() {

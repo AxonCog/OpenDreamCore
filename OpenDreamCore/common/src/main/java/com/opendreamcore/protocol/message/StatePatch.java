@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.LinkedHashMap;
@@ -15,7 +17,7 @@ public final class StatePatch implements Message {
     private final Map<String, Object> values;
 
     public StatePatch(String sessionId, Map<String, Object> values) {
-        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+        if (sessionId == null || J8.isBlank(sessionId) || sessionId.length() > 64) {
             throw new IllegalArgumentException("会话 id 非法");
         }
         this.sessionId = sessionId;

@@ -1,0 +1,426 @@
+巨钳螳螂:
+  match: "可靠的伙伴"
+  texture: "212.png"
+  # 放大1倍（默认是1倍）
+  scale: 1
+  type: 5856
+品质1:
+  match: 品质1
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/27aa68f4be6e8dfc.gif
+  width: 26.0
+  height: 26.0
+品质2:
+  match: 品质2
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/8178e9d7038148f1.gif
+  width: 26.0
+  height: 26.0
+品质3:
+  match: 品质3
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/abe7c4f0cd7c4124.gif
+  width: 26.0
+  height: 26.0
+品质4:
+  match: 品质4
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/99975bec282aefd9.gif
+  width: 26.0
+  height: 26.0
+品质5:
+  match: 品质5
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/0d20b4223c2c690e.gif
+  width: 26.0
+  height: 26.0
+品质6:
+  match: 品质6
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/ea54ef663c9799ac.gif
+  width: 26.0
+  height: 26.0
+品质7:
+  match: 品质7
+  mode: 1
+  texture: https://s3.bmp.ovh/imgs/2024/09/28/447e83966c8f8d99.gif
+  width: 26.0
+  height: 26.0
+hongxinghuizhangicon:
+  match: Lore:\[.*红星.*]
+  type: 339
+  texture: item24.png
+  scale: 1
+  center: false
+  held: true
+laodongjieitem:
+  match: Lore:\[.*"&7Laodongjiehz".*]
+  type: 339
+  texture: item1.png
+  scale: 1
+  center: false
+  held: true
+laodongjieicon:
+  match: Lore:\[.*劳动节.*]
+  type: 339
+  texture: item1.png
+  scale: 1
+  center: false
+  held: true
+duanwujieitem:
+  match: Lore:\[.*"&7Duanwujiezz".*]
+  type: 339
+  texture: item3.png
+  scale: 1
+  center: false
+  held: true
+duanwujieicon:
+  match: Lore:\[.*端午节.*]
+  type: 339
+  texture: item3.png
+  scale: 1
+  center: false
+  held: true
+qixijieitem:
+  match: Lore:\[.*"&7Qixijiehz".*]
+  type: 339
+  texture: item14.png
+  scale: 1
+  center: false
+  held: true
+qixijieicon:
+  match: Lore:\[.*七夕节.*]
+  type: 339
+  texture: item14.png
+  scale: 1
+  center: false
+  held: true
+zhongqiujieitem:
+  match: Lore:\[.*"&7Zhongqiujiehz".*]
+  type: 339
+  texture: item4.png
+  scale: 1
+  center: false
+  held: true
+zhongqiujieicon:
+  match: Lore:\[.*中秋节.*]
+  type: 339
+  texture: item4.png
+  scale: 1
+  center: false
+  held: true
+guoqingjietem:
+  match: Lore:\[.*"&7Guoqingjiehz".*]
+  type: 339
+  texture: item24.png
+  scale: 1
+  center: false
+  held: true
+guoqingjieicon:
+  match: Lore:\[.*国庆节.*]
+  type: 339
+  texture: item24.png
+  scale: 1
+  center: false
+  held: true
+hanjiaicon:
+  match: Lore:\[.*寒假.*]
+  type: 339
+  texture: item5.png
+  scale: 1
+  center: false
+  held: true
+ka1:
+  match: Lore:\[.*"&7设置指定精灵一项个体满值".*]
+  type: 339
+  texture: ka1.png
+  scale: 1
+  center: false
+  held: true
+ka2:
+  match: Lore:\[.*"&7设置指定精灵一项努力满值".*]
+  type: 339
+  texture: ka2.png
+  scale: 1
+  center: false
+  held: true
+ka3:
+  match: Lore:\[.*"&7设置指定精灵一项性格数值".*]
+  type: 339
+  texture: ka3.png
+  scale: 1
+  center: false
+  held: true
+ka4:
+  match: Lore:\[.*"&7设置指定精灵变成闪光状态".*]
+  type: 339
+  texture: ka4.png
+  scale: 1
+  center: false
+  held: true
+ka5:
+  match: Lore:\[.*"&7设置指定精灵取消闪光状态".*]
+  type: 339
+  texture: ka5.png
+  scale: 1
+  center: false
+  held: true
+ka6:
+  match: Lore:\[.*"&7设置指定精灵修改体型".*]
+  type: 339
+  texture: ka6.png
+  scale: 1
+  center: false
+  held: true
+ka7:
+  match: Lore:\[.*"&7设置指定精灵等级改为1级".*]
+  type: 339
+  texture: ka7.png
+  scale: 1
+  center: false
+  held: true
+ka8:
+  match: Lore:\[.*"&7设置指定精灵EVS改为0%".*]
+  type: 339
+  texture: ka8.png
+  scale: 1
+  center: false
+  held: true
+ka9:
+  match: Lore:\[.*"&7设置指定精灵的性别".*]
+  type: 339
+  texture: ka9.png
+  scale: 1
+  center: false
+  held: true
+ka10:
+  match: Lore:\[.*"&7设置指定精灵IVS为0%".*]
+  type: 339
+  texture: ka10.png
+  scale: 1
+  center: false
+  held: true
+ka11-梦特卡:
+  match: Lore:\[.*"&7设置指定精灵改为梦特形态的强力卡".*]
+  type: 339
+  texture: ka11.png
+  scale: 1
+  center: false
+  held: true
+ka11-满值个体卡:
+  match: Lore:\[.*"&7设置指定精灵改为6V的强力卡".*]
+  type: 339
+  texture: ka11.png
+  scale: 1
+  center: false
+  held: true
+ka11-满级卡:
+  match: Lore:\[.*"&7设置指定精灵等级改为100级".*]
+  type: 339
+  texture: ka11.png
+  scale: 1
+  center: false
+  held: true
+jingshi1-随机体型:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a体型".*]'
+  type: 339
+  texture: jingshi1.png
+  scale: 1
+  center: false
+  held: true
+jingshi2-随机性格:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a性格".*]'
+  type: 339
+  texture: jingshi2.png
+  scale: 1
+  center: false
+  held: true
+jingshi3-随机性格:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a特性".*]'
+  type: 339
+  texture: jingshi3.png
+  scale: 1
+  center: false
+  held: true
+jingshi4-随机性格:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a等级".*]'
+  type: 339
+  texture: jingshi4.png
+  scale: 1
+  center: false
+  held: true
+jingshi5-随机性格:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a个体值".*]'
+  type: 339
+  texture: jingshi5.png
+  scale: 1
+  center: false
+  held: true
+jingshi6-随机性格:
+  match: 'Lore:\[.*"&7可随机更改精灵的: &a努力值".*]'
+  type: 339
+  texture: jingshi6.png
+  scale: 1
+  center: false
+  held: true
+yaoshi1-薄荷抽奖箱:
+  match: Lore:\[.*"&7可以打开薄荷抽奖箱一次".*]
+  type: 339
+  texture: yaoshi1.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi2-钓鱼抽奖箱:
+  match: Lore:\[.*"&7可以打开钓鱼抽奖箱一次".*]
+  type: 339
+  texture: yaoshi2.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi3-任务抽奖箱:
+  match: Lore:\[.*"&7可以打开任务抽奖箱一次".*]
+  type: 339
+  texture: yaoshi3.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi4-冰菓抽奖箱:
+  match: Lore:\[.*"&7可以打开冰菓抽奖箱一次".*]
+  type: 339
+  texture: yaoshi4.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi5-进化石抽奖箱:
+  match: Lore:\[.*"&7可以打开进化石抽奖箱一次".*]
+  type: 339
+  texture: yaoshi5.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi6-特性抽奖箱:
+  match: Lore:\[.*"&7可以打开稀有特性抽奖箱一次".*]
+  type: 339
+  texture: yaoshi6.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi7-三连抽奖箱:
+  match: Lore:\[.*"&7可以打开三连抽奖箱一次".*]
+  type: 339
+  texture: yaoshi7.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi8-道具抽奖箱:
+  match: Lore:\[.*"&7可以打开道具抽奖箱一次".*]
+  type: 339
+  texture: yaoshi8.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi9-神兽抽奖箱:
+  match: Lore:\[.*"&7可以打开神兽抽奖箱一次".*]
+  type: 339
+  texture: yaoshi9.gif
+  scale: 1
+  center: false
+  held: true
+yaoshi10-神兽抽奖箱:
+  match: Lore:\[.*"&7可以打开时装抽奖箱一次".*]
+  type: 339
+  texture: yaoshi10.gif
+  scale: 1
+  center: false
+  held: true
+cuicanxinghuo-时装兑换:
+  match: Lore:\[.*"&7兑换精美时装的特殊道具".*]
+  type: 339
+  texture: cuicanxinghuo.png
+  scale: 1
+  center: false
+  held: true
+jiebang-解绑石:
+  match: Lore:\[.*"&7可以解除绑定中的宝可梦".*]
+  type: 339
+  texture: jiebang.gif
+  scale: 1
+  center: false
+  held: true
+jiebang-解绑卡:
+  match: Lore:\[.*"&7可以解除绑定中的物品".*]
+  type: 339
+  texture: bangding1.png
+  scale: 1
+  center: false
+  held: true
+jiebang-绑定卡:
+  match: Lore:\[.*"&7可以绑定一个物品".*]
+  type: 339
+  texture: bangding2.png
+  scale: 1
+  center: false
+  held: true
+ae_anquanhufu-安全护符:
+  match: Lore:\[.*"&7可以使物品在附魔安装失败时不被摧毁".*]
+  type: 339
+  texture: ae_anquanhufu.png
+  scale: 1
+  center: false
+  held: true
+ae_caowei-孔位符:
+  match: Lore:\[.*"&7可为附魔上限的武器工具使用".*]
+  type: 339
+  texture: ae_caowei.png
+  scale: 1
+  center: false
+  held: true
+ae_fanhuan-腐蚀符:
+  match: Lore:\[.*"&7随机抽取一个附魔变为附魔书返还予你".*]
+  type: 339
+  texture: ae_fanhuan.png
+  scale: 1
+  center: false
+  held: true
+ae_jishuqi-计数器:
+  match: Lore:\[.*"&7记录你所有破坏的方块".*]
+  type: 339
+  texture: ae_jishuqi.png
+  scale: 1
+  center: false
+  held: true
+ae_linghunshouge-灵魂收割:
+  match: Lore:\[.*"&7记录你杀死的玩家数量".*]
+  type: 339
+  texture: ae_linghunshouge.png
+  scale: 1
+  center: false
+  held: true
+ae_siwangbiji-死亡笔记:
+  match: Lore:\[.*"&7记录你杀死的任何生物".*]
+  type: 339
+  texture: ae_siwangbiji.png
+  scale: 1
+  center: false
+  held: true
+ae_mochen-神秘魔尘:
+  match: Lore:\[.*"&7有概率开出魔尘和没用的魔尘".*]
+  type: 339
+  texture: ae_mochen.png
+  scale: 1
+  center: false
+  held: true
+ae_mochen2-魔尘:
+  match: Lore:\[.*"&7此物内部还蕴含着些许魔力".*]
+  type: 339
+  texture: ae_mochen2.png
+  scale: 1
+  center: false
+  held: true
+ae_mochen3-没有用的魔尘:
+  match: Lore:\[.*"&7无用的东西...".*]
+  type: 339
+  texture: ae_mochen3.png
+  scale: 1
+  center: false
+  held: true

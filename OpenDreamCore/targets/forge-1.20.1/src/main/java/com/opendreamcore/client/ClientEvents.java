@@ -22,9 +22,6 @@ import net.minecraftforge.event.TickEvent;
  */
 public final class ClientEvents {
 
-    static {
-        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
-    }
 
     private ClientEvents() {
     }
@@ -65,10 +62,10 @@ public final class ClientEvents {
                 ClientController.LOGGER.warn("世界渲染异常（已跳过本帧）: {}", t.toString());
                 // 强制闭合可能残留的 Tesselator 缓冲
                 try {
+                    // 直接 end()：没在 building 时它会自己抛 IllegalStateException，正好被兑底接住。
+                    // 别反射查 building() —— SRG 环境下方法名对不上，等于白写。
                     var b = com.mojang.blaze3d.vertex.Tesselator.getInstance().getBuilder();
-                    if ((boolean) b.getClass().getMethod("building").invoke(b)) {
-                        b.end();
-                    }
+                    b.end();
                 } catch (Throwable ignored) { }
             }
         }
@@ -138,10 +135,10 @@ public final class ClientEvents {
         ClientController.get().clearServerTitle();
     }
 
-    /** 客户端命令树：/odc open|close|hud|edit|list。 */
+    /** codc 命令树：open|close|hud|edit|list。 */
     public static void onRegisterCommands(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.minecraft.commands.CommandSourceStack>)
-                com.opendreamcore.client.OdcCommands.buildRoot());
+        // 命令树全走注册表：核心的 codc 和附属自注的命令一起遍历塞进自家通道
+        com.opendreamcore.client.OdcCommands.registerAll(event.getDispatcher());
     }
 
     /** 客户端可用的脚本方法（服务端裁决类方法在插件侧注册）。入口在 ClientSetup 调用。 */
@@ -175,13 +172,4 @@ public final class ClientEvents {
         });
     }
 
-    /**
-     * 连接服务器时将 /odc 命令转发到服务端执行（单人世界返回 false 走本地逻辑）。
-     * 直接发送命令协议包绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
-     */
-    private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> ctx,
-                                                      String subCommand)  {
-        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
-        return ClientController.get().tryForwardOdcCommand(subCommand);
-    }
 }

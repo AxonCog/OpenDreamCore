@@ -1,13 +1,19 @@
 {
   "required": true,
-  "refmap": "opendreamcore.refmap.json",
   "minVersion": "0.8",
   "package": "com.opendreamcore.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
     "MixinGui",
+    "MixinItemIcon",
+    "MixinTooltip",
+    "MixinNameTag",
+    "MixinItemEffect",
+    "MixinGuiText",
     "MixinSubtitleOverlay",
-    "MixinWorldRender"
+    "MixinWorldRender",
+    "MixinArmorLayer",
+    "MixinCursor"
   ],
   "injectors": {
     "defaultRequire": 1

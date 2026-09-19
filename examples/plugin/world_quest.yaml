@@ -30,7 +30,7 @@ elements:
     type: text
     hologram: {x: 0, y: -0.38, z: 0, scale: 0.017, width: 4, height: 0.5, wrap: 4}
     text: {content: "{vars.quest_body}", color: "#E0E0E0"}
-  # ---- 独立页签（与公告板页签各自独立切换） ----
+  # 独立页签（与公告板页签各自独立切换）
   - id: q_tab_bar
     type: tabs
     hologram: {x: 0, y: 0.42, z: 0, width: 2.8, height: 0.2}

@@ -14,18 +14,21 @@ import net.minecraft.network.chat.Component;
 import java.nio.file.Path;
 
 /**
- * Fabric 1.20.1 侧事件：网络发送注入、进服握手、本地页面、HUD/全息渲染、容器替换、/odc 命令。
+ * Fabric 1.20.1 侧事件：网络发送注入、进服握手、本地页面、HUD/全息渲染、容器替换、codc 命令。
  */
 public final class FabricEvents {
 
-    static {
-        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
-    }
 
     private FabricEvents() {
     }
 
     public static void register() {
+        // 实体渲染桥（entity/model 组件 GUI 渲染，1.20.1 实现）
+        com.opendreamcore.client.entity.EntityViews.register(
+                new com.opendreamcore.client.entity.EntityRenderBridgeImpl());
+        // 物品 3D 展示桥（item_model 组件）
+        com.opendreamcore.client.entity.ItemModelViews.register(
+                new com.opendreamcore.client.entity.ItemModelRenderBridgeImpl());
         // 网络发送：Fabric 走旧版 channel API
         ClientController.get().setSender(com.opendreamcore.network.FabricChannel::send);
 
@@ -100,20 +103,11 @@ try {
             }
         });
 
-        // /odc 客户端命令
+        // codc 客户端命令
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-            dispatcher.register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource>)
-                    com.opendreamcore.client.OdcCommands.buildRoot());
+            // 命令树全走注册表：核心的 codc 和附属自注的命令一起遍历塞进来
+            com.opendreamcore.client.OdcCommands.registerAll(dispatcher);
         });
     }
 
-    /**
-     * 连接服务器时将 /odc 命令转发到服务端执行（单人世界返回 false 走本地逻辑）。
-     * 直接发送命令协议包绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
-     */
-    private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> ctx,
-                                                      String subCommand)  {
-        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
-        return ClientController.get().tryForwardOdcCommand(subCommand);
-    }
 }

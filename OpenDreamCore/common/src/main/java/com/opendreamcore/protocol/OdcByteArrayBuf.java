@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol;
 
+import com.opendreamcore.util.J8;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -55,12 +57,21 @@ public final class OdcByteArrayBuf implements OdcByteBuf {
     public void writeString(String s) {
         byte[] data = s.getBytes(StandardCharsets.UTF_8);
         writeVarInt(data.length);
-        out.writeBytes(data);
+        writeMem(data);
     }
 
     @Override
     public void writeBytes(byte[] data) {
-        out.writeBytes(data);
+        writeMem(data);
+    }
+
+    /** JDK8 的 write(byte[]) 带 checked 异常声明，ByteArrayOutputStream 内存流实际不会真抛，剥掉包装。 */
+    private void writeMem(byte[] data) {
+        try {
+            out.write(data);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("内存流写不进去？没这种命", e);
+        }
     }
 
     @Override
@@ -138,8 +149,13 @@ public final class OdcByteArrayBuf implements OdcByteBuf {
         if (length < 0) {
             throw new IllegalStateException("长度非法: " + length);
         }
+        // 空串/空载荷是合法读：PageControl 的可空 sessionId 走这条路，
+        // 不早退的话流尾 readNBytes(0) 也会在个别实现上出怪结果
+        if (length == 0) {
+            return new byte[0];
+        }
         byte[] data = new byte[length];
-        int read = in.readNBytes(data, 0, length);
+        int read = J8.readNBytes(in, data, 0, length);
         if (read != length) {
             throw new IllegalStateException("数据不足: 需要 " + length + " 实得 " + read);
         }

@@ -17,15 +17,12 @@ import net.neoforged.neoforge.common.NeoForge;
 import java.nio.file.Path;
 
 /**
- * 客户端侧事件：进服握手、本地页面目录加载、/odc 调试命令。
+ * 客户端侧事件：进服握手、本地页面目录加载、codc 本地命令。
  * game bus 事件在新版 NeoForge 里不能用注解订阅，统一在这里手动挂。
  */
 @EventBusSubscriber(modid = OpenDreamCore.MODID, value = Dist.CLIENT)
 public final class ClientEvents {
 
-    static {
-        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
-    }
 
     private ClientEvents() {
     }
@@ -33,6 +30,12 @@ public final class ClientEvents {
     @SubscribeEvent
     public static void onClientSetup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.opendreamcore.script.CommonMethods.registerAll();
+        // 实体渲染桥（entity/model 组件 GUI 渲染）
+        com.opendreamcore.client.entity.EntityViews.register(
+                new com.opendreamcore.client.entity.EntityRenderBridgeImpl());
+        // 物品 3D 展示桥（item_model 组件）
+        com.opendreamcore.client.entity.ItemModelViews.register(
+                new com.opendreamcore.client.entity.ItemModelRenderBridgeImpl());
         ClientPlaceholders.registerAll();
         registerScriptMethods();
         com.opendreamcore.client.spi.ResourcePackInjector.register(new NeoForgePackInjector());
@@ -98,11 +101,22 @@ public final class ClientEvents {
         ClientController.get().addChatMessage(LegacyText.toLegacy(event.getMessage()));
     }
 
-    /** 世界全息渲染（实体渲染后一帧）。 */
-    public static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent.AfterEntities event) {
-        // 21.6+ NeoForge：Stage 枚举拆分为独立子事件类，监听器直接收 AfterEntities
-        ClientController.get().renderWorld(event.getCamera(), event.getPartialTick().getGameTimeDeltaPartialTick(false));
-        ClientController.get().renderNameTags(event.getCamera(), event.getPartialTick().getGameTimeDeltaPartialTick(false));
+    /** 世界全息渲染（世界渲染收尾叠加，避开实体中段冲 shader/栈）。 */
+    public static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent.AfterLevel event) {
+        // 21.6+ NeoForge：Stage 枚举拆分为独立子事件类；世界图稿收尾画（与 26.1.2 一致）。
+        // 之前挂 AfterEntities 在实体批次中段 endBatch/换 shader，实机 1.21.8 触发
+        // LevelRenderer 模型视图栈失衡（popMatrix already at bottom），改到末尾阶段叠加。
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        var camera = mc.gameRenderer.getMainCamera();
+        float partial = mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+        var modelView = com.mojang.blaze3d.systems.RenderSystem.getModelViewStack();
+        int depth = com.opendreamcore.client.CompatRender.modelViewStackDepth();
+        try {
+            ClientController.get().renderWorld(camera, partial);
+            ClientController.get().renderNameTags(camera, partial);
+        } finally {
+            com.opendreamcore.client.CompatRender.modelViewRestoreTo(depth);
+        }
     }
 
     /**
@@ -218,87 +232,9 @@ public final class ClientEvents {
     }
 
     public static void onRegisterCommands(RegisterClientCommandsEvent event) {
-        // 客户端 /odc 命令：单人世界执行本地操作；连接服务器时转发给服务端执行
-        event.getDispatcher().register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.minecraft.commands.CommandSourceStack>)
-                com.opendreamcore.client.OdcCommands.buildRoot());
+        // codc 客户端命令：全本地执行，服务器的 /odc 我们不管
+        // 命令树全走注册表：核心的 codc 和附属自注的命令一起遍历塞进自家通道
+        com.opendreamcore.client.OdcCommands.registerAll(event.getDispatcher());
     }
 
-    /**
-     * /odc edit <pageId> 核心逻辑：
-     * 1. 确保 YAML 文件存在（不存在则创建模板）
-     * 2. 确保页面已加载（reload 触发）
-     * 3. 打开页面
-     * 4. external=true 时用外置编辑器打开 YAML
-     * 5. external=false 时进入游戏内编辑模式
-     */
-    private static int handleEditPage(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> ctx,
-                                      String pageId, boolean external, String editorCmd) {
-        var controller = ClientController.get();
-        // 1. 查找页面（优先级：当前打开实例 > 服务端下发 > 本地文件）
-        //    服务端页面（如加密下发的 shop）本地无 YAML 也能直接编辑
-        java.nio.file.Path file = ExternalEditor.findFile(pageId);
-        Page openPage = controller.isOpen() ? controller.currentPage() : null;
-        boolean editOpenInstance = openPage != null
-                && pageId.equals(openPage.id() == null ? "" : openPage.id());
-        Page serverPage = editOpenInstance ? null : controller.serverPage(pageId);
-        Page page = editOpenInstance ? openPage
-                : serverPage != null ? serverPage
-                : controller.localPages().get(pageId);
-        if (page == null) {
-            // 本地也没有 → 创建模板文件后重试一次
-            boolean created = !java.nio.file.Files.exists(file);
-            if (created) {
-                ExternalEditor.ensureFile(pageId);
-                java.nio.file.Path uiDir = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
-                        .resolve("OpenDreamCore").resolve("UI");
-                controller.localPages().load(uiDir);
-                page = controller.localPages().get(pageId);
-            }
-            if (page == null) {
-                ctx.getSource().sendFailure(Component.literal(
-                        "§c页面加载失败: §f" + pageId + " §7(检查 YAML 语法)"));
-                return 0;
-            }
-        }
-        // 2. 打开页面（编辑已打开实例时跳过：不重复 open / 不替换会话）
-        if (!editOpenInstance && (!controller.isOpen() || controller.currentPage() != page)) {
-            controller.open(page);
-        }
-        // 4. 外置编辑器 or 游戏内编辑
-        if (external) {
-            boolean ok;
-            if (editorCmd != null && !editorCmd.isBlank()) {
-                ok = ExternalEditor.openWith(editorCmd, pageId);
-            } else {
-                ok = ExternalEditor.open(pageId);
-            }
-            if (ok) {
-                ctx.getSource().sendSuccess(() -> Component.literal(
-                        "§a外置编辑器已打开: §f" + file + "\n" +
-                        "§7保存后游戏自动热重载"), false);
-            } else {
-                ctx.getSource().sendFailure(Component.literal(
-                        "§c无法打开外置编辑器 §7(试试 /odc edit " + pageId + " with code)"));
-            }
-            // 同时进入游戏内编辑模式（双窗口协作）
-            controller.toggleEdit(true);
-        } else {
-            controller.toggleEdit(true);
-            ctx.getSource().sendSuccess(() -> Component.literal(
-                    "§a编辑模式已开启: §f" + pageId + "\n" +
-                    "§7拖动元素 | Del删除 | Ctrl+C复制 | [ ]调Z | Ctrl+E导出YAML\n" +
-                    "§7/odc edit " + pageId + " external §8→ 外置编辑器"), false);
-        }
-        return Command.SINGLE_SUCCESS;
-    }
-
-    /**
-     * 连接服务器时将 /odc 命令转发到服务端执行（单人世界返回 false 走本地逻辑）。
-     * 直接发送 ServerboundChatCommandPacket 绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
-     */
-    private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> ctx,
-                                                       String subCommand)  {
-        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
-        return ClientController.get().tryForwardOdcCommand(subCommand);
-    }
 }

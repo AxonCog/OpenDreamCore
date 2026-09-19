@@ -231,7 +231,7 @@ chat_line:
   chat_input:
     prefix: "> "
 
-# ========== P1 新组件演示（滚动区：area_input/suggestion/card/flip_card/chart/compass/direction/canvas/boss_bar/embed/import） ==========
+# P1 新组件演示（滚动区：area_input/suggestion/card/flip_card/chart/compass/direction/canvas/boss_bar/embed/import）
 new_components:
   type: scroll
   x: "window.width / 2 - 230"
@@ -528,7 +528,7 @@ new_components:
           height: 22
           button: {label: "自适应行二", background: "#5C6BC0"}
 
-# ===== 新组件演示区（round 13）：圆角面板 / 复选框 / 仪表盘 / 环形滑块 / 事件总线 =====
+# 新组件演示区（round 13）：圆角面板 / 复选框 / 仪表盘 / 环形滑块 / 事件总线
 rounded_panel:
   type: rect
   x: 10

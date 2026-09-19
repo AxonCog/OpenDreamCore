@@ -15,13 +15,10 @@ import net.minecraft.network.chat.Component;
 import java.nio.file.Path;
 
 /**
- * Fabric 侧事件：网络发送注入、进服握手、本地页面、HUD/全息渲染、容器替换、/odc 命令。
+ * Fabric 侧事件：网络发送注入、进服握手、本地页面、HUD/全息渲染、容器替换、codc 命令。
  */
 public final class FabricEvents {
 
-    static {
-        com.opendreamcore.client.ClientController.setClientVersion("0.1.1");
-    }
 
     private FabricEvents() {
     }
@@ -59,6 +56,12 @@ public final class FabricEvents {
     }
 
     public static void register() {
+        // 实体渲染桥（entity/model 组件 GUI 渲染）
+        com.opendreamcore.client.entity.EntityViews.register(
+                new com.opendreamcore.client.entity.EntityRenderBridgeImpl());
+        // 物品 3D 展示桥（item_model 组件）
+        com.opendreamcore.client.entity.ItemModelViews.register(
+                new com.opendreamcore.client.entity.ItemModelRenderBridgeImpl());
         registerScriptMethods();
         ClientPlaceholders.registerAll(); // 占位符（脚本方法/CommonMethods 已在入口注册）
         // 文本自动高度测量（text.autoHeight / text.wrap → 布局按字体折行算高度）
@@ -174,90 +177,11 @@ try {
             }
         });
 
-// /odc 客户端命令：单人世界执行本地操作；连接服务器时转发给服务端执行
-ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-dispatcher.register((com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource>)
-                    com.opendreamcore.client.OdcCommands.buildRoot());
+// codc 客户端命令：全部本地执行，不碰服务器的 /odc
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+            // 命令树全走注册表：核心的 codc 和附属自注的命令一起遍历塞进来
+            com.opendreamcore.client.OdcCommands.registerAll(dispatcher);
         });
     }
 
-    /**
-     * 连接服务器时将 /odc 命令转发到服务端执行（单人世界返回 false 走本地逻辑）。
-     * 直接发送 ServerboundChatCommandPacket 绕过客户端命令调度器，防止 /odc 自匹配导致无限递归。
-     */
-    private static boolean forwardToServerIfConnected(com.mojang.brigadier.context.CommandContext<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> ctx,
-                                                       String subCommand)  {
-        // 一链路：转发实现在共享树 ClientController，版本差异由其内部反射吸收
-        return ClientController.get().tryForwardOdcCommand(subCommand);
-    }
-
-    /**
-     * /odc edit <pageId> 核心逻辑：
-     * 1. 确保 YAML 文件存在（不存在则创建模板）
-     * 2. 确保页面已加载（reload 触发）
-     * 3. 打开页面
-     * 4. external=true 时用外置编辑器打开 YAML
-     * 5. external=false 时进入游戏内编辑模式
-     */
-    private static int handleEditPage(com.mojang.brigadier.context.CommandContext<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> ctx,
-                                      String pageId, boolean external, String editorCmd) {
-        var controller = ClientController.get();
-        // 1. 查找页面（优先级：当前打开实例 > 服务端下发 > 本地文件）
-        //    服务端页面（如加密下发的 shop）本地无 YAML 也能直接编辑 —— 与 NeoForge 对齐
-        java.nio.file.Path file = ExternalEditor.findFile(pageId);
-        Page openPage = controller.isOpen() ? controller.currentPage() : null;
-        boolean editOpenInstance = openPage != null
-                && pageId.equals(openPage.id() == null ? "" : openPage.id());
-        com.opendreamcore.page.Page serverPage = editOpenInstance ? null : controller.serverPage(pageId);
-        Page page = editOpenInstance ? openPage
-                : serverPage != null ? serverPage
-                : controller.localPages().get(pageId);
-        if (page == null) {
-            // 本地也没有 → 创建模板文件后重试一次
-            boolean created = !java.nio.file.Files.exists(file);
-            if (created) {
-                ExternalEditor.ensureFile(pageId);
-                // 重载本地页面（加载新文件）
-                java.nio.file.Path uiDir = Minecraft.getInstance().gameDirectory.toPath()
-                        .resolve("OpenDreamCore").resolve("UI");
-                controller.localPages().load(uiDir);
-                page = controller.localPages().get(pageId);
-            }
-            if (page == null) {
-                ctx.getSource().sendError(Component.literal(
-                        "§c页面加载失败: §f" + pageId + " §7(检查 YAML 语法)"));
-                return 0;
-            }
-        }
-        // 3. 打开页面（编辑已打开实例时跳过：不重复 open / 不替换会话）
-        if (!editOpenInstance && (!controller.isOpen() || controller.currentPage() != page)) {
-            controller.open(page);
-        }
-        // 4. 外置编辑器 or 游戏内编辑
-        if (external) {
-            boolean ok;
-            if (editorCmd != null && !editorCmd.isBlank()) {
-                ok = ExternalEditor.openWith(editorCmd, pageId);
-            } else {
-                ok = ExternalEditor.open(pageId);
-            }
-            if (ok) {
-                ctx.getSource().sendFeedback(Component.literal(
-                        "§a外置编辑器已打开: §f" + file + "\n" +
-                        "§7保存后游戏自动热重载"));
-            } else {
-                ctx.getSource().sendError(Component.literal(
-                        "§c无法打开外置编辑器 §7(试试 /odc edit " + pageId + " with code)"));
-            }
-            // 同时进入游戏内编辑模式（双窗口协作）
-            controller.toggleEdit(true);
-        } else {
-            controller.toggleEdit(true);
-            ctx.getSource().sendFeedback(Component.literal(
-                    "§a编辑模式已开启: §f" + pageId + "\n" +
-                    "§7拖动元素 | Del删除 | Ctrl+C复制 | [ ]调Z | Ctrl+E导出YAML\n" +
-                    "§7/odc edit " + pageId + " external §8→ 外置编辑器"));
-        }
-        return 1;
-    }
 }

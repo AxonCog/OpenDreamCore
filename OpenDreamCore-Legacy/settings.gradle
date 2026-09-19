@@ -1,0 +1,12 @@
+// 跟现代线（OpenDreamCore/）同一个规矩：根工程不 include 任何 target，只做编排。
+//
+// 原因很实际——各 target 的 Gradle 版本差着代（1.16.5 是 7.6，1.12.2 是 4.10.3，
+// 1.7.10 是 2.14），一旦 include 进来，根构建在配置期就会去评估它们的 build.gradle，
+// ForgeGradle 2.3 在 Gradle 7.6 下直接报 Configuration 'compile' not found 而整体崩掉。
+// 每个 target 目录下都有自己的 settings.gradle 与 gradlew，用 gradlew -p <dir> 进去
+// 就是一次独立构建，互不干扰。
+rootProject.name = 'OpenDreamCore-Legacy'
+
+// common-j8 是纯 java-library，不带 Forge 插件，可以安全地由根构建评估，
+// 这样它能继承根目录 gradle.properties 里的 JDK17（Gradle 7.6 跑不了 PATH 上的 JDK24）。
+include 'common-j8'

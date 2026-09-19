@@ -58,7 +58,7 @@ tasks.register('listTargets') {
     }
 }
 
-// ---- verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总（提交前门禁）----
+// verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总（提交前门禁）
 // 用法：gradlew.bat verifyMatrix                       （全矩阵，任一红则任务失败）
 //       gradlew.bat verifyMatrix -PmatrixContinue=true （汇总但不失败，用于漂移盘点）
 tasks.register('verifyMatrix') {
@@ -97,13 +97,13 @@ tasks.register('verifyMatrix') {
     }
 }
 
-def outputDir = file('../output')
+def outputDir = file('../output/server')
 
-// 各 target 自己的 build.gradle 里有 collectOutput（finalizedBy build），编译完自动复制到 ../../../output。
-// 根 collectOutput 只负责收集插件 fat jar（插件不在 target 列表里）。
+// 各 target 自己的 build.gradle 里有 collectOutput（finalizedBy build），产物进 ../output/client。
+// 根 collectOutput 只负责收集插件 fat jar（插件不在 target 列表里），产物进 ../output/server。
 tasks.register('collectOutput') {
     group = 'build'
-    description = 'Collects plugin fat jar into ../output. Target jars are handled by their own collectOutput.'
+    description = 'Copy the plugin fat jar into ../output/server.'
     doLast {
         outputDir.mkdirs()
         file('../OpenDreamCore-Plugin/plugin/build/libs').listFiles()?.each { f ->

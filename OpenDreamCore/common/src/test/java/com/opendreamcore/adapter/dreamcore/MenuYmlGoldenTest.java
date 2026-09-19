@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Golden 测试：真实 菜单.yml（仓库根目录快照）全链路解析。
  * 链路 = YamlParser → DreamCoreParser.transform → PageSchema.build（与客户端 LocalPageManager 一致）。
- * 验收：不抛异常、元素数量正确、关键映射逐点抽查。
+ * 查的是：不抛异常、元素数量正确、关键映射逐点抽查。
  */
 class MenuYmlGoldenTest {
 
@@ -94,7 +94,7 @@ class MenuYmlGoldenTest {
                 "旧滚动区 limit* 键保留（滚动语义在事件阶段处理）");
     }
 
-    // ---------- 工具 ----------
+    // 工具
 
     private static Map<String, Object> find(Map<String, Object> ir, String id) {
         Object o = ir.get(id);

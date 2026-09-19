@@ -25,6 +25,7 @@ public final class ServerMethods {
         registerItem();
         registerScreen();
         registerSound();
+        registerVisualSoundApi();
         registerEconomy();
         registerTeleport();
         registerParticle();
@@ -41,7 +42,17 @@ public final class ServerMethods {
         registerDreamCoreCompat();
     }
 
-    // ========== Tooltip（动态 tooltip 注册/样式/移除） ==========
+    // Tooltip（动态 tooltip 注册/样式/移除）
+
+    /** 方块键路径（minecraft:stone）：走兼容层，1.13+ 用 getKey，老服枚举名小写。 */
+    private static String blockKey(org.bukkit.block.Block b) {
+        return com.opendreamcore.plugin.util.LegacyItemCompat.key(b.getType());
+    }
+
+    /** 视线方块：统一走兼容层，老服新服同一口子。 */
+    private static org.bukkit.block.Block targetBlock(Player p, int dist) {
+        return com.opendreamcore.plugin.util.LegacyItemCompat.targetBlock(p, dist);
+    }
 
     private static String strArg(Object v) {
         return v == null ? null : String.valueOf(v);
@@ -85,7 +96,7 @@ public final class ServerMethods {
         }, "移除", "unregister", "remove");
     }
 
-    // ========== Network（自定义双向通道 custom_packet 下行） ==========
+    // Network（自定义双向通道 custom_packet 下行）
 
     private static void registerNetwork() {
         NamespaceRegistry.register("Network", args -> {
@@ -114,7 +125,7 @@ public final class ServerMethods {
         }, "广播", "broadcast", "broadcastCustomPacket", "broadcast_custom_packet");
     }
 
-    // ========== Script（运行控制：执行/延迟/计划/打印） ==========
+    // Script（运行控制：执行/延迟/计划/打印）
 
     private static void registerScript() {
         NamespaceRegistry.register("Script", args -> {
@@ -197,7 +208,7 @@ public final class ServerMethods {
         }
     }
 
-    // ========== Player ==========
+    // Player
 
     private static void registerPlayer() {
         NamespaceRegistry.register("Player", args -> {
@@ -276,7 +287,7 @@ public final class ServerMethods {
         // 手持物品（Bukkit 权威）
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
-            if (p == null || p.getInventory().getItemInMainHand().getType().isAir()) {
+            if (p == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(p.getInventory().getItemInMainHand())) {
                 return "";
             }
             ItemStack stack = p.getInventory().getItemInMainHand();
@@ -285,7 +296,7 @@ public final class ServerMethods {
         }, "手持物品", "getHeldItem", "get_held_item", "heldItem", "主手物品", "getMainHandItem", "get_main_hand_item");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
-            if (p == null || p.getInventory().getItemInOffHand().getType().isAir()) {
+            if (p == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(p.getInventory().getItemInOffHand())) {
                 return "";
             }
             ItemStack stack = p.getInventory().getItemInOffHand();
@@ -294,14 +305,14 @@ public final class ServerMethods {
         }, "副手物品", "getOffhandItem", "get_offhand_item", "offhandItem");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
-            if (p == null || p.getInventory().getItemInMainHand().getType().isAir()) {
+            if (p == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(p.getInventory().getItemInMainHand())) {
                 return "";
             }
-            return p.getInventory().getItemInMainHand().getType().getKey().toString();
+            return com.opendreamcore.plugin.util.LegacyItemCompat.key(p.getInventory().getItemInMainHand());
         }, "手持物品ID", "getHeldItemId", "get_held_item_id", "heldItemId");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
-            if (p == null || p.getInventory().getItemInMainHand().getType().isAir()) {
+            if (p == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(p.getInventory().getItemInMainHand())) {
                 return 0.0;
             }
             return (double) p.getInventory().getItemInMainHand().getAmount();
@@ -313,7 +324,7 @@ public final class ServerMethods {
                 return out;
             }
             for (ItemStack stack : p.getInventory().getArmorContents()) {
-                out.add(stack == null || stack.getType().isAir() ? "" : itemName(stack));
+                out.add(stack == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(stack) ? "" : itemName(stack));
             }
             return out;
         }, "盔甲栏", "getArmor", "get_armor", "armor");
@@ -321,32 +332,32 @@ public final class ServerMethods {
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
             int dist = args.length > 1 ? (int) num(args[1]) : 5;
-            org.bukkit.block.Block b = p == null ? null : p.getTargetBlockExact(dist);
-            return b == null ? "" : b.getType().getKey().toString();
+            org.bukkit.block.Block b = p == null ? null : targetBlock(p, dist);
+            return b == null || b.getType() == null ? "" : blockKey(b);
         }, "视线方块", "getLookingBlock", "get_looking_block", "lookingBlock", "视线方块名");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
             int dist = args.length > 1 ? (int) num(args[1]) : 5;
-            org.bukkit.block.Block b = p == null ? null : p.getTargetBlockExact(dist);
+            org.bukkit.block.Block b = targetBlock(p, dist);
             return b == null ? 0.0 : b.getLocation().getX() + 0.5;
         }, "视线方块X", "getLookingBlockX", "get_looking_block_x", "lookingBlockX");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
             int dist = args.length > 1 ? (int) num(args[1]) : 5;
-            org.bukkit.block.Block b = p == null ? null : p.getTargetBlockExact(dist);
+            org.bukkit.block.Block b = targetBlock(p, dist);
             return b == null ? 0.0 : b.getLocation().getY() + 0.5;
         }, "视线方块Y", "getLookingBlockY", "get_looking_block_y", "lookingBlockY");
         NamespaceRegistry.register("Player", args -> {
             Player p = player(args);
             int dist = args.length > 1 ? (int) num(args[1]) : 5;
-            org.bukkit.block.Block b = p == null ? null : p.getTargetBlockExact(dist);
+            org.bukkit.block.Block b = targetBlock(p, dist);
             return b == null ? 0.0 : b.getLocation().getZ() + 0.5;
         }, "视线方块Z", "getLookingBlockZ", "get_looking_block_z", "lookingBlockZ");
     }
 
     /** 物品显示名（无自定义名时用注册键路径，如 diamond_sword）。 */
     private static String itemName(ItemStack stack) {
-        String key = stack.getType().getKey().toString();
+        String key = com.opendreamcore.plugin.util.LegacyItemCompat.key(stack);
         int colon = key.indexOf(':');
         return colon >= 0 ? key.substring(colon + 1) : key;
     }
@@ -367,7 +378,7 @@ public final class ServerMethods {
         return Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
     }
 
-    // ========== Chat ==========
+    // Chat
 
     private static void registerChat() {
         NamespaceRegistry.register("Chat", args -> {
@@ -381,7 +392,7 @@ public final class ServerMethods {
         }, "发送消息", "sendMessage", "send_message", "say");
     }
 
-    // ========== Server ==========
+    // Server
 
     private static void registerServer() {
         NamespaceRegistry.register("Server", args -> Bukkit.getOnlinePlayers().size(), "在线人数", "onlinePlayers", "online_players");
@@ -394,7 +405,7 @@ public final class ServerMethods {
         }, "广播", "broadcast");
     }
 
-    // ========== Item（手持物品 + 真正给物品） ==========
+    // Item（手持物品 + 真正给物品）
 
     private static void registerItem() {
         NamespaceRegistry.register("Item", args -> {
@@ -403,7 +414,7 @@ public final class ServerMethods {
                 return "";
             }
             ItemStack hand = p.getInventory().getItemInMainHand();
-            return hand == null || hand.getType().isAir() ? "" : hand.getType().name().toLowerCase();
+            return hand == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(hand) ? "" : hand.getType().name().toLowerCase();
         }, "手持物品", "getHandItem", "get_hand_item");
         NamespaceRegistry.register("Item", args -> {
             // Item.给予物品(玩家, "minecraft:diamond", 数量)
@@ -423,7 +434,7 @@ public final class ServerMethods {
         }, "给予物品", "giveItem", "give_item", "给物品");
     }
 
-    // ========== Screen（页面状态） ==========
+    // Screen（页面状态）
 
     private static void registerScreen() {
         NamespaceRegistry.register("Screen", args -> {
@@ -438,8 +449,8 @@ public final class ServerMethods {
         }, "更新状态", "setState", "set_state", "更新变量", "setVar", "set_var");
         NamespaceRegistry.register("Screen", args -> {
             // Screen.设置变量(名, 值[, 玩家?])
-            // - 写回服务端页面变量（下次触发器 vars.* 读到最新值，如 showreel 的 ready 自增）
-            // - 第三参指定玩家 → 只给该玩家发状态补丁；
+            // 写回服务端页面变量（下次触发器 vars.* 读到最新值，如 showreel 的 ready 自增）
+            // 第三参指定玩家 → 只给该玩家发状态补丁；
             //   无玩家上下文（tick 触发器）→ 广播给所有已打开界面的玩家（各自应用到当前页面）
             if (args.length < 2 || args[0] == null) {
                 return false;
@@ -509,7 +520,7 @@ public final class ServerMethods {
             double z = num(args[4]);
             Object raw = element.props().get("hologram");
             java.util.Map<Object, Object> holo = new java.util.LinkedHashMap<>(
-                    raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Map.of());
+                    raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Collections.emptyMap());
             holo.put("x", x);
             holo.put("y", y);
             holo.put("z", z);
@@ -749,7 +760,7 @@ public final class ServerMethods {
         });
     }
 
-    // ========== Sound（给指定玩家播音效） ==========
+    // Sound（给指定玩家播音效）
 
     private static void registerSound() {
         NamespaceRegistry.register("Sound", args -> {
@@ -764,7 +775,31 @@ public final class ServerMethods {
         }, "播放音效", "playSound", "play_sound", "播放", "play");
     }
 
-    // ========== Economy（记分板经济，脚本可读写） ==========
+    /** SoundAPI（视觉规则库音效）：触发客户端按 Sounds 规则播放。 */
+    private static void registerVisualSoundApi() {
+        // SoundAPI.播放(玩家, "音效键"[, 音量, 音调]) —— 播放视觉规则库里的音效
+        NamespaceRegistry.register("SoundAPI", args -> {
+            Player p = player(args.length > 1 ? new Object[]{args[1]} : new Object[0]);
+            if (p == null || args.length < 2 || args[1] == null) {
+                return false;
+            }
+            Double vol = args.length > 2 && args[2] instanceof Number n ? n.doubleValue() : null;
+            Double pit = args.length > 3 && args[3] instanceof Number n ? n.doubleValue() : null;
+            com.opendreamcore.plugin.server.visual.VisualSoundApi.play(p, String.valueOf(args[1]), vol, pit);
+            return true;
+        }, "播放", "play", "playSound", "play_sound");
+        // SoundAPI.停止(玩家, "音效键") —— 停止循环音效
+        NamespaceRegistry.register("SoundAPI", args -> {
+            Player p = player(args.length > 1 ? new Object[]{args[1]} : new Object[0]);
+            if (p == null || args.length < 2 || args[1] == null) {
+                return false;
+            }
+            com.opendreamcore.plugin.server.visual.VisualSoundApi.stop(p, String.valueOf(args[1]));
+            return true;
+        }, "停止", "stop", "stopSound", "stop_sound");
+    }
+
+    // Economy（记分板经济，脚本可读写）
 
     /** 记分板目标：odc_coin（服务端重启保留）。 */
     public static final String COIN_OBJECTIVE = "odc_coin";
@@ -819,7 +854,7 @@ public final class ServerMethods {
         setCoins(p, coins(p) + delta);
     }
 
-    // ========== Teleport ==========
+    // Teleport
 
     private static void registerTeleport() {
         NamespaceRegistry.register("Teleport", args -> {
@@ -845,7 +880,7 @@ public final class ServerMethods {
         }, "传送到出生点", "toSpawn", "to_spawn");
     }
 
-    // ========== Particle（粒子特效） ==========
+    // Particle（粒子特效）
 
     private static void registerParticle() {
         NamespaceRegistry.register("Particle", args -> {
@@ -871,7 +906,7 @@ public final class ServerMethods {
         }, "播放", "spawn", "播放粒子", "spawnParticle", "spawn_particle");
     }
 
-    // ========== Game（世界控制） ==========
+    // Game（世界控制）
 
     private static void registerGame() {
         NamespaceRegistry.register("Game", args -> {
@@ -917,7 +952,7 @@ public final class ServerMethods {
         }, "设置难度", "setDifficulty", "set_difficulty", "难度");
     }
 
-    // ========== Entity（实体操作） ==========
+    // Entity（实体操作）
 
     private static void registerEntity() {
         NamespaceRegistry.register("Entity", args -> {
@@ -957,7 +992,7 @@ public final class ServerMethods {
         }, "清除附近", "clearNearby", "clear_nearby");
     }
 
-    // ========== Container（容器操作） ==========
+    // Container（容器操作）
 
     private static void registerContainer() {
         NamespaceRegistry.register("Container", args -> {
@@ -980,7 +1015,7 @@ public final class ServerMethods {
                 return "";
             }
             org.bukkit.inventory.ItemStack item = binding.inventory().getItem((int) num(args, 1));
-            return item == null || item.getType().isAir() ? "" : item.getType().getKey().toString();
+            return item == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(item) ? "" : com.opendreamcore.plugin.util.LegacyItemCompat.key(item);
         }, "获取物品", "getItem", "get_item");
         NamespaceRegistry.register("Container", args -> {
             // Container.获取数量(会话id, 槽位) → 数量（空槽 0）
@@ -999,7 +1034,7 @@ public final class ServerMethods {
             }
             int slot = (int) num(args, 1);
             String itemId = args.length > 2 && args[2] != null ? String.valueOf(args[2]) : null;
-            if (itemId == null || itemId.isBlank()) {
+            if (itemId == null || (itemId).trim().isEmpty()) {
                 binding.inventory().setItem(slot, null);
             } else {
                 int count = args.length > 3 ? (int) num(args, 3) : 1;
@@ -1027,17 +1062,17 @@ public final class ServerMethods {
             int slot = (int) num(args, 1);
             int want = args.length > 2 ? (int) num(args, 2) : Integer.MAX_VALUE;
             org.bukkit.inventory.ItemStack from = binding.inventory().getItem(slot);
-            if (from == null || from.getType().isAir() || want <= 0) {
+            if (from == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(from) || want <= 0) {
                 return 0.0;
             }
             int moved = 0;
             var leftover = from.clone();
-            // 1) 堆叠到玩家背包同物品栈
+            // 堆叠到玩家背包同物品栈
             for (var stack : binding.player().getInventory().getStorageContents()) {
                 if (want <= moved || leftover.getAmount() <= 0) {
                     break;
                 }
-                if (stack == null || stack.getType().isAir() || !stack.isSimilar(from)) {
+                if (stack == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(stack) || !stack.isSimilar(from)) {
                     continue;
                 }
                 int room = from.getMaxStackSize() - stack.getAmount();
@@ -1049,11 +1084,11 @@ public final class ServerMethods {
                 leftover.setAmount(leftover.getAmount() - take);
                 moved += take;
             }
-            // 2) 剩余放空槽
+            // 剩余放空槽
             var contents = binding.player().getInventory().getStorageContents();
             for (int i = 0; i < contents.length && want > moved && leftover.getAmount() > 0; i++) {
                 var stack = contents[i];
-                if (stack != null && !stack.getType().isAir()) {
+                if (stack != null && !com.opendreamcore.plugin.util.LegacyItemCompat.isAir(stack)) {
                     continue;
                 }
                 int take = Math.min(from.getMaxStackSize(), Math.min(want - moved, leftover.getAmount()));
@@ -1090,12 +1125,12 @@ public final class ServerMethods {
                 return 0.0;
             }
             org.bukkit.inventory.ItemStack from = inv.getItem(playerSlot);
-            if (from == null || from.getType().isAir() || want <= 0) {
+            if (from == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(from) || want <= 0) {
                 return 0.0;
             }
             org.bukkit.inventory.ItemStack target = binding.inventory().getItem(slot);
             int moved = 0;
-            if (target != null && !target.getType().isAir() && target.isSimilar(from)) {
+            if (target != null && !com.opendreamcore.plugin.util.LegacyItemCompat.isAir(target) && target.isSimilar(from)) {
                 // 目标槽同类栈：堆叠（不足补满）
                 int room = target.getMaxStackSize() - target.getAmount();
                 int take = Math.min(room, Math.min(want, from.getAmount()));
@@ -1104,7 +1139,7 @@ public final class ServerMethods {
                     from.setAmount(from.getAmount() - take);
                     moved = take;
                 }
-            } else if (target == null || target.getType().isAir()) {
+            } else if (target == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(target)) {
                 // 目标槽空：整栈或指定数量放入
                 int take = Math.min(from.getMaxStackSize(), Math.min(want, from.getAmount()));
                 var put = from.clone();
@@ -1179,7 +1214,7 @@ public final class ServerMethods {
         });
     }
 
-    // ========== ChatChannel（聊天通道：chat_display 富文本消息源） ==========
+    // ChatChannel（聊天通道：chat_display 富文本消息源）
 
     private static final java.util.concurrent.atomic.AtomicLong CHAT_IDS = new java.util.concurrent.atomic.AtomicLong();
 
@@ -1239,7 +1274,7 @@ public final class ServerMethods {
                 return;
             }
             java.util.List<Player> recipients = target != null
-                    ? java.util.List.of(target)
+                    ? java.util.Arrays.asList(target)
                     : new java.util.ArrayList<>(org.bukkit.Bukkit.getOnlinePlayers());
             for (Player recipient : recipients) {
                 // 按接收者上下文解析 {player.name} / {system.online} 等占位符
@@ -1250,7 +1285,7 @@ public final class ServerMethods {
         });
     }
 
-    // ========== WorldUi（世界 UI：Boss 条 / 名牌 / 物品提示） ==========
+    // WorldUi（世界 UI：Boss 条 / 名牌 / 物品提示）
 
     private static void registerWorldUi() {
         NamespaceRegistry.register("BossBar", args -> {
@@ -1333,7 +1368,7 @@ public final class ServerMethods {
             return null;
         }
         String name = String.valueOf(args[index]);
-        return name.isBlank() ? null : Bukkit.getPlayerExact(name);
+        return (name).trim().isEmpty() ? null : Bukkit.getPlayerExact(name);
     }
 
     private static void sendBossBar(com.opendreamcore.protocol.message.BossBarSync sync, Player target) {
@@ -1366,7 +1401,7 @@ public final class ServerMethods {
         });
     }
 
-    // ========== Hud（HUD 三型：个人 / 全局常驻 GHUD / 静态广播 HUDStatic） ==========
+    // Hud（HUD 三型：个人 / 全局常驻 GHUD / 静态广播 HUDStatic）
 
     private static void registerHud() {
         NamespaceRegistry.register("Hud", args -> {
@@ -1468,7 +1503,7 @@ public final class ServerMethods {
         });
     }
 
-    // ========== Music（背景音乐：文件在客户端 OpenDreamCore/music 或云端 music/） ==========
+    // Music（背景音乐：文件在客户端 OpenDreamCore/music 或云端 music/）
 
     private static void registerMusic() {
         NamespaceRegistry.register("Music", args -> {
@@ -1553,7 +1588,7 @@ public final class ServerMethods {
         return num(args[index]);
     }
 
-    // ========== DreamCore 兼容方法（菜单.yml 等旧页面直接运行） ==========
+    // DreamCore 兼容方法（菜单.yml 等旧页面直接运行）
 
     /** 注册 DreamCore 兼容的"方法"命名空间。 */
     private static void registerDreamCoreCompat() {

@@ -32,7 +32,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         return scope;
     }
 
-    // ---------- 函数定义 / Lambda ----------
+    // 函数定义 / Lambda
 
     @Override
     public Object visitFunctionDefinitionStatement(DreamLangParser.FunctionDefinitionStatementContext ctx) {
@@ -127,7 +127,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         }
     }
 
-    // ---------- 语句 ----------
+    // 语句
 
     @Override
     public Object visitProgram(DreamLangParser.ProgramContext ctx) {
@@ -173,7 +173,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         return value;
     }
 
-    // ---------- 循环 ----------
+    // 循环
 
     @Override
     public Object visitWhileStatement(DreamLangParser.WhileStatementContext ctx) {
@@ -292,7 +292,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         return v == null ? fallback : String.valueOf(v);
     }
 
-    // ---------- 分层表达式 ----------
+    // 分层表达式
 
     @Override
     public Object visitExpressionBody(DreamLangParser.ExpressionBodyContext ctx) {
@@ -437,7 +437,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         }
     }
 
-    // ---------- primary（原子 + 后缀）----------
+    // primary（原子 + 后缀）
 
     @Override
     public Object visitPrimaryExpression(DreamLangParser.PrimaryExpressionContext ctx) {
@@ -566,7 +566,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         throw new ScriptException("索引访问失败: " + target + "[" + index + "]");
     }
 
-    // ---------- 原子与字面量 ----------
+    // 原子与字面量
 
     @Override
     public Object visitNumberAtom(DreamLangParser.NumberAtomContext ctx) {
@@ -614,7 +614,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         return visit(ctx.expression());
     }
 
-    // ---------- 方法命名空间 ----------
+    // 方法命名空间
 
     /** 方法命名空间对象：方法.xxx(...) → 方法注册表。 */
     private final class MethodNamespace implements Callable {

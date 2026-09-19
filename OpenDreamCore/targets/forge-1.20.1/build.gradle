@@ -137,15 +137,16 @@ tasks.named('processResources') {
 // build 完自动复制 jar 到 ../../../output（-shadow 重映射产物改名为正式名）
 tasks.register('collectOutput') {
     group = 'build'
-    description = 'Copy built jar to ../../../output'
+    description = 'Copy built jar to ../../../output/client'
     doLast {
-        def out = file('../../../output')
+        def out = file('../../../output/client')
         out.mkdirs()
         // 只收集当前版本的产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
         file('build/libs').listFiles()?.each { f ->
             if (f.name.endsWith('.jar') && f.name.contains('-shadow') && f.name.contains("-${mod_version}-")) {
                 def destName = f.name.replace('-shadow', '')
                 copy { from f; into out }
+                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
                 def dest = new File(out, destName)
                 dest.delete()
                 new File(out, f.name).renameTo(dest)
@@ -158,7 +159,14 @@ tasks.register('collectOutput') {
                 delete f
                 println "removed stale ${f.name}"
             }
+        }        // all 里也同步清掉非当前版本的残留，避免拿到陈旧 jar
+        file(out.parentFile.path + "/all").listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar")) {
+                delete f
+            }
         }
+
     }
 }
 tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }

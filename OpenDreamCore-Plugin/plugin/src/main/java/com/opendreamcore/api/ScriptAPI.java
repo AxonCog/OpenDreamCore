@@ -32,9 +32,9 @@ public final class ScriptAPI {
 
     /**
      * 注册脚本方法。
-     * @param namespace 命名空间（如 "Shop"、"Teleport"）
-     * @param method 方法名（如 "购买"、"buy"）
-     * @param handler 处理器，args 为脚本传入的已求值参数
+     * namespace：命名空间（如 "Shop"、"Teleport"）
+     * method：方法名（如 "购买"、"buy"）
+     * handler：处理器，args 为脚本传入的已求值参数
      */
     public static void register(String namespace, String method, NamespaceRegistry.Handler handler) {
         NamespaceRegistry.register(namespace, method, handler);

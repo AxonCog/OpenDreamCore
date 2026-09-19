@@ -47,12 +47,25 @@ public final class FabricPackInjector implements ResourcePackInjector {
                     PackType.CLIENT_RESOURCES,
                     new PackSelectionConfig(true, Pack.Position.TOP, false));
 
-            // vanilla：sources 在构造时固定 → 反射追加我们的 RepositorySource
-            var sourcesField = PackRepository.class.getDeclaredField("sources");
+            // vanilla 的 sources 构造时就固定了，只能反射塞 finder。
+            // 别按 "sources" 查字段——线上环境是混淆名/intermediary 名，必炸；
+            // 全类唯一的 Set 字段就是它（available 是 Map、selected 是 List），按类型扫最稳。
+            // 字段实际类型各版本有出入，一律按 Collection 接，别强转 List（26.x 就是这么栽的）。
+            java.lang.reflect.Field sourcesField = null;
+            int setFields = 0;
+            for (var f : PackRepository.class.getDeclaredFields()) {
+                if (java.util.Set.class.isAssignableFrom(f.getType())) {
+                    sourcesField = f;
+                    setFields++;
+                }
+            }
+            if (setFields != 1) {
+                throw new NoSuchFieldException("PackRepository 应该只有一个 Set 字段，扫到 " + setFields);
+            }
             sourcesField.setAccessible(true);
             @SuppressWarnings("unchecked")
-            java.util.List<net.minecraft.server.packs.repository.RepositorySource> sources =
-                    (java.util.List<net.minecraft.server.packs.repository.RepositorySource>) sourcesField.get(repo);
+            java.util.Collection<net.minecraft.server.packs.repository.RepositorySource> sources =
+                    (java.util.Collection<net.minecraft.server.packs.repository.RepositorySource>) sourcesField.get(repo);
             sources.add(consumer -> consumer.accept(pack));
             repo.reload();
 

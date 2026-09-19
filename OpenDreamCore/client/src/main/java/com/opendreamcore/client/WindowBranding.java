@@ -10,9 +10,9 @@ import java.nio.file.Path;
 
 /**
  * 窗口 Branding：OpenDreamCore/branding/ 下的标题与图标覆盖游戏窗口。
- * - title.txt    → 窗口标题（纯文本，首行有效，自动去空白）
- * - title.json   → 打字机/轮播标题（优先于 txt；TypewriterSequencer 时序，tick() 驱动）
- * - icon.png     → 窗口图标（任意尺寸，系统缩放）
+ * title.txt    → 窗口标题（纯文本，首行有效，自动去空白）
+ * title.json   → 打字机/轮播标题（优先于 txt；TypewriterSequencer 时序，tick() 驱动）
+ * icon.png     → 窗口图标（任意尺寸，系统缩放）
  * 随 /odc reload 或启动时应用；文件缺失则保持原样。
  */
 public final class WindowBranding {
@@ -26,6 +26,11 @@ public final class WindowBranding {
     private static volatile String lastAppliedTitle;
     /** 服务端覆盖中的静态标题（SET_STATIC；时序器模式由 sequencer 驱动，此字段为空）。 */
     private static volatile String serverTitle;
+    /**
+     * 本地应有的标题（打字机定格末句 / title.txt 静态行）。
+     * tick() 每 tick 无条件重写靠它顶回原版自设的窗口标题（原版每帧重设 → 只改一次必被盖掉）。
+     */
+    private static volatile String localTitle;
     /** 服务端覆盖中（DreamCore serverTitleOverride 语义）：本地 title.txt/title.json 序列静默。 */
     private static volatile boolean serverOverride;
 
@@ -83,6 +88,36 @@ public final class WindowBranding {
                 .resolve("OpenDreamCore").resolve("branding");
     }
 
+    /**
+     * 首启自动生成默认打字机标题：
+     * branding/title.json 缺失时写出"欢迎来到梦想小屋！"的打字机配置——
+     * 玩家装好模组进单机的第一眼就有仪式感；服主想换自行改文件即可。
+     * 只在 title.json 与 title.txt 都不存在时生成，绝不覆盖用户内容。
+     */
+    public static void ensureDefaultTitle() {
+        try {
+            Path dir = brandingDir();
+            if (Files.isDirectory(dir)
+                    && (Files.isRegularFile(dir.resolve("title.json"))
+                        || Files.isRegularFile(dir.resolve("title.txt")))) {
+                return;
+            }
+            Files.createDirectories(dir);
+            String json = """
+                    {
+                      "text": "欢迎来到梦想小屋！",
+                      "typewriter": true,
+                      "speed": 120,
+                      "holdMs": 3000,
+                      "loop": false
+                    }
+                    """;
+            Files.writeString(dir.resolve("title.json"), json);
+        } catch (Exception ignored) {
+            // 默认标题是锦上添花：任何失败都静默，不影响启动
+        }
+    }
+
     /** 应用 branding（无文件时静默跳过；仅主线程 GL 上下文有效时执行，仅执行一次）。 */
     private static volatile boolean applied;
 
@@ -98,6 +133,7 @@ public final class WindowBranding {
         if (!isMainThread() || !glContextReady(mc)) {
             return;
         }
+        ensureDefaultTitle();
         Path dir = brandingDir();
         if (!Files.isDirectory(dir)) {
             return;
@@ -113,6 +149,7 @@ public final class WindowBranding {
     /** 强制重刷（/odc reload 后）：无论单次标记均重试，成功后再次进入单次语义。 */
     public static void reload() {
         sequencer = null; // title.json 重新加载（打字机从头开始）
+        localTitle = null;
         lastAppliedTitle = null;
         var mc = Minecraft.getInstance();
         if (mc == null || mc.gameDirectory == null || mc.getWindow() == null) {
@@ -135,7 +172,7 @@ public final class WindowBranding {
 
     private static boolean isMainThread() {
         try {
-            return Minecraft.getInstance().isSameThread();
+            return com.opendreamcore.client.CompatRender.isRenderThread();
         } catch (Throwable ignored) {
             return true;
         }
@@ -157,6 +194,7 @@ public final class WindowBranding {
             com.opendreamcore.branding.TitleConfig cfg = com.opendreamcore.branding.TitleConfig.load(json);
             if (cfg != null && !cfg.sequence().isEmpty()) {
                 sequencer = new com.opendreamcore.branding.TypewriterSequencer(cfg);
+                localTitle = null;
                 lastAppliedTitle = null;
                 tick();
                 return true;
@@ -169,7 +207,10 @@ public final class WindowBranding {
         try {
             String text = Files.readString(title, StandardCharsets.UTF_8).trim();
             if (!text.isEmpty()) {
-                Minecraft.getInstance().getWindow().setTitle(text);
+                // 记进 localTitle：tick() 每帧顶回靠它，否则写一次就被原版盖掉
+                localTitle = text;
+                lastAppliedTitle = null;
+                setWindowTitleIfChanged(text);
                 return true;
             }
         } catch (IOException ignored) {
@@ -204,13 +245,23 @@ public final class WindowBranding {
         }
         var seq = sequencer;
         if (seq == null) {
+            // 本地静态/定格标题：原版每帧自设窗口标题会顶掉我们写的那一次，
+            // 故同样每 tick 无条件重写（旧逻辑 sequencer==null 直接 return → 只改第一次）。
+            String t = localTitle;
+            if (t != null) {
+                lastAppliedTitle = null;
+                setWindowTitleIfChanged(t);
+            }
             return;
         }
         try {
             String s = seq.tick(System.currentTimeMillis());
+            // 每 tick 无条件重写：原版/其他 mod 会随时覆盖窗口标题，去重会导致覆盖后不再恢复
+            lastAppliedTitle = null;
             setWindowTitleIfChanged(s);
             if (seq.isFinished(System.currentTimeMillis())) {
-                sequencer = null; // 定格完毕，停止 tick 开销
+                localTitle = s; // 定格末句存进 localTitle，后续 tick 继续顶回
+                sequencer = null; // 打字机不再推进，停止序列开销（重写由 localTitle 分支承担）
             }
         } catch (Throwable ignored) {
             sequencer = null;

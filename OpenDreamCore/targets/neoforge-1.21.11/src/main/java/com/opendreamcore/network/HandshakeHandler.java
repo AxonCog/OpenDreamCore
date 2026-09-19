@@ -19,6 +19,7 @@ import com.opendreamcore.protocol.message.ReadyAck;
 import com.opendreamcore.protocol.message.StatePatch;
 import com.opendreamcore.protocol.message.TooltipRegistry;
 import com.opendreamcore.protocol.message.UiEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
@@ -30,6 +31,73 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 public final class HandshakeHandler {
 
     private static final int CAPABILITIES = Protocol.CAPABILITY_LOCAL_UI | Protocol.CAPABILITY_CLOUD;
+
+    /**
+     * 分片凑齐后的换名路由表：chunk 帧头里带的业务通道名 → 对应的处理方法。
+     * 收包进口先查这张表，命中就直送，没命中当普通包放着不管。
+     */
+    private static final java.util.Map<String, java.util.function.BiConsumer<RawPayload, IPayloadContext>> CHUNK_ROUTES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    static {
+        CHUNK_ROUTES.put(Protocol.READY_ACK, HandshakeHandler::handleReadyAck);
+        CHUNK_ROUTES.put(Protocol.PAGE_CONTROL, HandshakeHandler::handlePageControl);
+        CHUNK_ROUTES.put(Protocol.PAGE_SYNC, HandshakeHandler::handlePageSync);
+        CHUNK_ROUTES.put(Protocol.VISUAL_RULES, HandshakeHandler::handleVisualRules);
+        CHUNK_ROUTES.put(Protocol.CLOUD_MANIFEST, HandshakeHandler::handleCloudManifest);
+        CHUNK_ROUTES.put(Protocol.CLOUD_FILE, HandshakeHandler::handleCloudFile);
+        CHUNK_ROUTES.put(Protocol.CLOUD_DELETE, HandshakeHandler::handleCloudDelete);
+        CHUNK_ROUTES.put(Protocol.CLOUD_DONE, HandshakeHandler::handleCloudDone);
+        CHUNK_ROUTES.put(Protocol.STATE_PATCH, HandshakeHandler::handleStatePatch);
+        CHUNK_ROUTES.put(Protocol.TOOLTIP_REGISTRY, HandshakeHandler::handleTooltipRegistry);
+        CHUNK_ROUTES.put(Protocol.GLOBAL_STATE, HandshakeHandler::handleGlobalState);
+        CHUNK_ROUTES.put(Protocol.PAGE_LAYOUT, HandshakeHandler::handlePageLayout);
+        CHUNK_ROUTES.put(Protocol.CONTAINER_SYNC, HandshakeHandler::handleContainerSync);
+        CHUNK_ROUTES.put(Protocol.CHAT_MESSAGE, HandshakeHandler::handleChatMessage);
+        CHUNK_ROUTES.put(Protocol.UI_EFFECT, HandshakeHandler::handleUiEffect);
+        CHUNK_ROUTES.put(Protocol.BOSS_BAR, HandshakeHandler::handleBossBar);
+        CHUNK_ROUTES.put(Protocol.NAME_TAG, HandshakeHandler::handleNameTag);
+        CHUNK_ROUTES.put(Protocol.ITEM_TIP, HandshakeHandler::handleItemTip);
+        CHUNK_ROUTES.put(Protocol.HUD_SYNC, HandshakeHandler::handleHudSync);
+        CHUNK_ROUTES.put(Protocol.MUSIC, HandshakeHandler::handleMusicSync);
+        CHUNK_ROUTES.put(Protocol.CONFIG_PUSH, HandshakeHandler::handleConfigPush);
+        CHUNK_ROUTES.put(Protocol.UI_ANIMATION, HandshakeHandler::handleUiAnimation);
+        CHUNK_ROUTES.put(Protocol.WORLD_TAB, HandshakeHandler::handleWorldTab);
+        CHUNK_ROUTES.put(Protocol.WORLD_ELEMENT_STATE, HandshakeHandler::handleWorldElementState);
+        CHUNK_ROUTES.put(Protocol.WINDOW_TITLE, HandshakeHandler::handleWindowTitle);
+        CHUNK_ROUTES.put(Protocol.EDITOR_WORLD_ACK, HandshakeHandler::handleWorldSaveAck);
+        CHUNK_ROUTES.put(Protocol.EDITOR_LEASE, HandshakeHandler::handleLease);
+        CHUNK_ROUTES.put(Protocol.CUSTOM_PACKET, HandshakeHandler::handleCustomPacket);
+    }
+
+    /** chunk 通道收包进口：解帧、凑包，凑齐换回真实通道名，照表直送。 */
+    public static void handleChunk(RawPayload payload, IPayloadContext context) {
+        com.opendreamcore.protocol.LegacyFraming.Frame frame =
+                com.opendreamcore.protocol.LegacyFraming.parse(payload.bytes());
+        if (frame == null) {
+            OpenDreamCore.LOGGER.warn("收到一帧读不懂的分片包，丢弃（{} 字节）", payload.bytes() == null ? 0 : payload.bytes().length);
+            return;
+        }
+        byte[] assembled = INBOX.offer(frame);
+        if (assembled == null) {
+            // 分片还没凑齐，等下一帧
+            return;
+        }
+        var route = CHUNK_ROUTES.get(frame.path);
+        if (route == null) {
+            OpenDreamCore.LOGGER.warn("分片拼出的通道没人接：{}", frame.path);
+            return;
+        }
+        route.accept(RawPayload.received(typeForPath(frame.path), assembled), context);
+    }
+
+    /** chunk 通道的重组信箱：凑包在哪个线程发生都行，信箱自己管并发。 */
+    private static final com.opendreamcore.protocol.LegacyFraming.Assembler INBOX =
+            new com.opendreamcore.protocol.LegacyFraming.Assembler();
+
+    private static CustomPacketPayload.Type<RawPayload> typeForPath(String path) {
+        return UiChannel.typeFor(path);
+    }
 
     private HandshakeHandler() {
     }
@@ -66,6 +134,19 @@ public final class HandshakeHandler {
                 ClientController.get().storeServerPage(sync);
             } catch (Exception e) {
                 OpenDreamCore.LOGGER.warn("page_sync 解析失败: {}", e.toString());
+            }
+        });
+    }
+
+    /** 客户端侧：收到服务端 visual_rules（视觉规则 YAML 入库）。 */
+    public static void handleVisualRules(RawPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            try {
+                com.opendreamcore.protocol.message.VisualRulesSync sync =
+                        com.opendreamcore.protocol.message.VisualRulesSync.decode(reader(payload));
+                ClientController.get().handleVisualRules(sync);
+            } catch (Exception e) {
+                OpenDreamCore.LOGGER.warn("visual_rules 解析失败: {}", e.toString());
             }
         });
     }

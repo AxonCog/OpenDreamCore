@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -27,7 +29,7 @@ public final class TooltipRegistry implements Message {
     private final List<Entry> entries;
 
     public TooltipRegistry(List<Entry> entries) {
-        this.entries = entries == null ? new ArrayList<>() : List.copyOf(entries);
+        this.entries = entries == null ? new ArrayList<>() : J8.listCopy(entries);
     }
 
     public List<Entry> entries() {

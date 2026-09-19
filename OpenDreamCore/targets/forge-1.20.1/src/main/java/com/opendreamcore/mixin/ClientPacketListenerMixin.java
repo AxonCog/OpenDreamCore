@@ -1,5 +1,6 @@
 package com.opendreamcore.mixin;
 
+import com.opendreamcore.client.ClientController;
 import com.opendreamcore.network.ForgeChannel;
 import com.opendreamcore.protocol.Protocol;
 import net.minecraft.client.Minecraft;
@@ -27,12 +28,18 @@ public abstract class ClientPacketListenerMixin {
         if (id == null || !Protocol.NAMESPACE.equals(id.getNamespace())) {
             return;
         }
-        // 缓冲必须在网络线程同步读完，处理丢到客户端主线程（与 fabric 壳同策略）
+        // 缓冲必须在网络线程同步读完，处理丢到客户端主线程（与 fabric 壳同策略）。
+        // 进主线程前先过分片分拣：chunk 通道的帧凑齐后换回真实通道名，普通包原样放行。
         FriendlyByteBuf data = packet.getData();
         byte[] bytes = new byte[data.readableBytes()];
         data.readBytes(bytes);
         String path = id.getPath();
-        Minecraft.getInstance().execute(() -> ForgeChannel.dispatch(path, bytes));
+        Minecraft.getInstance().execute(() -> {
+            ClientController.ChunkResult routed = ClientController.get().routeInbound(path, bytes);
+            if (routed != null) {
+                ForgeChannel.dispatch(routed.path(), routed.payload());
+            }
+        });
         ci.cancel();
     }
 }

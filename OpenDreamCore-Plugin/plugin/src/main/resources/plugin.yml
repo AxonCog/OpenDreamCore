@@ -11,5 +11,10 @@ commands:
   odc:
     description: OpenDreamCore 页面管理
     usage: /odc open <页面id> | close | list | reload
-    permission: opendreamcore.admin
-    permission-message: 你没有权限使用 OpenDreamCore 命令
+# 命令不设 permission 门：Paper 聊天命令走 brigadier，未定义权限节点会让命令对非 op
+# 直接变"未知或不完整命令"（实测 ops.json 空 + 无 permissions 段时 /odc 就这毛病）。
+# 权限在 OdcCommand.onCommand 里自查（console/op/或持 opendreamcore.admin 放行）。
+permissions:
+  opendreamcore.admin:
+    description: OpenDreamCore 管理命令权限
+    default: op

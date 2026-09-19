@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -12,7 +14,7 @@ public final class CloudFile implements Message {
     private final byte[] encrypted;
 
     public CloudFile(String path, byte[] encrypted) {
-        if (path == null || path.isBlank() || path.length() > 256) {
+        if (path == null || J8.isBlank(path) || path.length() > 256) {
             throw new IllegalArgumentException("文件路径非法: " + path);
         }
         this.path = path;

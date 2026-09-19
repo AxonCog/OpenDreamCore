@@ -27,11 +27,11 @@ public final class PackAPI {
     /**
      * 向单个玩家推送材质包安装指令。
      *
-     * @param player   目标玩家（需已装 OpenDreamCore 客户端）
-     * @param spec     https url 或服务端本地路径（路径仅对装在同机的玩家有意义；
+     * player：目标玩家（需已装 OpenDreamCore 客户端）
+     * spec：https url 或服务端本地路径（路径仅对装在同机的玩家有意义；
      *                 远程分发一律用 https url）
-     * @param password 加密 zip 密码（可空）
-     * @param top      置顶覆盖
+     * password：加密 zip 密码（可空）
+     * top：置顶覆盖
      */
     public static boolean push(Player player, String spec, String password, boolean top) {
         try {

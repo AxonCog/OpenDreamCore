@@ -11,9 +11,9 @@ import java.io.IOException;
 
 /**
  * TTF 字体封装（纯 Java，零 MC 依赖，可独立单测）：
- * - 从 .ttf 文件加载（Font.createFont，TRUETYPE）
- * - 字形宽度/文本宽度测量（FontMetrics）
- * - 字形渲染到透明 BufferedImage（软件渲染，供客户端图集缓存与染色绘制）
+ * 从 .ttf 文件加载（Font.createFont，TRUETYPE）
+ * 字形宽度/文本宽度测量（FontMetrics）
+ * 字形渲染到透明 BufferedImage（软件渲染，供客户端图集缓存与染色绘制）
  * 内部统一用 64px 渲染源保证字形质量，客户端按目标尺寸缩放绘制。
  */
 public final class TtfFont {

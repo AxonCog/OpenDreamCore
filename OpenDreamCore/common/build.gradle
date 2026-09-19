@@ -13,6 +13,11 @@ java {
     }
 }
 
+// 中文注释与中文字符串是本项目的常态：源码一律按 UTF-8 编译（Windows 默认 GBK 会读坏）
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
 // Windows 中文路径下测试 worker 的 classpath URL 类加载会失败（Gradle 已知问题），
 // 构建产物统一放到用户目录（英文路径），测试与打包都不受影响。
 if (System.getProperty('os.name').toLowerCase().contains('windows')) {

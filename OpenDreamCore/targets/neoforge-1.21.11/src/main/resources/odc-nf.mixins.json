@@ -4,7 +4,14 @@
   "package": "com.opendreamcore.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "MixinNetworkFilters"
+    "MixinNetworkFilters",
+    "MixinItemIcon",
+    "MixinTooltip",
+    "MixinCursor",
+    "MixinArmorLayer",
+    "MixinNameTag",
+    "MixinItemEffect",
+    "MixinGuiText"
   ],
   "injectors": {
     "defaultRequire": 1

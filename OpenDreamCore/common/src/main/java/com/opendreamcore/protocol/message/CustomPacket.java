@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -13,7 +15,7 @@ public final class CustomPacket implements Message {
     private final String payload;
 
     public CustomPacket(String channel, String payload) {
-        if (channel == null || channel.isBlank()) {
+        if (channel == null || J8.isBlank(channel)) {
             throw new IllegalArgumentException("通道名不能为空");
         }
         this.channel = channel;

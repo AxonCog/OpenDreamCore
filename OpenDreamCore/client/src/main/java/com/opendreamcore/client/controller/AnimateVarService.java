@@ -10,8 +10,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 动画变量服务（Var.动画值 / 设置动画值 / 动画到：数值补间每帧写入页面变量）。
  *
- * <p>从 ClientController 抽出的纯补间逻辑；与控制器的交互（当前页/按 id 查页/
- * 立即写变量/屏幕刷新）经 {@link Host} 回调，保持零 MC 依赖可单测。</p>
+ * 从 ClientController 抽出的纯补间逻辑；与控制器的交互（当前页/按 id 查页/
+ * 立即写变量/屏幕刷新）经 Host 回调，保持零 MC 依赖可单测。
  */
 public final class AnimateVarService {
 

@@ -16,6 +16,7 @@ import com.opendreamcore.page.Page;
 import com.opendreamcore.protocol.message.UiEvent;
 import com.opendreamcore.ui.RenderNode;
 import com.opendreamcore.ui.UiSession;
+import com.opendreamcore.ui.Viewport;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -156,7 +157,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         }
     }
 
-    // ---------- UiRenderer.State ----------
+    // UiRenderer.State
 
     @Override
     public String inputText(String id) {
@@ -228,10 +229,12 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         return suggestionCursor.getOrDefault(id, -1);
     }
 
-    // ---------- 渲染 ----------
+    // 渲染
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        com.opendreamcore.client.style.StyleStateService.beginFrame(mouseX, mouseY,
+                net.minecraft.client.Minecraft.getInstance().mouseHandler.isLeftPressed(), focusedId);
         AnimationEngine.get().tick(null, page.options(), page.variables());
         tickFlips();
         // 旧版（DreamCore）Functions.preRender：每帧预绘制脚本（存在才跑；编辑模式跳过）
@@ -300,6 +303,11 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         drawContainerCursor(g, mouseX, mouseY); // 容器槽位拖放：光标物品跟随鼠标
         trackHover(mouseX, mouseY);
         renderTooltip(g, mouseX, mouseY);
+        // 状态覆盖层改了布局属性（x/y/宽高）→ 请求一次重排让覆盖落地
+        // （带冷却防抖；放在帧末，下一帧就是新布局）
+        if (com.opendreamcore.client.style.StyleStateService.get().consumePendingRelayout()) {
+            ClientController.get().refreshCurrent();
+        }
     }
 
     /** 容器光标物品渲染（服务端 container_sync 携带；拾起物品跟随鼠标）。 */
@@ -562,8 +570,10 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             Map<String, double[]> overrides = ClientController.get().elementEdits().forPage(pageId);
             double[] pos = overrides == null ? null : overrides.get(selectedId);
             RenderNode node = findNode(selectedId);
-            double x = pos == null && node != null ? node.x() : pos == null ? 0 : pos[0];
-            double y = pos == null && node != null ? node.y() : pos == null ? 0 : pos[1];
+            // 回退基准用设计坐标（node 是投影后屏幕 rect，反解再用）；输入值也按设计单位理解
+            Viewport vp = Viewport.active();
+            double x = pos == null && node != null ? vp.unlayoutX(node.x()) : pos == null ? 0 : pos[0];
+            double y = pos == null && node != null ? vp.unlayoutY(node.y()) : pos == null ? 0 : pos[1];
             if ("x".equals(editingProp)) {
                 x = value;
             } else {
@@ -831,6 +841,12 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             OdcScreen.this.copySelected();
         }
         @Override public void addElement(String type, double x, double y) {
+            // design 页下拖放落点是屏幕坐标，写进 Layout 前反解回设计坐标（保存/重布才不错位）
+            var vp = com.opendreamcore.ui.Viewport.active();
+            if (!vp.isIdentity()) {
+                x = vp.unlayoutX(x);
+                y = vp.unlayoutY(y);
+            }
             String id = type + "_" + System.currentTimeMillis() % 10000;
             int[] size = defaultSizeFor(type);
             Layout layout = new Layout(String.valueOf((int) x), String.valueOf((int) y),
@@ -968,10 +984,56 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         return offsetY;
     }
 
-    // ---------- 交互 ----------
+    // 交互
+
+    /**
+     * KeyConfig 全局键检测（键盘）：主键名+当前修饰键解析成组合串，
+     * 命中规则就上报服务端执行。OdcScreen 打开时（任何模式）都生效，
+     * 会话缺失（本地预览）静默——与服务端裁决的 KeyConfig 语义一致。
+     * 返回 true = 本帧命中过规则（调用方可选择吞掉按键防重复触发）。
+     */
+    boolean visualKeyHit(int keyCode) {
+        var primaries = com.opendreamcore.client.visual.ClientKeyConfigTrigger
+                .collectPrimaries(com.opendreamcore.client.visual.ClientVisualStore.get()
+                        .rulesOf("KeyConfig"));
+        String hit = com.opendreamcore.client.visual.ClientKeyConfigTrigger.match(
+                primaries, glfwKeyName(keyCode), activeModifierNames());
+        if (hit == null) {
+            return false;
+        }
+        ClientController.get().sendVisualKeyTrigger(session, "keyconfig:" + hit);
+        return true;
+    }
+
+    /** KeyConfig 全局键检测（鼠标）：左/右/中键就是主键，命中即上报。 */
+    boolean visualMouseHit(int button) {
+        String key = switch (button) {
+            case 0 -> "左键";
+            case 1 -> "右键";
+            case 2 -> "中键";
+            default -> null;
+        };
+        if (key == null) {
+            return false;
+        }
+        var primaries = com.opendreamcore.client.visual.ClientKeyConfigTrigger
+                .collectPrimaries(com.opendreamcore.client.visual.ClientVisualStore.get()
+                        .rulesOf("KeyConfig"));
+        String hit = com.opendreamcore.client.visual.ClientKeyConfigTrigger.match(
+                primaries, key, activeModifierNames());
+        if (hit == null) {
+            return false;
+        }
+        ClientController.get().sendVisualKeyTrigger(session, "keyconfig:" + hit);
+        return true;
+    }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // KeyConfig 鼠标组合（编辑模式下也检测——服主可能在编辑页配快捷指令）
+        if (visualMouseHit(button)) {
+            return editMode && !previewMode; // 编辑模式吞事件，普通模式放行后续元素点击
+        }
         if (editMode && !previewMode) {
             // 专业面板优先处理点击
             if (editorPanels != null && editorPanels.mouseClicked(mouseX, mouseY, button)) {
@@ -986,14 +1048,16 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             RenderNode hit = hit(mouseX, mouseY);
             selectedId = hit == null ? null : hit.id();
             editingProp = null;
-            // 按住元素即武装拖拽：移动鼠标 → 相对起点拖动（松手结束）
-            // 修复：旧实现按事件增量累加（target.x()+dragX），且按住空白处也会拖动已选中元素
+            // 按住元素即武装拖拽：移动鼠标 → 相对起点拖动（松手结束）。
+            // 坐标系修复：hit 节点是投影后屏幕 rect，拖拽存的是设计 override——
+            // 起点用 active 视口反解回设计坐标，位移按屏幕像素差 /s 换算（IDENTITY 下两者退化照旧）。
             if (hit != null && button == 0) {
+                Viewport vp = Viewport.active();
                 editDragArmed = true;
                 editDragPressX = mouseX;
                 editDragPressY = mouseY;
-                editDragOriginX = hit.x();
-                editDragOriginY = hit.y();
+                editDragOriginX = vp.unlayoutX(hit.x());
+                editDragOriginY = vp.unlayoutY(hit.y());
             } else {
                 editDragArmed = false;
             }
@@ -1026,8 +1090,9 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             runtimeDragMode = dm;
             runtimeDragPressX = mouseX;
             runtimeDragPressY = mouseY;
-            runtimeDragOriginX = hit.x();
-            runtimeDragOriginY = hit.y();
+            // 存层是设计坐标：起点反解（dragged 分支里同口径 /s）
+            runtimeDragOriginX = Viewport.active().unlayoutX(hit.x());
+            runtimeDragOriginY = Viewport.active().unlayoutY(hit.y());
             return true;
         }
         // 涟漪点击波纹（元素 ripple 属性）
@@ -1057,6 +1122,14 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
                 draggingId = hit.id();
                 updateArcSlider(hit, mouseX, mouseY);
                 send(hit, UiEvent.Trigger.PRESS, null);
+            }
+            case "entity", "model" -> {
+                // 实体组件点击：走统一事件管线（Functions.onClick / 上报服务端）
+                send(hit, UiEvent.Trigger.CLICK, null);
+            }
+            case "item_model", "item_3d" -> {
+                // 物品模型点击：同一套事件管线
+                send(hit, UiEvent.Trigger.CLICK, null);
             }
             case "toggle" -> {
                 boolean next = !Boolean.TRUE.equals(toggleValue.get(hit.id()));
@@ -1240,8 +1313,10 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             editorPanels.mouseDragged(mouseX, mouseY);
         }
         if (runtimeDragId != null) {
-            double nx = runtimeDragOriginX + (mouseX - runtimeDragPressX);
-            double ny = runtimeDragOriginY + (mouseY - runtimeDragPressY);
+            // 同 editDrag：屏幕位移 /s 才是设计位移（IDENTITY 下 s=1 照旧）
+            double inv = 1.0 / Viewport.active().scale();
+            double nx = runtimeDragOriginX + (mouseX - runtimeDragPressX) * inv;
+            double ny = runtimeDragOriginY + (mouseY - runtimeDragPressY) * inv;
             double cx = runtimeDragOriginX;
             double cy = runtimeDragOriginY;
             if (runtimeDragMode.contains("x") || runtimeDragMode.equals("both") || runtimeDragMode.equals("free")) {
@@ -1256,11 +1331,12 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             return true;
         }
         if (editMode && editDragArmed && selectedId != null) {
-            // 编辑拖动：起点元素位置 + 鼠标相对位移（与 HUD/世界编辑器同一手势语义）
+            // 编辑拖动：起点（设计坐标）+ 鼠标相对位移折算设计位移（与 HUD/世界编辑器同一手势语义）
             String pageId = page.id() == null ? "page" : page.id();
+            double inv = 1.0 / Viewport.active().scale();
             ClientController.get().elementEdits().set(pageId, selectedId,
-                    editDragOriginX + (mouseX - editDragPressX),
-                    editDragOriginY + (mouseY - editDragPressY));
+                    editDragOriginX + (mouseX - editDragPressX) * inv,
+                    editDragOriginY + (mouseY - editDragPressY) * inv);
             ClientController.get().refreshCurrent();
             return true;
         }
@@ -1445,6 +1521,59 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         return false;
     }
 
+    /** 当前激活的修饰键名集合（C/CTRL/SHIFT…归一形态）。 */
+    static java.util.Set<String> activeModifierNames() {
+        // 归一化：同一修饰键的多种写法都放进激活集合（规则里写 C 或 CTRL 都能命中）
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (Screen.hasControlDown()) {
+            out.add("CTRL");
+            out.add("C");
+            out.add("LEFT_CTRL");
+            out.add("CONTROL");
+        }
+        if (Screen.hasShiftDown()) {
+            out.add("SHIFT");
+            out.add("LEFT_SHIFT");
+            out.add("RIGHT_SHIFT");
+        }
+        if (Screen.hasAltDown()) {
+            out.add("ALT");
+            out.add("LEFT_ALT");
+            out.add("RIGHT_ALT");
+        }
+        return out;
+    }
+
+    /** GLFW 键码 → 可读键名（R/1/F5/LEFT_SHIFT…）；未知回退数字串。 */
+    static String glfwKeyName(int keyCode) {
+        if (keyCode >= 'A' && keyCode <= 'Z') {
+            return String.valueOf((char) keyCode);
+        }
+        if (keyCode >= '0' && keyCode <= '9') {
+            return String.valueOf((char) keyCode);
+        }
+        switch (keyCode) {
+            case 340: return "LEFT_SHIFT";
+            case 341: return "LEFT_CONTROL";
+            case 342: return "LEFT_ALT";
+            case 344: return "RIGHT_SHIFT";
+            case 345: return "RIGHT_CONTROL";
+            case 346: return "RIGHT_ALT";
+            default:
+                if (keyCode >= 290 && keyCode <= 301) {   // F1..F12
+                    return "F" + (keyCode - 289);
+                }
+                if (keyCode == 32) { return "SPACE"; }
+                if (keyCode == 257) { return "ENTER"; }
+                if (keyCode == 256) { return "ESCAPE"; }
+                if (keyCode == 259) { return "BACKSPACE"; }
+                if (keyCode == 262 || keyCode == 263 || keyCode == 264 || keyCode == 265) {
+                    return "ARROW";
+                }
+                return "KEY_" + keyCode;
+        }
+    }
+
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // 旧版（DreamCore）Functions.keyPress：写入键名上下文（E/ESCAPE…）并触发（存在才跑）
@@ -1452,6 +1581,14 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
             LegacyClientHost.setPressedKey(LegacyClientHost.keyName(keyCode, scanCode));
             ClientController.get().runLifecycle(page, "keyPress");
             LegacyClientHost.setPressedKey("");
+        }
+        // KeyConfig 全局键：OdcScreen 打开时（编辑/预览/普通一律）都检测——
+        // 这就是服主在编辑器里配组合键也能用、游戏页面里直接按也生效的那条路
+        visualKeyHit(keyCode);
+        if (keyCode == 82 && (modifiers & 2) != 0) { // Ctrl+R 只刷材质包（页面/规则用 /codc reload）
+            // 页面/字体/视觉规则用 /codc reload；Ctrl+R 只管材质包
+            ClientController.get().reloadResources();
+            return true;
         }
         if (keyCode == 256) { // ESC
             if (editMode) {
@@ -1510,6 +1647,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
                 }
             }
             // 专业面板优先处理键盘
+            // （KeyConfig 全局键已在 keyPressed 入口统一检测，这里不再重复）
             if (editorPanels != null && editorPanels.keyPressed(keyCode, modifiers)) {
                 return true;
             }
@@ -1762,7 +1900,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
-    // ---------- 焦点路由 ----------
+    // 焦点路由
 
     /** 可聚焦组件类型。 */
     private static final java.util.Set<String> FOCUSABLE =

@@ -5,6 +5,7 @@ import com.opendreamcore.client.ClientController;
 import com.opendreamcore.protocol.OdcByteArrayBuf;
 import com.opendreamcore.protocol.OdcByteBuf;
 import com.opendreamcore.protocol.Protocol;
+import net.fabricmc.fabric.impl.networking.RegistrationPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.network.FriendlyByteBuf;
@@ -76,9 +77,9 @@ public final class FabricChannel {
     /** 客户端侧：注册全部通道的 codec + 接收 handler。 */
     public static void registerClient() {
         // 全部 opendreamcore:* 通道按协议常量双向注册 codec：
-        // - 发送方向漏注册会在编码期落入 vanilla DiscardedPayload 兜底 → ClassCastException 断连
+        // 发送方向漏注册会在编码期落入 vanilla DiscardedPayload 兜底 → ClassCastException 断连
         //   （page_close / editor_world 曾因此断连）
-        // - 接收方向未挂 handler 的通道收到后静默忽略，多注册无害；
+        // 接收方向未挂 handler 的通道收到后静默忽略，多注册无害；
         //   新增通道只需在 Protocol 里加常量，无需再维护这份清单
         for (java.lang.reflect.Field f : Protocol.class.getDeclaredFields()) {
             if (f.getType() != String.class
@@ -107,6 +108,9 @@ public final class FabricChannel {
             var sync = com.opendreamcore.protocol.message.PageSync.decode(reader(data));
             ClientController.get().storeServerPage(sync);
         });
+        register(Protocol.VISUAL_RULES, data ->
+                ClientController.get().handleVisualRules(
+                        com.opendreamcore.protocol.message.VisualRulesSync.decode(reader(data))));
         register(Protocol.CLOUD_MANIFEST, data ->
                 ClientController.get().cloud().handleManifest(
                         com.opendreamcore.protocol.message.CloudManifest.decode(reader(data))));
@@ -180,14 +184,29 @@ public final class FabricChannel {
         register(Protocol.WINDOW_TITLE, data ->
                 ClientController.get().handleWindowTitle(
                         com.opendreamcore.protocol.message.WindowTitlePush.decode(reader(data))));
+        // 分片通道：凑包与换名路由都在 register 的进口逻辑里，这里挂个位子让接收器注册上
+        register(Protocol.CHUNK, data -> { });
     }
 
-    /** 注册一个接收通道：处理丢到渲染线程。 */
+    /** 通道名 → 处理人。分片凑齐换回真实通道名后，得靠这张表找对真正的处理人。 */
+    private static final java.util.Map<String, java.util.function.Consumer<byte[]>> HANDLERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 注册一个接收通道：处理丢到渲染线程，进口先过分片分拣。 */
     private static void register(String path, java.util.function.Consumer<byte[]> handler) {
+        HANDLERS.put(path, handler);
         ClientPlayNetworking.registerGlobalReceiver(typeFor(path), (payload, ctx) ->
                 ctx.client().execute(() -> {
                     try {
-                        handler.accept(payload.bytes());
+                        ClientController.ChunkResult routed = ClientController.get().routeInbound(path, payload.bytes());
+                        if (routed == null) {
+                            // 分片还没凑齐，等下一帧；坏帧则已被丢弃
+                            return;
+                        }
+                        java.util.function.Consumer<byte[]> real = HANDLERS.get(routed.path());
+                        if (real != null) {
+                            real.accept(routed.payload());
+                        }
                     } catch (Exception e) {
                         LOGGER.warn("通道处理失败 {}: {}", path, e.toString());
                     }
@@ -200,17 +219,29 @@ public final class FabricChannel {
 
     /** 发送协议消息（ClientController.UiSender 实现）。 */
     public static void send(String channelPath, byte[] bytes) {
-        // minecraft:register 保留通道：fabric 注册表不收 minecraft 命名空间，
-        // 走原版直发（vanilla 对未知 ID 写 id+原始字节，Paper messenger 可收）
+        // 用 fabric 自己的 RegistrationPayload（impl 包，record 构造器 public）：
+        // 其记录体 = 各通道 toString 的 ASCII 字节、非首个前缀 0x00 分隔。
+        // 走 ClientPlayNetworking.send 时，fabric 的 payload mixin 会按类型取
+        // RegistrationPayload.REGISTER_CODEC 编码，与服务端 receiveRegistration 解析一致；
+        // 自建 mimic（varint 计数 + 标识符列表）字节流不同，服务端解不出通道。
         if (channelPath.equals("minecraft:register")) {
             var mc = net.minecraft.client.Minecraft.getInstance();
             if (mc.getConnection() == null) {
                 return;
             }
-            mc.getConnection().getConnection().send(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
-                    RawPayload.of(typeFor(channelPath), bytes)));
+            java.util.List<Identifier> channels = new java.util.ArrayList<>();
+            for (String c : Protocol.CLIENTBOUND_CHANNELS) {
+                int j = c.indexOf(':');
+                channels.add(j >= 0
+                        ? Identifier.fromNamespaceAndPath(c.substring(0, j), c.substring(j + 1))
+                        : Identifier.fromNamespaceAndPath(Protocol.NAMESPACE, c));
+            }
+            ClientPlayNetworking.send(new RegistrationPayload(
+                    RegistrationPayload.REGISTER, channels));
             return;
         }
-        ClientPlayNetworking.send(RawPayload.of(typeFor(channelPath), bytes));
+        if (net.minecraft.client.Minecraft.getInstance().getConnection() != null) {
+            ClientPlayNetworking.send(RawPayload.of(typeFor(channelPath), bytes));
+        }
     }
 }

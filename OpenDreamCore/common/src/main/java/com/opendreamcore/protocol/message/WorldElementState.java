@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -18,10 +20,10 @@ public final class WorldElementState implements Message {
     private final boolean value;
 
     public WorldElementState(String pageId, String elementId, int mode, boolean value) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
-        if (elementId == null || elementId.isBlank() || elementId.length() > 64) {
+        if (elementId == null || J8.isBlank(elementId) || elementId.length() > 64) {
             throw new IllegalArgumentException("元素 id 非法: " + elementId);
         }
         this.pageId = pageId;

@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -17,7 +19,7 @@ public final class WorldLayout implements Message {
     /** 条目：元素 id + 绝对坐标（hologram.x/y/z）+ 可选属性编辑（点路径 → 字符串值）。 */
     public record Entry(String elementId, double x, double y, double z, Map<String, String> props) {
         public Entry {
-            props = props == null ? Map.of() : Map.copyOf(props);
+            props = props == null ? J8.map() : J8.mapCopy(props);
         }
     }
 
@@ -31,27 +33,27 @@ public final class WorldLayout implements Message {
     private final Map<String, String> variablesProps;
 
     public WorldLayout(String pageId, List<Entry> entries) {
-        this(pageId, entries, Map.of(), null, Map.of());
+        this(pageId, entries, J8.map(), null, J8.map());
     }
 
     public WorldLayout(String pageId, List<Entry> entries, Map<String, String> optionsProps) {
-        this(pageId, entries, optionsProps, null, Map.of());
+        this(pageId, entries, optionsProps, null, J8.map());
     }
 
     public WorldLayout(String pageId, List<Entry> entries, Map<String, String> optionsProps, String pageTitle) {
-        this(pageId, entries, optionsProps, pageTitle, Map.of());
+        this(pageId, entries, optionsProps, pageTitle, J8.map());
     }
 
     public WorldLayout(String pageId, List<Entry> entries, Map<String, String> optionsProps, String pageTitle,
                        Map<String, String> variablesProps) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
         this.pageId = pageId;
-        this.entries = entries == null ? new ArrayList<>() : List.copyOf(entries);
-        this.optionsProps = optionsProps == null ? Map.of() : Map.copyOf(optionsProps);
-        this.pageTitle = pageTitle == null || pageTitle.isBlank() ? null : pageTitle;
-        this.variablesProps = variablesProps == null ? Map.of() : Map.copyOf(variablesProps);
+        this.entries = entries == null ? new ArrayList<>() : J8.listCopy(entries);
+        this.optionsProps = optionsProps == null ? J8.map() : J8.mapCopy(optionsProps);
+        this.pageTitle = pageTitle == null || J8.isBlank(pageTitle) ? null : pageTitle;
+        this.variablesProps = variablesProps == null ? J8.map() : J8.mapCopy(variablesProps);
     }
 
     public String pageId() {

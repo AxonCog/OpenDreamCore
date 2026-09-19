@@ -74,7 +74,10 @@ public final class UiWatcher {
                     continue;
                 }
                 lastFire = now;
-                Bukkit.getScheduler().runTask(plugin, this::reload);
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    reload();
+                    plugin.getLogger().info("文件变化：页面与配置已自动重载");
+                });
             } catch (InterruptedException e) {
                 return;
             } catch (Exception e) {
@@ -83,14 +86,35 @@ public final class UiWatcher {
         }
     }
 
-    /** 主线程：页面+tooltip+type别名 重载，变化页面广播给已握手玩家 */
-    private void reload() {
+    /**
+     * 主线程：全量重载（页面+tooltip+type别名+视觉规则+主题），
+     * 变化广播给已握手玩家。/odc reload 与文件监听共用，语义完全一致。
+     */
+    public void reload() {
         try {
+            // config.yml 也在监听目录里，得一并重读，不然改了 client-title
+            // 这类配置项日志历打“已重载”实际用的还是启动时那份
+            plugin.reloadConfig();
             plugin.pageManager().load();
             plugin.tooltipManager().load();
             plugin.loadTypeAliases();
-            plugin.getLogger().info("文件变化：页面与配置已自动重载");
+            int v = plugin.visualRules().reload();
+            // 资源云重扫：资源文件夹里的文件变了 → 在线玩家全部重新对账
+            plugin.resourcePipeline().configure();
+            plugin.resourcePipeline().reload();
+            // 扩展随视觉规则重载：脚本命名空间与方言适配器清场重登
+            plugin.extensions().loadAll();
+            int t = com.opendreamcore.api.ThemeAPI.get()
+                    .loadFromDir(plugin.getDataFolder().toPath().resolve("themes"));
+            if (v + t > 0) {
+                plugin.getLogger().info("热重载 视觉" + v + " 主题" + t);
+            }
             plugin.networkLayer().broadcastPages();
+            for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                if (plugin.networkLayer().isReady(p)) {
+                    plugin.networkLayer().send(p, com.opendreamcore.protocol.Protocol.VISUAL_RULES, plugin.visualRules().buildSync());
+                }
+            }
         } catch (Exception e) {
             plugin.getLogger().warning("自动重载失败: " + e);
         }

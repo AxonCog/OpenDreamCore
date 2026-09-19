@@ -9,9 +9,9 @@ import java.util.List;
  * chat_display 按片段绘制（一行内多色）。
  *
  * 支持：
- * - 颜色码 §0-9a-f / &0-9a-f（大小写均可）
- * - 格式码 §k(乱码) §l(粗体) §m(删除线) §n(下划线) §o(斜体) §r(重置)
- * - RGB：§x§R§R§G§G§B§B（1.16 传统写法，每个 hex 前一个 §/&）与 &#RRGGBB / &x#RRGGBB
+ * 颜色码 §0-9a-f / &0-9a-f（大小写均可）
+ * 格式码 §k(乱码) §l(粗体) §m(删除线) §n(下划线) §o(斜体) §r(重置)
+ * RGB：§x§R§R§G§G§B§B（1.16 传统写法，每个 hex 前一个 §/&）与 &#RRGGBB / &x#RRGGBB
  * 格式码解析后保留在 Segment 里（当前渲染只取颜色；粗体等留给未来字体渲染）。
  */
 public final class RichText {

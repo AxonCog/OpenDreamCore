@@ -1,0 +1,6 @@
+随便一个名称啦:
+  # 当盔甲的 lore 或 name 或 某个nbt【包含】测试材质  -> 穿在身上的盔甲外壳就会显示为xxx材质
+  match: "阿巴阿巴"
+  # 贴图名称,需要在客户端放置盔甲贴图
+  # DragonCore/armor/你这里填的_layer_1.png和DragonCore/armor/你这里填的_layer_2.png
+  texture: "diamond"

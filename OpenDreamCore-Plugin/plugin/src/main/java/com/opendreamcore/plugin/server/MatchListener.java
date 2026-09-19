@@ -38,7 +38,7 @@ public final class MatchListener implements Listener {
         Player player = event.getPlayer();
         var hudRegistry = plugin.hudRegistry();
 
-        // ---- HUD 下发 ----
+        // HUD 下发
         boolean hudSent = false;
         String saved = hudRegistry.playerHudOf(player);
         if (saved != null) {
@@ -67,7 +67,7 @@ public final class MatchListener implements Listener {
             }
         }
 
-        // ---- World 面板下发（所有 match:world 且 display:world 的页面，可多个） ----
+        // World 面板下发（所有 match:world 且 display:world 的页面，可多个）
         for (Page page : pages.allPages()) {
             if (page.match() == null) {
                 continue;
@@ -78,7 +78,7 @@ public final class MatchListener implements Listener {
             }
         }
 
-        // ---- Screen 面板下发（match:screen 且 display:screen 的页面） ----
+        // Screen 面板下发（match:screen 且 display:screen 的页面）
         for (Page page : pages.allPages()) {
             if (page.match() == null) {
                 continue;
@@ -98,14 +98,14 @@ public final class MatchListener implements Listener {
     /** 稍后挂载 HUD（等玩家数据就绪）。 */
     private void sendHudLater(Player player, String pageId,
                               com.opendreamcore.protocol.message.HudSync.Mode mode) {
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline()) {
-                String yaml = pages.compiledYaml(pageId, player);
-                if (yaml != null) {
-                    network.openHud(player, pageId, yaml, mode);
-                }
+        // join 瞬间客户端多半还没握手，通道还没报备，发了也是被 Bukkit 静默吞。
+        // 统一走 ready 感知发送：握手完了立刻补发，没完就扣着等
+        network.runWhenReady(player, () -> {
+            String yaml = pages.compiledYaml(pageId, player);
+            if (yaml != null) {
+                network.openHud(player, pageId, yaml, mode);
             }
-        }, 10L);
+        });
     }
 
     /** 退出：清理该玩家的容器会话、个人 HUD 与版本记录。 */
@@ -173,16 +173,14 @@ public final class MatchListener implements Listener {
         }
     }
 
-    /** 稍后下发（等玩家数据就绪；扁平语法按玩家编译）。 */
+    /** 稍后下发（扁平语法按玩家编译）。join 时通道多半还没报备，同样走 ready 感知。 */
     private void sendLater(Player player, Page page) {
         String id = page.id() == null ? "page" : page.id();
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-            if (player.isOnline()) {
-                String yaml = pages.compiledYaml(id, player);
-                if (yaml != null) {
-                    network.openPage(player, id, yaml);
-                }
+        network.runWhenReady(player, () -> {
+            String yaml = pages.compiledYaml(id, player);
+            if (yaml != null) {
+                network.openPage(player, id, yaml);
             }
-        }, 10L);
+        });
     }
 }

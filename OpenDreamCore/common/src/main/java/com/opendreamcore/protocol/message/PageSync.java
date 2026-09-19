@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.nio.charset.StandardCharsets;
@@ -22,7 +24,7 @@ public final class PageSync implements Message {
 
     /** 密文构造（服务端用会话 key 加密后传字节）。 */
     public PageSync(String pageId, byte[] content, boolean encrypted) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
         if (content == null || content.length == 0) {

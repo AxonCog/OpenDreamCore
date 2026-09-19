@@ -1,0 +1,1022 @@
+# 该文件用于替换 某个字 为 图片
+#
+  # 如果开启了这个设置,则只有当文本为 §傻 时才会替换为图片    color: true
+# 多个字则每个字都会显示成马儿.png
+
+#########黄脸默认表情###########
+闇:
+  path: "chenghao/1.gif"
+  width: 34.5
+  height: 8.5
+龜:
+  path: "chenghao/mvip.png"
+  width: 34.5
+  height: 8.5
+龖:
+  path: "chenghao/mvip+.png"
+  width: 34.5
+  height: 8.5
+簗:
+  path: "chenghao/fmvip.png"
+  width: 34.5
+  height: 8.5
+朧:
+  path: "chenghao/svip.png"
+  width: 34.5
+  height: 8.5
+爨:
+  path: "chenghao/成功人士.png"
+  width: 30
+  height: 8
+靐:
+  path: "chenghao/豪掷千金.png"
+  width: 30
+  height: 8
+繩:
+  path: "chenghao/富可敌国.png"
+  width: 30
+  height: 8
+繓:
+  path: "chenghao/虎牙.png"
+  width: 30
+  height: 8
+아:
+  path: https://s3.bmp.ovh/imgs/2024/02/08/a2021d4af18d3a0d.gif
+  width: 36
+  height: 9
+  color: true
+피:
+  path: https://s3.bmp.ovh/imgs/2024/02/08/8ad1c3ee2350facc.gif
+  width: 36
+  height: 9
+  color: true
+이:
+  path: https://s3.bmp.ovh/imgs/2024/02/08/f214175c8628c0a0.png
+  width: 44
+  height: 9
+  color: true
+스:
+  path: https://s3.bmp.ovh/imgs/2024/02/08/de7a39c1594aeb04.png
+  width: 44
+  height: 9
+  color: true
+커:
+  path: https://s3.bmp.ovh/imgs/2024/02/08/ec7be187d34cb8e5.png
+  width: 40
+  height: 9
+  color: true
+컥:
+  path: https://s3.bmp.ovh/imgs/2024/04/30/08e146bd04bca31d.gif
+  width: 40
+  height: 9
+  color: true
+컦:
+  path: https://s3.bmp.ovh/imgs/2024/04/30/6576828dc4dcb485.gif
+  width: 42
+  height: 9
+  color: true
+컧:
+  path: https://s3.bmp.ovh/imgs/2024/04/30/adfd368c20d304c9.gif
+  width: 40
+  height: 9
+  color: true
+컨:
+  path: https://s3.bmp.ovh/imgs/2024/04/30/786754cc1a462639.gif
+  width: 40
+  height: 9
+  color: true
+컩:
+  path: https://s3.bmp.ovh/imgs/2024/04/30/ed852960bb6836f4.gif
+  width: 40
+  height: 9
+  color: true
+가:
+  path: tubiao/lvsetanhao.png
+  width: 6
+  height: 8
+  color: true
+각:
+  path: tubiao/hongsetanhao.png
+  width: 6
+  height: 8
+  color: true
+갂:
+  path: chenghao/xunjue.gif
+  width: 31
+  height: 9
+  color: true
+갃:
+  path: chenghao/nanjue.gif
+  width: 34
+  height: 9
+  color: true
+간:
+  path: chenghao/zijue.gif
+  width: 34
+  height: 9
+  color: true
+갅:
+  path: chenghao/houjue.gif
+  width: 34
+  height: 9
+  color: true
+갆:
+  path: chenghao/bojue.gif
+  width: 34
+  height: 9
+  color: true
+갇:
+  path: chenghao/gongjue.gif
+  width: 36
+  height: 9
+  color: true
+갈:
+  path: chenghao/2025diluke.gif
+  width: 36
+  height: 9
+  color: true
+갉:
+  path: chenghao/2025mona.gif
+  width: 36
+  height: 9
+  color: true
+갊:
+  path: chenghao/2025xuanyuanxiayu.gif
+  width: 36
+  height: 9
+  color: true
+갋:
+  path: chenghao/2025youlingnaling.gif
+  width: 36
+  height: 9
+  color: true
+갌:
+  path: chenghao/2025yuanlairuci.gif
+  width: 36
+  height: 9
+  color: true
+갍:
+  path: tubiao/chengsetanhao.png
+  width: 6
+  height: 8
+  color: true
+갎:
+  path: tubiao/zisetanhao.png
+  width: 6
+  height: 8
+  color: true
+갏:
+  path: chenghao/2025sheniankuaile.gif
+  width: 36
+  height: 9
+  color: true
+감:
+  path: tubiao/shift_tubiao.png
+  width: 16
+  height: 8
+  color: true
+갑:
+  path: tubiao/shubiaoyou.png
+  width: 8
+  height: 8
+  color: true
+값:
+  path: tubiao/shubiaozuo.png
+  width: 8
+  height: 8
+  color: true
+갓:
+  path: tubiao/msg.png
+  width: 24
+  height: 8
+  color: true
+갔:
+  path: shenshou_chenghao/1/huoyanniao.png
+  width: 42
+  height: 9
+  color: true
+강:
+  path: shenshou_chenghao/1/jidongniao.png
+  width: 42
+  height: 9
+  color: true
+갖:
+  path: shenshou_chenghao/1/shandianniao.png
+  width: 42
+  height: 9
+  color: true
+갗:
+  path: shenshou_chenghao/1/menghuan.png
+  width: 36
+  height: 9
+  color: true
+갘:
+  path: shenshou_chenghao/1/chaomeng.png
+  width: 36
+  height: 9
+  color: true
+같:
+  path: shenshou_chenghao/1/chaomeng_x.png
+  width: 36
+  height: 9
+  color: true
+갚:
+  path: shenshou_chenghao/1/chaomeng_y.png
+  width: 36
+  height: 9
+  color: true
+갛:
+  path: shenshou_chenghao/2/yandi.png
+  width: 36
+  height: 9
+  color: true
+개:
+  path: shenshou_chenghao/2/shuijun.png
+  width: 36
+  height: 9
+  color: true
+객:
+  path: shenshou_chenghao/2/leigong.png
+  width: 36
+  height: 9
+  color: true
+갞:
+  path: shenshou_chenghao/2/shilabi.png
+  width: 42
+  height: 9
+  color: true
+갟:
+  path: shenshou_chenghao/2/fengwang.png
+  width: 36
+  height: 9
+  color: true
+갠:
+  path: shenshou_chenghao/2/luoqiya.png
+  width: 42
+  height: 9
+  color: true
+갡:
+  path: shenshou_chenghao/3/gaiouka.png
+  width: 42
+  height: 9
+  color: true
+갢:
+  path: shenshou_chenghao/3/guladuo.png
+  width: 42
+  height: 9
+  color: true
+갣:
+  path: shenshou_chenghao/3/liekongzuo.png
+  width: 42
+  height: 9
+  color: true
+갤:
+  path: shenshou_chenghao/3/gaiouka_mega.png
+  width: 42
+  height: 9
+  color: true
+갥:
+  path: shenshou_chenghao/3/guladuo_mega.png
+  width: 42
+  height: 9
+  color: true
+갦:
+  path: shenshou_chenghao/3/liekongzuo_mega.png
+  width: 42
+  height: 9
+  color: true
+갧:
+  path: shenshou_chenghao/3/leijiaisi.png
+  width: 47
+  height: 9
+  color: true
+갨:
+  path: shenshou_chenghao/3/leijiluoke.png
+  width: 47
+  height: 9
+  color: true
+갩:
+  path: shenshou_chenghao/3/leijisiqilu.png
+  width: 53
+  height: 9
+  color: true
+갪:
+  path: shenshou_chenghao/3/ladiyasi.png
+  width: 47
+  height: 9
+  color: true
+갫:
+  path: shenshou_chenghao/3/ladiousi.png
+  width: 47
+  height: 9
+  color: true
+갬:
+  path: shenshou_chenghao/3/ladiyasi_mega.png
+  width: 47
+  height: 9
+  color: true
+갭:
+  path: shenshou_chenghao/3/ladiousi_mega.png
+  width: 47
+  height: 9
+  color: true
+갮:
+  path: shenshou_chenghao/3/jilaqi.png
+  width: 42
+  height: 9
+  color: true
+갯:
+  path: shenshou_chenghao/3/daiouqixisi.png
+  width: 53
+  height: 9
+  color: true
+갰:
+  path: shenshou_chenghao/3/daiouqixisi_gongji.png
+  width: 53
+  height: 9
+  color: true
+갱:
+  path: shenshou_chenghao/3/daiouqixisi_fangyu.png
+  width: 53
+  height: 9
+  color: true
+갲:
+  path: shenshou_chenghao/3/daiouqixisi_sudu.png
+  width: 53
+  height: 9
+  color: true
+갳:
+  path: shenshou_chenghao/4/paluqiya.png
+  width: 47
+  height: 9
+  color: true
+갴:
+  path: shenshou_chenghao/4/paluqiya_qiyuan.png
+  width: 47
+  height: 9
+  color: true
+갵:
+  path: shenshou_chenghao/4/diyaluka.png
+  width: 47
+  height: 9
+  color: true
+갶:
+  path: shenshou_chenghao/4/diyaluka_qiyuan.png
+  width: 47
+  height: 9
+  color: true
+갷:
+  path: shenshou_chenghao/4/qiladina.png
+  width: 47
+  height: 9
+  color: true
+갸:
+  path: shenshou_chenghao/4/qiladina_qiyuan.png
+  width: 47
+  height: 9
+  color: true
+갹:
+  path: shenshou_chenghao/4/aimuliduo.png
+  width: 47
+  height: 9
+  color: true
+갺:
+  path: shenshou_chenghao/4/yakenuomu.png
+  width: 47
+  height: 9
+  color: true
+갻:
+  path: shenshou_chenghao/4/youkexi.png
+  width: 42
+  height: 9
+  color: true
+갼:
+  path: shenshou_chenghao/4/xiduolanen.png
+  width: 47
+  height: 9
+  color: true
+갽:
+  path: shenshou_chenghao/4/dakelaiyi.png
+  width: 47
+  height: 9
+  color: true
+갾:
+  path: shenshou_chenghao/4/feiouna.png
+  width: 42
+  height: 9
+  color: true
+갿:
+  path: shenshou_chenghao/4/manafei.png
+  width: 42
+  height: 9
+  color: true
+걀:
+  path: shenshou_chenghao/4/leijiqikasi.png
+  width: 53
+  height: 9
+  color: true
+걁:
+  path: shenshou_chenghao/4/xiemi.png
+  width: 36
+  height: 9
+  color: true
+걂:
+  path: shenshou_chenghao/4/xiemi_tiankong.png
+  width: 36
+  height: 9
+  color: true
+걃:
+  path: shenshou_chenghao/4/aerzhousi.png
+  width: 47
+  height: 9
+  color: true
+걄:
+  path: shenshou_chenghao/4/keleiseliya.png
+  width: 53
+  height: 9
+  color: true
+걅:
+  path: shenshou_chenghao/5/laixilamu.png
+  width: 48
+  height: 9
+  color: true
+걆:
+  path: shenshou_chenghao/5/qiuleimu.png
+  width: 42
+  height: 9
+  color: true
+걇:
+  path: shenshou_chenghao/5/jiekeluomu.png
+  width: 47
+  height: 9
+  color: true
+걈:
+  path: shenshou_chenghao/5/qiuleimu_anhei.png
+  width: 42
+  height: 9
+  color: true
+걉:
+  path: shenshou_chenghao/5/qiuleimu_yanbai.png
+  width: 42
+  height: 9
+  color: true
+걊:
+  path: shenshou_chenghao/5/dailajiweng.png
+  width: 47
+  height: 9
+  color: true
+걋:
+  path: shenshou_chenghao/5/goupaluweng.png
+  width: 47
+  height: 9
+  color: true
+걌:
+  path: shenshou_chenghao/5/longjuanyun.png
+  width: 42
+  height: 9
+  color: true
+걍:
+  path: shenshou_chenghao/5/longjuanyun_lingshou.png
+  width: 42
+  height: 9
+  color: true
+걎:
+  path: shenshou_chenghao/5/bilijiweng.png
+  width: 47
+  height: 9
+  color: true
+걏:
+  path: shenshou_chenghao/5/kailudiou.png
+  width: 47
+  height: 9
+  color: true
+걐:
+  path: shenshou_chenghao/5/kailudiou_juewu.png
+  width: 47
+  height: 9
+  color: true
+걑:
+  path: shenshou_chenghao/5/leidianyun.png
+  width: 42
+  height: 9
+  color: true
+걒:
+  path: shenshou_chenghao/5/leidianyun_lingshou.png
+  width: 42
+  height: 9
+  color: true
+걓:
+  path: shenshou_chenghao/5/tudiyun.png
+  width: 42
+  height: 9
+  color: true
+걔:
+  path: shenshou_chenghao/5/tudiyun_lingshou.png
+  width: 42
+  height: 9
+  color: true
+걕:
+  path: shenshou_chenghao/5/biketini.png
+  width: 47
+  height: 9
+  color: true
+걖:
+  path: shenshou_chenghao/5/meiluoyeta.png
+  width: 47
+  height: 9
+  color: true
+걗:
+  path: shenshou_chenghao/5/meiluoyeta_wubu.png
+  width: 47
+  height: 9
+  color: true
+걘:
+  path: shenshou_chenghao/5/gainuosaikete.png
+  width: 53
+  height: 9
+  color: true
+걙:
+  path: shenshou_chenghao/6/yipeiertaer.png
+  width: 53
+  height: 9
+  color: true
+걚:
+  path: shenshou_chenghao/6/zheerniyasi.png
+  width: 53
+  height: 9
+  color: true
+걛:
+  path: shenshou_chenghao/6/zheerniyasi_huoyue.png
+  width: 53
+  height: 9
+  color: true
+걜:
+  path: shenshou_chenghao/6/jigeerde10.png
+  width: 53
+  height: 9
+  color: true
+걝:
+  path: shenshou_chenghao/6/jigeerde50.png
+  width: 53
+  height: 9
+  color: true
+걞:
+  path: shenshou_chenghao/6/jigeerde100.png
+  width: 53
+  height: 9
+  color: true
+걟:
+  path: shenshou_chenghao/6/boerkainien.png
+  width: 53
+  height: 9
+  color: true
+걠:
+  path: shenshou_chenghao/6/dianxi.png
+  width: 42
+  height: 9
+  color: true
+걡:
+  path: shenshou_chenghao/6/dianxi_mega.png
+  width: 42
+  height: 9
+  color: true
+걢:
+  path: shenshou_chenghao/6/hupa.png
+  width: 36
+  height: 9
+  color: true
+걣:
+  path: shenshou_chenghao/6/hupa_chengjie.png
+  width: 36
+  height: 9
+  color: true
+걤:
+  path: shenshou_chenghao/7/kesimogu.png
+  width: 47
+  height: 9
+  color: true
+걥:
+  path: shenshou_chenghao/7/kesimomu.png
+  width: 47
+  height: 9
+  color: true
+걦:
+  path: shenshou_chenghao/7/suoerjialeiou.png
+  width: 53
+  height: 9
+  color: true
+걧:
+  path: shenshou_chenghao/7/lunaiyala.png
+  width: 47
+  height: 9
+  color: true
+걨:
+  path: shenshou_chenghao/7/naikeluozima.png
+  width: 53
+  height: 9
+  color: true
+걩:
+  path: shenshou_chenghao/7/naikeluozima_ri.png
+  width: 53
+  height: 9
+  color: true
+걪:
+  path: shenshou_chenghao/7/naikeluozima_yue.png
+  width: 53
+  height: 9
+  color: true
+걫:
+  path: shenshou_chenghao/7/naikeluozima_jiuji.png
+  width: 53
+  height: 9
+  color: true
+걬:
+  path: shenshou_chenghao/7/majiyana.png
+  width: 47
+  height: 9
+  color: true
+걭:
+  path: shenshou_chenghao/7/maxiaduo.png
+  width: 42
+  height: 9
+  color: true
+걮:
+  path: shenshou_chenghao/7/shuxingkong.png
+  width: 42
+  height: 9
+  color: true
+걯:
+  path: shenshou_chenghao/7/yinbanzhanshou.png
+  width: 47
+  height: 9
+  color: true
+거:
+  path: shenshou_chenghao/7/kapumingming.png
+  width: 47
+  height: 9
+  color: true
+걱:
+  path: shenshou_chenghao/7/kapudiedie.png
+  width: 47
+  height: 9
+  color: true
+걲:
+  path: shenshou_chenghao/7/kapumoumou.png
+  width: 47
+  height: 9
+  color: true
+걳:
+  path: shenshou_chenghao/7/kapuqiqi.png
+  width: 47
+  height: 9
+  color: true
+건:
+  path: shenshou_chenghao/7/feiluomeilang.png
+  width: 47
+  height: 9
+  color: true
+걵:
+  path: shenshou_chenghao/7/dianshumu.png
+  width: 42
+  height: 9
+  color: true
+걶:
+  path: shenshou_chenghao/7/tiehuohuiye.png
+  width: 47
+  height: 9
+  color: true
+걷:
+  path: shenshou_chenghao/7/zhiyujian.png
+  width: 42
+  height: 9
+  color: true
+걸:
+  path: shenshou_chenghao/7/eshidawang.png
+  width: 47
+  height: 9
+  color: true
+걹:
+  path: shenshou_chenghao/7/dubeibi.png
+  width: 42
+  height: 9
+  color: true
+걺:
+  path: shenshou_chenghao/7/siezhenlong.png
+  width: 47
+  height: 9
+  color: true
+걻:
+  path: shenshou_chenghao/7/xuwuyide.png
+  width: 47
+  height: 9
+  color: true
+걼:
+  path: shenshou_chenghao/7/baojiwen.png
+  width: 42
+  height: 9
+  color: true
+걽:
+  path: shenshou_chenghao/7/jielaaola.png
+  width: 47
+  height: 9
+  color: true
+걾:
+  path: shenshou_chenghao/7/meiluta.png
+  width: 42
+  height: 9
+  color: true
+걿:
+  path: shenshou_chenghao/7/meilumeita.png
+  width: 47
+  height: 9
+  color: true
+검:
+  path: shenshou_chenghao/7/leileishi.png
+  width: 42
+  height: 9
+  color: true
+겁:
+  path: shenshou_chenghao/7/pengtouxiaochou.png
+  width: 47
+  height: 9
+  color: true
+겂:
+  path: shenshou_chenghao/8/cangxiang.png
+  width: 36
+  height: 9
+  color: true
+것:
+  path: shenshou_chenghao/8/cangxiang_jian.png
+  width: 36
+  height: 9
+  color: true
+겄:
+  path: shenshou_chenghao/8/zangmarante.png
+  width: 47
+  height: 9
+  color: true
+겅:
+  path: shenshou_chenghao/8/zangmarante_dun.png
+  width: 47
+  height: 9
+  color: true
+겆:
+  path: shenshou_chenghao/8/wujitaina.png
+  width: 47
+  height: 9
+  color: true
+겇:
+  path: shenshou_chenghao/8/xiongtudi.png
+  width: 42
+  height: 9
+  color: true
+겈:
+  path: shenshou_chenghao/8/wudaoxiongshi.png
+  width: 47
+  height: 9
+  color: true
+겉:
+  path: shenshou_chenghao/8/wudaoxiongshi_yiji.png
+  width: 47
+  height: 9
+  color: true
+겊:
+  path: shenshou_chenghao/8/salude.png
+  width: 42
+  height: 9
+  color: true
+겋:
+  path: shenshou_chenghao/8/leijiaileqi.png
+  width: 53
+  height: 9
+  color: true
+게:
+  path: shenshou_chenghao/8/xuebaoma.png
+  width: 42
+  height: 9
+  color: true
+겍:
+  path: shenshou_chenghao/8/lingyouma.png
+  width: 42
+  height: 9
+  color: true
+겎:
+  path: shenshou_chenghao/8/leiguanwang.png
+  width: 42
+  height: 9
+  color: true
+겏:
+  path: shenshou_chenghao/8/leiguanwang_baima.png
+  width: 42
+  height: 9
+  color: true
+겐:
+  path: shenshou_chenghao/8/leiguanwang_heima.png
+  width: 42
+  height: 9
+  color: true
+겑:
+  path: shenshou_chenghao/8/juanlianyun.png
+  width: 42
+  height: 9
+  color: true
+겒:
+  path: shenshou_chenghao/8/juanlianyun_lingshou.png
+  width: 42
+  height: 9
+  color: true
+겓:
+  path: shenshou_chenghao/8/leijizelage.png
+  width: 53
+  height: 9
+  color: true
+겔:
+  path: shenshou_chenghao/9/taoxilang.png
+  width: 42
+  height: 9
+  color: true
+겕:
+  path: shenshou_chenghao/9/gouzangou.png
+  width: 42
+  height: 9
+  color: true
+겖:
+  path: shenshou_chenghao/9/yuanzengyuan.png
+  width: 42
+  height: 9
+  color: true
+겗:
+  path: shenshou_chenghao/9/jizhiji.png
+  width: 42
+  height: 9
+  color: true
+겘:
+  path: shenshou_chenghao/9/eguipeng.png
+  width: 42
+  height: 9
+  color: true
+겙:
+  path: shenshou_chenghao/9/guledun.png
+  width: 42
+  height: 9
+  color: true
+겚:
+  path: shenshou_chenghao/9/miledun.png
+  width: 42
+  height: 9
+  color: true
+겛:
+  path: shenshou_chenghao/9/gujianwo.png
+  width: 42
+  height: 9
+  color: true
+겜:
+  path: shenshou_chenghao/9/eguipeng_shuijing.png
+  width: 42
+  height: 9
+  color: true
+겝:
+  path: shenshou_chenghao/9/eguipeng_huozao.png
+  width: 42
+  height: 9
+  color: true
+겞:
+  path: shenshou_chenghao/9/eguipeng_chushi.png
+  width: 42
+  height: 9
+  color: true
+겟:
+  path: shenshou_chenghao/9/tailebagesi.png
+  width: 53
+  height: 9
+  color: true
+겠:
+  path: shenshou_chenghao/9/tailebagesi_taijing.png
+  width: 53
+  height: 9
+  color: true
+겡:
+  path: shenshou_chenghao/9/tailebagesi_xingjing.png
+  width: 53
+  height: 9
+  color: true
+겢:
+  path: shenshou_chenghao/9/guyuyu.png
+  width: 42
+  height: 9
+  color: true
+겣:
+  path: shenshou_chenghao/9/xiongweiya.png
+  width: 42
+  height: 9
+  color: true
+겤:
+  path: shenshou_chenghao/9/houjiaowei.png
+  width: 42
+  height: 9
+  color: true
+겥:
+  path: shenshou_chenghao/9/mengegu.png
+  width: 42
+  height: 9
+  color: true
+겦:
+  path: shenshou_chenghao/9/gujianbao.png
+  width: 42
+  height: 9
+  color: true
+겧:
+  path: shenshou_chenghao/9/gudinglu.png
+  width: 42
+  height: 9
+  color: true
+겨:
+  path: shenshou_chenghao/9/pokongyan.png
+  width: 42
+  height: 9
+  color: true
+격:
+  path: shenshou_chenghao/9/mengleigu.png
+  width: 42
+  height: 9
+  color: true
+겪:
+  path: shenshou_chenghao/9/bodangshui.png
+  width: 42
+  height: 9
+  color: true
+겫:
+  path: shenshou_chenghao/9/tiedue.png
+  width: 42
+  height: 9
+  color: true
+견:
+  path: shenshou_chenghao/9/hongmingyue.png
+  width: 42
+  height: 9
+  color: true
+겭:
+  path: shenshou_chenghao/9/tieshapi.png
+  width: 42
+  height: 9
+  color: true
+겮:
+  path: shenshou_chenghao/9/padichi.png
+  width: 42
+  height: 9
+  color: true
+겯:
+  path: shenshou_chenghao/9/tiejingji.png
+  width: 42
+  height: 9
+  color: true
+결:
+  path: shenshou_chenghao/9/tiecheji.png
+  width: 42
+  height: 9
+  color: true
+겱:
+  path: shenshou_chenghao/9/tiebaofu.png
+  width: 42
+  height: 9
+  color: true
+겲:
+  path: shenshou_chenghao/9/tiebibang.png
+  width: 42
+  height: 9
+  color: true
+겳:
+  path: shenshou_chenghao/9/tiebojing.png
+  width: 42
+  height: 9
+  color: true
+겴:
+  path: shenshou_chenghao/9/tiewuzhe.png
+  width: 42
+  height: 9
+  color: true
+겵:
+  path: shenshou_chenghao/9/tiepanyan.png
+  width: 42
+  height: 9
+  color: true
+겶:
+  path: shenshou_chenghao/9/tietouke.png
+  width: 42
+  height: 9
+  color: true
+겷:
+  path: shenshou_chenghao/9/tiebanye.png
+  width: 42
+  height: 9
+  color: true
+겸:
+  path: shenshou_chenghao/9/zhenyifa.png
+  width: 42
+  height: 9
+  color: true
+겹:
+  path: tubiao/npc.png
+  width: 26
+  height: 8
+  color: true

@@ -177,7 +177,7 @@ public final class RemoteMedia {
         return cached;
     }
 
-    // ========== SSRF 防护 ==========
+    // SSRF 防护
 
     /**
      * 校验远程 URL 是否安全：协议白名单 + 无 userinfo + DNS 解析后无内网地址。
@@ -284,7 +284,7 @@ public final class RemoteMedia {
         return true;
     }
 
-    // ========== 缓存 ==========
+    // 缓存
 
     /** 缓存文件名：URL 的 SHA-256 + 原扩展名（无扩展名 → .bin）。 */
     public static String cacheFileName(String url) {

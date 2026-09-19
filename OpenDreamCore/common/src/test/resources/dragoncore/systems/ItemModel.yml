@@ -1,0 +1,105 @@
+# 该名称随意
+橘子盆栽:
+  # 当物品的 lore 或 name 或 某个nbt【包含】测试模型  -> 就会显示为xxx材质
+  match: "橘子盆栽"
+  # 贴图材质均需要放置在DragonCore/models/items/<path>/文件夹内
+  # 且模型文件命名为model.json
+  # 模型内材质设置为core:贴图名称
+  # 可参考默认的示例材质包
+  path: "橘子盆栽"
+  # 放大2倍（默认是1倍）
+  scale: 2
+  # 指定物品ID为167,并且匹配match的物品才会修改模型
+  type: 5194
+测试模型2:
+  match: "测试模型2"
+  path: "模型2"
+模型3:
+  match: "测试模型3"
+  path: "模型3"
+神王:
+  match: Lore:\[.*"§f§l鴺§e§l§n神王".*]
+  type: 276
+  path: king_1
+  scale: 2
+至尊:
+  match: Lore:\[.*"§f§l鴺§d§l§n至尊".*]
+  type: 276
+  path: king_2
+  scale: 2
+战意:
+  match: Lore:\[.*"§f§l鴺§6§l§n战意".*]
+  type: 276
+  path: king_3
+  scale: 2
+深渊:
+  match: Lore:\[.*"§f§l鴺§b§l§n深渊".*]
+  type: 276
+  path: king_4
+  scale: 2
+熔岩:
+  match: Lore:\[.*"§f§l鴺§c§l§n熔岩".*]
+  type: 276
+  path: king_5
+  scale: 2
+冥幽:
+  match: Lore:\[.*"§f§l鴺§a§l§n冥幽".*]
+  type: 276
+  path: king_7
+  scale: 2
+重铸:
+  match: Lore:\[.*"§f§l鴺§e§l§n重铸".*]
+  type: 276
+  path: king_8
+  scale: 2
+荆棘:
+  match: Lore:\[.*"§f§l鴺§2§l§n荆棘".*]
+  type: 276
+  path: king_9
+  scale: 2
+荣光_1:
+  match: Lore:\[.*"§f§l鴺§e§l§n荣光".*]
+  type: 276
+  path: rg_jian
+  scale: 1.5
+荣光_2:
+  match: Lore:\[.*"§f§l鴺§e§l§n荣光".*]
+  type: 293
+  path: rg_chu
+  scale: 1.5
+荣光_3:
+  match: Lore:\[.*"§f§l鴺§e§l§n荣光".*]
+  type: 279
+  path: rg_fu
+  scale: 1.5
+荣光_4:
+  match: Lore:\[.*"§f§l鴺§e§l§n荣光".*]
+  type: 278
+  path: rg_gao
+  scale: 1.5
+国庆_1:
+  match: Lore:\[.*"§f§l鴺§6§l§n业精于勤".*]
+  type: 276
+  path: xw_j_3
+  scale: 1.3
+国庆_2:
+  match: Lore:\[.*"§f§l鴺§6§l§n天道酬勤".*]
+  type: 293
+  path: xw_ct_3
+  scale: 1.3
+国庆_3:
+  match: Lore:\[.*"§f§l鴺§6§l§n花团锦簇".*]
+  type: 279
+  path: xw_ft_3
+  scale: 1.3
+国庆_4:
+  match: Lore:\[.*"§f§l鴺§6§l§n安居乐业".*]
+  type: 278
+  path: xw_gz_3
+  scale: 1.3
+国庆_5:
+  match: Lore:\[.*"§f§l鴺§6§l§n繁荣昌盛".*]
+  type: 277
+  path: xw_cz_3
+  scale: 1.3
+

@@ -1,5 +1,7 @@
 package com.opendreamcore.script;
 
+import com.opendreamcore.util.J8;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -26,7 +28,7 @@ public final class CommonMethods {
         registerEvent();
     }
 
-    // ========== Event（脚本事件总线：跨脚本/跨页面发布订阅） ==========
+    // Event（脚本事件总线：跨脚本/跨页面发布订阅）
 
     private static void registerEvent() {
         NamespaceRegistry.register("Event", args -> {
@@ -64,7 +66,7 @@ public final class CommonMethods {
         }, "清空", "clear");
     }
 
-    // ========== Math ==========
+    // Math
 
     private static void registerMath() {
         NamespaceRegistry.register("Math", args -> {
@@ -241,7 +243,7 @@ public final class CommonMethods {
         }, "平滑插值", "smoothstep", "hermite", "hermiteBlend", "hermite_blend");
     }
 
-    // ========== Str ==========
+    // Str
 
     private static void registerStr() {
         NamespaceRegistry.register("Str", args -> {
@@ -318,7 +320,7 @@ public final class CommonMethods {
         NamespaceRegistry.register("Str", args -> {
             String s = str(args, 0);
             int times = (int) num(args, 1);
-            return s.repeat(Math.max(0, times));
+            return J8.repeat(s, Math.max(0, times));
         }, "重复", "repeat");
         NamespaceRegistry.register("Str", args -> {
             // Str.格式化("你好 %s，等级 %d", 名字, 等级)
@@ -356,7 +358,7 @@ public final class CommonMethods {
             }
         }, "转小数", "parseFloat", "parse_float", "parseDouble", "parse_double", "toDouble", "to_double");
         NamespaceRegistry.register("Str", args -> str(args, 0).isEmpty(), "为空", "isEmpty", "is_empty");
-        NamespaceRegistry.register("Str", args -> str(args, 0).isBlank(), "为空白", "isBlank", "is_blank");
+        NamespaceRegistry.register("Str", args -> J8.isBlank(str(args, 0)), "为空白", "isBlank", "is_blank");
         NamespaceRegistry.register("Str", args -> new StringBuilder(str(args, 0)).reverse().toString(), "反转", "reverse");
         NamespaceRegistry.register("Str", args -> {
             String s = str(args, 0);
@@ -442,7 +444,7 @@ public final class CommonMethods {
         }, "首字母大写", "capitalize");
     }
 
-    // ========== Array（列表操作；尽量返回新列表，不改入参） ==========
+    // Array（列表操作；尽量返回新列表，不改入参）
 
     private static void registerArray() {
         NamespaceRegistry.register("Array", args -> {
@@ -587,7 +589,7 @@ public final class CommonMethods {
         }, "插入", "insert", "insertAt", "insert_at");
         NamespaceRegistry.register("Array", args -> {
             Object list = args.length > 0 ? args[0] : null;
-            if (!(list instanceof List<?> l) || l.isEmpty()) return List.of();
+            if (!(list instanceof List<?> l) || l.isEmpty()) return J8.list();
             Object fn = args.length > 1 ? args[1] : null;
             if (!(fn instanceof DreamLangExecutor.Callable c)) return new ArrayList<>(l);
             List<Object> out = new ArrayList<>();
@@ -599,7 +601,7 @@ public final class CommonMethods {
         }, "过滤", "filter", "where");
         NamespaceRegistry.register("Array", args -> {
             Object list = args.length > 0 ? args[0] : null;
-            if (!(list instanceof List<?> l)) return List.of();
+            if (!(list instanceof List<?> l)) return J8.list();
             Object fn = args.length > 1 ? args[1] : null;
             if (!(fn instanceof DreamLangExecutor.Callable c)) return new ArrayList<>(l);
             List<Object> out = new ArrayList<>();
@@ -618,20 +620,20 @@ public final class CommonMethods {
         }, "归约", "reduce", "fold", "聚合");
     }
 
-    // ========== Time（纯逻辑版；客户端另有游戏时间） ==========
+    // Time（纯逻辑版；客户端另有游戏时间）
 
     private static void registerTime() {
         NamespaceRegistry.register("Time", args -> (double) (System.currentTimeMillis() / 1000), "当前时间戳", "now", "timestamp");
         NamespaceRegistry.register("Time", args -> (double) System.currentTimeMillis(), "当前毫秒", "millis");
     }
 
-    // ========== UUID ==========
+    // UUID
 
     private static void registerUuid() {
         NamespaceRegistry.register("UUID", args -> java.util.UUID.randomUUID().toString(), "随机", "random");
     }
 
-    // ========== 工具 ==========
+    // 工具
 
     private static double num(Object[] args, int index) {
         if (args.length <= index || args[index] == null) {

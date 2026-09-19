@@ -1,11 +1,16 @@
 # 主菜单演示（扁平语法）：服务端按玩家编译 + 加密下发
-# - condition: 服务端编译期条件（不满足的元素整体剔除，不可见）
-# - {player.xxx} / {system.xxx}: 编译期占位符（按接收玩家解析）
-# - %xxx%: PlaceholderAPI 令牌（服务器装了 PAPI 才替换）
-# - functions: 生命周期脚本
+# condition: 服务端编译期条件（不满足的元素整体剔除，不可见）
+# {player.xxx} / {system.xxx}: 编译期占位符（按接收玩家解析）
+# %xxx%: PlaceholderAPI 令牌（服务器装了 PAPI 才替换）
+# functions: 生命周期脚本
 # /odc open menu 打开
 title: 主菜单
 display: screen
+# 设计画布：按 1280×720 排的版，客户端按真实窗口等比缩放（对 GUI 缩放档位免疫）。
+# scale: 充满度倍率，1 = 恰好适配；不想要自适应就把这段删掉（回 guiScaled 1:1）。
+design:
+  width: 1280
+  height: 720
 options:
   allowEscClose: true
   keybinds:                    # 页面打开期间：按 F 上报 OdcKeyEvent（服务端 Bukkit 事件）
@@ -152,7 +157,7 @@ elements:
     actions:
       click: |-
         Music.停止(player.name)
-  # ---- 视觉样式演示：渐变圆角面板 / 圆角描边按钮 / 禁用按钮（enabledWhen: false） ----
+  # 视觉样式演示：渐变圆角面板 / 圆角描边按钮 / 禁用按钮（enabledWhen: false）
   - type: rect
     x: "window.width / 2 + 130"
     y: 60
@@ -223,7 +228,7 @@ elements:
       content: "自动高度文本：wrap 按宽度折行，高度随行数自适应（不写 height，行距 12px）"
       color: "#80CBC4"
       lineHeight: 12
-  # ---- 输入框/快捷栏样式演示（右下区域） ----
+  # 输入框/快捷栏样式演示（右下区域）
   - type: input
     x: "window.width / 2 + 130"
     y: 262
@@ -257,7 +262,7 @@ elements:
     text:
       content: "输入框：background/accent/radius/border/placeholder/textColor + 光标闪烁\n快捷栏：slotColor/selectedColor/accent/radius/slots"
       color: "#9AA3B2"
-  # ---- 输入建议键盘导航演示（↑/↓ 移动光标，Enter 选中，ESC 收起） ----
+  # 输入建议键盘导航演示（↑/↓ 移动光标，Enter 选中，ESC 收起）
   - type: suggestion
     x: "window.width / 2 + 130"
     y: 396
@@ -269,7 +274,7 @@ elements:
     actions:
       input: |-
         Chat.发送消息("选择: " + vars.input, player.name)
-  # ---- 滑块键盘演示（聚焦后 ←/→ 按 step 步进） ----
+  # 滑块键盘演示（聚焦后 ←/→ 按 step 步进）
   - type: slider
     x: "window.width / 2 + 130"
     y: 424

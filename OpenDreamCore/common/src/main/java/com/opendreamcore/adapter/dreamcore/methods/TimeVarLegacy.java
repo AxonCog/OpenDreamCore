@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 public final class TimeVarLegacy {
@@ -12,7 +14,7 @@ public final class TimeVarLegacy {
             String name = LegacyMethods.str(a, 1);
             Object val = a != null && a.length > 2 ? a[2] : null;
             if (name != null && ms > 0) {
-                java.util.concurrent.CompletableFuture.delayedExecutor(ms,
+                J8.delayedExecutor(ms,
                         java.util.concurrent.TimeUnit.MILLISECONDS)
                         .execute(() -> LegacyMethods.delegate("Var", "设置", name, val));
             }

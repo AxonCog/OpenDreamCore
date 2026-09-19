@@ -13,9 +13,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 世界全息 + 名牌渲染钩子（1.21.9+ Fabric）。
  *
- * <p>Fabric API 的 WorldRenderEvents 在 1.21.9+ 被移除（世界渲染重构为提交管线），
+ * Fabric API 的 WorldRenderEvents 在 1.21.9+ 被移除（世界渲染重构为提交管线），
  * Mixin 注入 GameRenderer.renderLevel HEAD，时点与 NeoForge 侧 RenderLevelStageEvent 一致。
- * 与 NeoForge 侧 RenderLevelStageEvent.AfterEntities 时点等价。</p>
+ * 与 NeoForge 侧 RenderLevelStageEvent.AfterEntities 时点等价。
  */
 @Environment(EnvType.CLIENT)
 @Mixin(GameRenderer.class)

@@ -1,0 +1,98 @@
+// OpenDreamCore-Legacy 1.7.10 — 简化构建：直接使用 Forge Universal JAR 作为依赖
+// 绕过 ForgeGradle 的反编译工作区，直接编译模组
+
+apply plugin: 'java'
+
+version = '0.1.2'
+group = 'com.opendreamcore'
+archivesBaseName = 'OpenDreamCore-Legacy-forge-1.7.10'
+
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava { 
+    options.encoding = 'UTF-8'
+    options.compilerArgs << "-Xlint:unchecked" << "-Xlint:deprecation"
+    // plain java 构建没有混淆映射，mixin 的 AP 会自动跑并报 No obfuscation mapping；
+    // 关掉 AP，注解留到运行时由 MixinBootstrap 处理
+    options.compilerArgs << "-proc:none"
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.spongepowered.org/maven/' }
+    maven { url = 'https://maven.aliyun.com/repository/public' }
+    flatDir { dirs 'libs' }
+}
+
+// 依赖：Forge Universal JAR + 模组依赖
+dependencies {
+    // Forge Universal JAR（Forge/FML API）+ Minecraft MCP 名编译 jar + 模组依赖
+    compile fileTree(dir: 'libs', include: '*.jar')
+    compile files('../../tools/minecraft-mcp-1.7.10.jar')
+    
+    // 模组自身依赖
+    compile 'org.yaml:snakeyaml:1.27'
+    compile 'org.spongepowered:mixin:0.7.11-SNAPSHOT'
+    compile 'com.google.code.gson:gson:2.10.1'
+    compile 'org.antlr:antlr4-runtime:4.13.1'
+    compile fileTree(dir: '../../common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
+}
+
+// 共享树换成 common-j8 成品 jar；客户端接线层还是源码直接编进来
+sourceSets.main.java.srcDirs += '../../client-legacy/src/main/java'
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // 只揸运行时必需的三个解析库：vanilla MC 没有 yaml/antlr，不揸实机一解析页面就崩；
+    // gson 换 vanilla 自带老版本有方法缺失风险，一并揸自家编译版。绝不能整体清扫
+    // compile classpath——那会把 forge-universal 里的 binpatches/changelog/FML assets
+    // 全拖进来（previous 版本干过这傻事，jar 被撑到 5MB）
+    from {
+        configurations.compile
+                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('common-j8') }
+                .collect { zipTree(it) }
+    }
+    // MC/Forge 本体类运行时由游戏提供，绝不进 jar
+    exclude '**/net/minecraft/**'
+    // module-info 会让老版 fml 的 asm 报 jar 损坏、整个包被忽略，随依赖揸进来的也要剔
+    exclude 'META-INF/versions/**'
+    exclude '**/module-info.class'
+    exclude '**/net/minecraftforge/**'
+    exclude '**/cpw/mods/fml/**'
+    exclude '**/org/apache/**'
+    exclude '**/io/netty/**'
+    exclude '**/org/lwjgl/**'
+    exclude '**/com/mojang/**'
+    manifest {
+        attributes(
+            'Manifest-Version': '1.0',
+            'FMLCorePlugin': 'com.opendreamcore.OpenDreamCorePlugin',
+            'FMLCorePluginContainsFMLMod': 'true',
+            'Mod-Version': version,
+            'Mod-Name': 'OpenDreamCore-Legacy'
+        )
+    }
+}
+// 编译完把成品收到 output/legacy，发布面只认这一处
+task collectLegacyOutput {
+    doLast {
+        def out = file('../../../output/legacy')
+        out.mkdirs()
+        file("${buildDir}/libs").listFiles()?.each { f ->
+            if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-nolib')) {
+                copy { from f; into out }
+                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
+                println "collected ${f.name} -> ${out.absolutePath}"
+            }
+        }
+        // 顺手清掉 legacy 和 all 里的非当前版本残留
+        [out, file(out.parentFile.path + "/all")].each { d ->
+            d.listFiles()?.each { f ->
+                if (f.name.startsWith("OpenDreamCore-Legacy-") && f.name.endsWith('.jar')
+                        && !f.name.contains("-${version}.jar")) {
+                    delete f
+                }
+            }
+        }
+    }
+}
+build.dependsOn collectLegacyOutput

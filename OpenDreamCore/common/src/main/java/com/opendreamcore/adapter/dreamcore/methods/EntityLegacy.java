@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 /**
@@ -26,7 +28,7 @@ public final class EntityLegacy {
         LegacyMethods.register("取附近实体", a -> h().nearby(str(a, 0), num(a, 1)));
     }
 
-    // —— Host 扩展口：实体能力集中在这里，避免 LegacyMethods.Host 无限膨胀 ——
+    // Host 扩展口：实体能力集中在这里，免得 LegacyMethods.Host 越滚越大
     private static volatile HostExt h;
 
     /** 客户端可选安装实体宿主；未安装时全部返回空值。 */
@@ -43,7 +45,7 @@ public final class EntityLegacy {
         HostExt NOOP = new HostExt() {
             @Override public Object aimedEntity() { return null; }
             @Override public String field(String f) { return ""; }
-            @Override public Object nearby(String type, double range) { return java.util.List.of(); }
+            @Override public Object nearby(String type, double range) { return J8.list(); }
         };
 
         Object aimedEntity();

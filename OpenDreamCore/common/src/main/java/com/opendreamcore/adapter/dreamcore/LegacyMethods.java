@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.script.MethodRegistry;
 import com.opendreamcore.script.NamespaceRegistry;
 
@@ -7,10 +9,10 @@ import com.opendreamcore.script.NamespaceRegistry;
  * DreamCore 旧版 `方法.*` 脚本桥：把旧方法名接到新引擎能力上。
  *
  * 三类实现策略：
- * 1. 委派——目标能力已由客户端命名空间提供（Screen/Music），调用时经
+ * 委派：目标能力已由客户端命名空间提供（Screen/Music），调用时经
  *    {@link NamespaceRegistry#require} 程序化转发，单一事实来源不复制逻辑；
- * 2. 纯本地——字符串/时间/限幅等待，零环境依赖；
- * 3. Host 注入——需要运行时上下文（当前页面函数/滚轮值/按键/容器槽位），
+ * 纯本地：字符串/时间/限幅等待，零环境依赖；
+ * Host 注入：需要运行时上下文（当前页面函数/滚轮值/按键/容器槽位），
  *    通过 {@link Host} 接口由客户端在加载旧页面时安装；未安装时安全降级（返回空值）。
  *
  * 注册时机：客户端检测到旧格式页面时 {@link #ensureRegistered()}（幂等）。
@@ -150,12 +152,15 @@ public final class LegacyMethods {
         com.opendreamcore.adapter.dreamcore.methods.ChatSoundScheduleLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.ShaderYamlMiscLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.FinalGapLegacy.install();
+        com.opendreamcore.adapter.dreamcore.methods.RoadmapGapLegacy.install();
+        com.opendreamcore.adapter.dreamcore.methods.FullGapLegacy.install();
+        com.opendreamcore.adapter.dreamcore.methods.PumpkinGapLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.ItemLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.TimeDelayLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.ChatLegacy.install();
     }
 
-    // ---------- 工具 ----------
+    // 工具
 
     private static void reg(String name, MethodRegistry.Handler h) {
         MethodRegistry.registerOrReplace(name, h);
@@ -231,7 +236,7 @@ public final class LegacyMethods {
      * 新执行器只会取到方法对象不会调用。对已知零参名补 `()`（已带括号的不动）。
      */
     public static String ensureZeroArgParens(String script) {
-        if (script == null || script.isBlank()) {
+        if (script == null || J8.isBlank(script)) {
             return script;
         }
         String out = script;

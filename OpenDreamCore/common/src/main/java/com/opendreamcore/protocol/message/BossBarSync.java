@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -34,7 +36,7 @@ public final class BossBarSync implements Message {
     private final String color;
 
     public BossBarSync(String id, Action action, String text, double progress, String color) {
-        if (id == null || id.isBlank() || id.length() > 32) {
+        if (id == null || J8.isBlank(id) || id.length() > 32) {
             throw new IllegalArgumentException("Boss 条 id 非法");
         }
         this.id = id;

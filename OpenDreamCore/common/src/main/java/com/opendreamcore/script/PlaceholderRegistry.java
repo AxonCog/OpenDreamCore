@@ -1,5 +1,7 @@
 package com.opendreamcore.script;
 
+import com.opendreamcore.util.J8;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -25,7 +27,7 @@ public final class PlaceholderRegistry {
     }
 
     public static void register(String category, Resolver resolver) {
-        if (category == null || category.isBlank()) {
+        if (category == null || J8.isBlank(category)) {
             throw new IllegalArgumentException("占位符分类不能为空");
         }
         REGISTRY.put(category, resolver);
@@ -54,7 +56,7 @@ public final class PlaceholderRegistry {
             return text;
         }
         Matcher matcher = TOKEN.matcher(text);
-        StringBuilder sb = new StringBuilder();
+        StringBuffer sb = new StringBuffer();
         while (matcher.find()) {
             String category = matcher.group(1);
             String key = matcher.group(2);

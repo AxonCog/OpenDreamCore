@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -15,7 +17,7 @@ public final class Ready implements Message {
         if (protocolVersion <= 0) {
             throw new IllegalArgumentException("协议版本非法: " + protocolVersion);
         }
-        if (modVersion == null || modVersion.isBlank() || modVersion.length() > 32) {
+        if (modVersion == null || J8.isBlank(modVersion) || modVersion.length() > 32) {
             throw new IllegalArgumentException("模组版本非法: " + modVersion);
         }
         this.protocolVersion = protocolVersion;

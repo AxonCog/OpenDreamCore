@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 用法一：自动播放（key = 元素 id，页面打开即播）：
  *   animations:
  *     title_text:
- *       - property: y
+ *       property: y
  *         from: -40
  *         to: 10
  *         duration: 700
@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 用法二：命名动画（条目带 target，脚本用 Screen.播放动画("名称") 触发）：
  *   animations:
  *     title_bounce:
- *       - target: title_text
+ *       target: title_text
  *         property: y
  *         from: -40
  *         to: 10

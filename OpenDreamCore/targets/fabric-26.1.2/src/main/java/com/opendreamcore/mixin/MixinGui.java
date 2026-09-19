@@ -13,9 +13,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * hideVanilla 页面选项（1.21.9+ 提交管线版）。
  *
- * <p>26.x 的 Gui 从 render(Xxx) 族整体改名为 extractXxx(GuiGraphicsExtractor, DeltaTracker)；
+ * 26.x 的 Gui 从 render(Xxx) 族整体改名为 extractXxx(GuiGraphicsExtractor, DeltaTracker)；
  * 血条/饥饿/载具/经验/跳跃条已并入 ContextualBarRenderer 体系，无独立方法——这些层在 26.x 上
- * 暂随 hotbar 装饰层（extractHotbarAndDecorations）一并抑制，粒度损失已记录 HANDOFF。</p>
+ * 暂随 hotbar 装饰层（extractHotbarAndDecorations）一并抑制，粒度损失已记录 HANDOFF。
  */
 @Mixin(Gui.class)
 public abstract class MixinGui {
@@ -44,7 +44,7 @@ public abstract class MixinGui {
         }
     }
 
-    // ---- 逐层（hideVanilla: [层列表]）----
+    // 逐层（hideVanilla: [层列表]）
 
     @Inject(method = "extractItemHotbar", at = @At("HEAD"), cancellable = true)
     private void odc$hideItemHotbar(GuiGraphicsExtractor g, DeltaTracker dt, CallbackInfo ci) {

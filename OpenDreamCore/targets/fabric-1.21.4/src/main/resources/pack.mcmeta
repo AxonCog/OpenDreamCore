@@ -1,6 +1,12 @@
 {
   "pack": {
     "description": "OpenDreamCore built-in resources",
-    "pack_format": 46
+    "pack_format": 46,
+    "supported_formats": [
+      4,
+      99
+    ],
+    "min_format": 4,
+    "max_format": 99
   }
 }

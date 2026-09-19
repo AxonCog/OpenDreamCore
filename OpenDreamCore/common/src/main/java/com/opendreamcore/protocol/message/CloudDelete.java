@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -13,7 +15,7 @@ public final class CloudDelete implements Message {
     private final List<String> paths;
 
     public CloudDelete(List<String> paths) {
-        this.paths = paths == null ? new ArrayList<>() : List.copyOf(paths);
+        this.paths = paths == null ? new ArrayList<>() : J8.listCopy(paths);
     }
 
     public List<String> paths() {

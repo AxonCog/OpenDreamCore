@@ -862,7 +862,7 @@ import java.util.concurrent.ConcurrentHashMap;
                     ClientController.get().setWorldAlignBoundsPreview(null);
                 }
             }
-            // 模式按钮当前状态标记（左/右/中/顶/底/中/宽/高/编组 已应用打 ✓）
+            // 模式按钮当前状态标记（左/右/中/顶/底/中/宽/高/编组 已应用打 对勾）
             if (!this.modeBtns.isEmpty()) {
                 var cc3 = ClientController.get();
                 var pg3 = cc3.worldPage;
@@ -965,7 +965,7 @@ import java.util.concurrent.ConcurrentHashMap;
                 }
                 this.gradDirBtn.setMessage(Component.literal(label));
             }
-            // 圆角快捷档实时回显（当前档打 ✓）
+            // 圆角快捷档实时回显（当前档打 对勾）
             if (this.radiusBtns != null) {
                 double cur = ClientController.get().worldPanelRadius();
                 double[] radii = {0, 0.15, 0.35, 0.7};
@@ -975,7 +975,7 @@ import java.util.concurrent.ConcurrentHashMap;
                             "R" + radiusLabels[i] + (Math.abs(cur - radii[i]) < 0.001 ? "✓" : "")));
                 }
             }
-            // padding 快捷档实时回显（当前档打 ✓；0 档 = 默认 0.25 视为 中 档）
+            // padding 快捷档实时回显（当前档打 对勾；0 档 = 默认 0.25 视为 中 档）
             if (this.paddingBtns != null) {
                 double cur = ClientController.get().worldPanelPadding();
                 double[] pads = {0, 0.1, 0.25, 0.5};
@@ -985,7 +985,7 @@ import java.util.concurrent.ConcurrentHashMap;
                             "P" + padLabels[i] + (Math.abs(cur - pads[i]) < 0.001 ? "✓" : "")));
                 }
             }
-            // 边框宽度档实时回显（当前档打 ✓）
+            // 边框宽度档实时回显（当前档打 对勾）
             if (this.borderWidthBtns != null) {
                 double cur = ClientController.get().worldPanelBorderWidth();
                 double[] bws = {0.01, 0.02, 0.04, 0.08};
@@ -995,7 +995,7 @@ import java.util.concurrent.ConcurrentHashMap;
                             "B" + bwLabels[i] + (Math.abs(cur - bws[i]) < 0.001 ? "✓" : "")));
                 }
             }
-            // 淡出距离档实时回显（当前档打 ✓）
+            // 淡出距离档实时回显（当前档打 对勾）
             if (this.fadeBtns != null) {
                 double cur = ClientController.get().worldPanelFadeDistance();
                 double[] fades = {4, 8, 16, 0};

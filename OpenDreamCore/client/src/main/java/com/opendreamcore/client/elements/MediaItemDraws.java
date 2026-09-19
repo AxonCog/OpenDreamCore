@@ -458,9 +458,37 @@ public final class MediaItemDraws {
                 double iy = node.y() + (node.height() - size) / 2;
                 UiRenderer.drawItemAt(g, font, ix, iy, size, slotData.itemId() + " x" + slotData.count(), null);
             }
+        // 物品皮肤覆盖：
+        // ItemIcon 规则命中的槽位，在原版图标之上绘制自定义贴图/GIF
+        if (slotData != null && slotData.itemId() != null) {
+            String tex = com.opendreamcore.client.visual.VisualItemSkins
+                    .textureFor(slotData.itemId());
+            if (tex != null) {
+                // 静态图走散装资源注册表；GIF 走 GifPlayer（当前帧贴图，自动播帧）
+                var rl = tex.toLowerCase().endsWith(".gif")
+                        ? com.opendreamcore.client.GifPlayer.of(tex) == null ? null
+                        : gifFrameOrNull(tex)
+                        : com.opendreamcore.client.resources.LooseResourceLoader.lookup(tex);
+                if (rl == null && tex.toLowerCase().endsWith(".gif")) {
+                    rl = gifFrameOrNull(tex);
+                }
+                if (rl != null) {
+                    com.opendreamcore.client.CompatRender.blit(g, rl,
+                            (int) node.x(), (int) node.y(),
+                            (int) node.width(), (int) node.height(),
+                            0, 0, 16, 16, 16, 16);
+                }
+            }
+        }
         }
         if (UiRenderer.bool(spec.get("showSlot"), false)) {
             g.drawString(font, String.valueOf(slot), (int) node.x() + 2, (int) node.y() + 1, UiRenderer.alphaColor(0xFF6B7280));
         }
+    }
+
+    /** GIF 当前帧贴图；未就绪/文件缺失返回 null。 */
+    private static net.minecraft.resources.ResourceLocation gifFrameOrNull(String path) {
+        var player = com.opendreamcore.client.GifPlayer.of(path);
+        return player == null ? null : player.currentTexture();
     }
 }

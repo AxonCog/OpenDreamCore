@@ -5,7 +5,7 @@ import com.opendreamcore.plugin.OpenDreamCorePlugin;
 /**
  * OpenDreamCore 对外 Java API（供附属插件调用）。
  *
- * 快速上手：
+ * 用法：
  * <pre>
  * // 打开页面
  * OpenDreamCoreAPI.gui().open(player, "menu");
@@ -70,6 +70,16 @@ public final class OpenDreamCoreAPI {
     /** 窗口标题 API：按玩家下发客户端窗口标题（打字机/轮播/随机）或解除覆盖。 */
     public static TitleAPI title() {
         return TitleAPI.INSTANCE;
+    }
+
+    /** 主题 API：注册/注销/重载主题，给附属自带皮肤用。 */
+    public static ThemeAPI theme() {
+        return ThemeAPI.INSTANCE;
+    }
+
+    /** 自定义双向通道 API：插件 ↔ 装了模组的客户端直接传话（custom_packet）。 */
+    public static NetworkAPI network() {
+        return NetworkAPI.INSTANCE;
     }
 
     /** 插件实例（未加载返回 null）。 */

@@ -95,7 +95,7 @@ elements:
     type: text
     hologram: {x: 0.6, y: -3.4, z: 0, scale: 0.015, group: demo_group}
     text: {content: "世界物品展示（拖物品，标签跟随 = 面板组）", color: "#90CAF9"}
-  # ---- 多页签：tab_bar 始终显示；带 tab: 属性的元素只在对应页签显示 ----
+  # 多页签：tab_bar 始终显示；带 tab: 属性的元素只在对应页签显示
   - id: tab_bar
     type: tabs
     hologram: {x: 0, y: 0.45, z: 0, width: 3, height: 0.22}

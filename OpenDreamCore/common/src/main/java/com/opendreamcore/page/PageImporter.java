@@ -1,5 +1,7 @@
 package com.opendreamcore.page;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.config.ConfigParseException;
 
 import java.util.ArrayList;
@@ -24,12 +26,12 @@ import java.util.Set;
  *
  * 用法二（页面级，顶层 imports 列表）：
  *   imports:
- *     - page: common_header
+ *     page: common_header
  *       prefix: hdr_
  *
  * 规则：
- * - 目标页元素全部内联（id 加前缀避免冲突），变量并入（本页已有键优先）
- * - 嵌套 import 递归展开；循环引用抛 ConfigParseException
+ * 目标页元素全部内联（id 加前缀避免冲突），变量并入（本页已有键优先）
+ * 嵌套 import 递归展开；循环引用抛 ConfigParseException
  */
 public final class PageImporter {
 
@@ -133,7 +135,7 @@ public final class PageImporter {
     private static void applyPageImport(Map<String, Object> out, Map<String, Object> imp,
                                         PageSource source, Set<String> stack) {
         String pageId = str(imp.get("page"));
-        if (pageId == null || pageId.isBlank()) {
+        if (pageId == null || J8.isBlank(pageId)) {
             throw new ConfigParseException("import 缺少 page（目标页面 id）", 0, 0);
         }
         if (stack.contains(pageId)) {
@@ -147,7 +149,7 @@ public final class PageImporter {
         try {
             Map<String, Object> expanded = expand(targetIr, source, stack);
             String prefix = str(imp.get("prefix"));
-            if (prefix == null || prefix.isBlank()) {
+            if (prefix == null || J8.isBlank(prefix)) {
                 prefix = pageId + "_";
             }
             double offsetX = num(imp.get("x"), 0);

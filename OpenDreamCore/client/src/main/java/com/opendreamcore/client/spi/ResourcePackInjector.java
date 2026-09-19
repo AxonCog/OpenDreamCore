@@ -11,14 +11,14 @@ public interface ResourcePackInjector {
     /**
      * 注入一个本地 zip 材质包。
      *
-     * @param zipFile  zip 文件（已下载/已存在）
-     * @param password 密码（加密 zip；null/空 = 明文包）
-     * @param top      true = 置顶覆盖（优先级最高），false = 追加
-     * @return 是否成功
+     * zipFile：zip 文件（已下载/已存在）
+     * password：密码（加密 zip；null/空 = 明文包）
+     * top：true = 置顶覆盖（优先级最高），false = 追加
+     * 返回：是否成功
      */
     boolean inject(Path zipFile, String password, boolean top);
 
-    // ---- 持有器（ClientSetup 时平台壳调用 register）----
+    // 持有器（ClientSetup 时平台壳调用 register）
 
     /** 可变持有器：接口字段必须是常量，故移入嵌套类。 */
     final class Holder {

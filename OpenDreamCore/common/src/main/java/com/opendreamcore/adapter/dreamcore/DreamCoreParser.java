@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.AdapterRegistry;
 import com.opendreamcore.config.ConfigParser;
 import com.opendreamcore.config.ConfigParseException;
@@ -25,7 +27,8 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
         AdapterRegistry.register(INSTANCE);
     }
 
-    private final YamlParser yamlParser = new YamlParser();
+    // 龙核配置有重复键（Bukkit 语义后者覆盖），走宽松解析
+    private final YamlParser yamlParser = YamlParser.lenient();
 
     @Override
     public String format() {
@@ -34,8 +37,8 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
 
     /**
      * 内容检测（强特征，避免误伤标准嵌套语法——两者顶层结构相同）：
-     * ① 特征串：hideVanillaList:/界面变量/用户变量./ChatDisplay/preRender:/行首 Functions:
-     * ② IR 级：顶层元素的 type 为旧类型名（mapType 能映射出新类型，如 Texture→image）。
+     * 特征串：hideVanillaList:/界面变量/用户变量./ChatDisplay/preRender:/行首 Functions:
+     * IR 级：顶层元素的 type 为旧类型名（mapType 能映射出新类型，如 Texture→image）。
      * 这是唯一的格式判定来源（LocalPageManager 等一律经 {@link AdapterRegistry#detect} 路由）。
      */
     @Override
@@ -55,7 +58,7 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
                 return false;
             }
             for (Object v : ir.values()) {
-                if (v instanceof Map<?, ?> m && m.get("type") instanceof String t && !t.isBlank()) {
+                if (v instanceof Map<?, ?> m && m.get("type") instanceof String t && !J8.isBlank(t)) {
                     String mapped = mapType(t);
                     if (!mapped.equalsIgnoreCase(t)) {
                         return true; // 旧类型名（Texture/label/…）→ 旧格式
@@ -84,7 +87,7 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
     @SuppressWarnings("unchecked")
     public static Map<String, Object> transform(Map<String, Object> raw) {
         // 页面级保留键（不当作元素）；旧版用大写 Functions，新版小写 functions，两者都保留
-        var pageKeys = java.util.Set.of("match", "display", "title", "background", "options",
+        var pageKeys = J8.set("match", "display", "title", "background", "options",
                 "variables", "functions", "Functions", "priority", "through", "hideVanilla", "hideVanillaList");
 
         List<Map<String, Object>> elements = new ArrayList<>();

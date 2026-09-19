@@ -1,0 +1,46 @@
+# 该文件存放世界贴图数据
+# 可通过/core createTexture生成配置
+随便一个名字:
+  world: world
+  x: 1
+  y: 1
+  z: 1
+  rotateX: 50
+  rotateY: 50
+  rotateZ: 0
+  path: backpack.png
+  width: 5
+  height: 5
+  alpha: 0.1
+  follow: false
+  glow: true
+/DragonCore/bs:
+  png:
+    world: zuanshi
+    x: 2501.076712619857
+    y: 71.62000000476837
+    z: 2525.191806495124
+    rotateX: 0.0
+    rotateY: 0.0
+    rotateZ: 0
+    path: '1'
+    width: 1.0
+    height: 2.0
+    alpha: 1
+    follow: true
+    glow: true
+bs:
+  png:
+    world: zuanshi
+    x: 2502.200757132774
+    y: 71.62000000476837
+    z: 2528.77371687103
+    rotateX: -1.7696272
+    rotateY: 28.064209
+    rotateZ: 0
+    path: txt
+    width: 1.0
+    height: 2.0
+    alpha: 1
+    follow: false
+    glow: true

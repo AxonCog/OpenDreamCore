@@ -57,7 +57,7 @@ public final class ServerPageManager {
             files = stream.filter(p -> {
                 String name = p.getFileName().toString();
                 return name.endsWith(".yaml") || name.endsWith(".yml");
-            }).sorted().toList();
+            }).sorted().collect(java.util.stream.Collectors.toList());
         } catch (IOException e) {
             plugin.getLogger().warning("UI 目录读取失败: " + e);
             return;
@@ -67,9 +67,9 @@ public final class ServerPageManager {
                 files = stream.filter(p -> {
                     String name = p.getFileName().toString();
                     return name.endsWith(".yaml") || name.endsWith(".yml");
-                }).sorted().toList();
+                }).sorted().collect(java.util.stream.Collectors.toList());
             } catch (IOException ignored) {
-                files = List.of();
+                files = java.util.Collections.emptyList();
             }
         }
         // 两阶段：先解析全部 IR（import 模板跨页面解析需要全量），再逐个展开构建
@@ -77,7 +77,7 @@ public final class ServerPageManager {
         Map<String, Map<String, Object>> parsed = new java.util.LinkedHashMap<>();
         for (Path file : files) {
             try {
-                String yaml = Files.readString(file, StandardCharsets.UTF_8);
+                String yaml = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
                 String id = file.getFileName().toString().replaceFirst("\\.(yaml|yml)$", "");
                 parsed.put(id, new YamlParser().parse(yaml));
             } catch (Exception e) {
@@ -106,7 +106,7 @@ public final class ServerPageManager {
         applyWorldPositions();
     }
 
-    // ========== 世界面板位置持久化（拖拽落点 overlay） ==========
+    // 世界面板位置持久化（拖拽落点 overlay）
 
     /** 世界位置文件：plugins/OpenDreamCore/world_positions.json。 */
     private Path worldPositionsFile() {
@@ -121,8 +121,8 @@ public final class ServerPageManager {
             return;
         }
         try {
-            String json = java.nio.file.Files.readString(file, StandardCharsets.UTF_8);
-            com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            String json = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject root = new com.google.gson.JsonParser().parse(json).getAsJsonObject();
             root.entrySet().forEach(pageEntry -> {
                 Map<String, double[]> positions = new ConcurrentHashMap<>();
                 pageEntry.getValue().getAsJsonObject().entrySet().forEach(elEntry -> {
@@ -152,7 +152,7 @@ public final class ServerPageManager {
                 }
                 Object raw = element.props().get("hologram");
                 java.util.Map<Object, Object> holo = new java.util.LinkedHashMap<>(
-                        raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Map.of());
+                        raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Collections.emptyMap());
                 holo.put("x", pos[0]);
                 holo.put("y", pos[1]);
                 holo.put("z", pos[2]);
@@ -202,9 +202,8 @@ public final class ServerPageManager {
                 });
                 out.add(pid, pageObj);
             });
-            java.nio.file.Files.writeString(worldPositionsFile(),
-                    new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(out),
-                    StandardCharsets.UTF_8);
+            java.nio.file.Files.write(worldPositionsFile(), new com.google.gson.GsonBuilder()
+                    .setPrettyPrinting().create().toJson(out).getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             plugin.getLogger().warning("世界面板位置保存失败: " + e);
         }
@@ -286,8 +285,11 @@ public final class ServerPageManager {
 
         @Override
         public String resolve(String text) {
-            String resolved = com.opendreamcore.plugin.server.ServerPlaceholders.resolveFor(player, text);
-            return papi(player, resolved);
+            // 页面占位符"本地优先"：客户端能自己解析的（player.* / query.* / system.* / color.* /
+            // entity.* / item.* / vars.* / global.* / lang.*）一律留原文下发，客户端每帧本地解析——
+            // 血量/等级/坐标/TPS 才是"活"的，服务端编译一次只会冻结成死值。
+            // 服务端只负责客户端拿不到的 PAPI（%..% ）。
+            return papi(player, text);
         }
 
         /** PlaceholderAPI 可选集成（装了才生效；%token% 语法）。 */
@@ -327,7 +329,7 @@ public final class ServerPageManager {
             Path file = uiDir.resolve(pageId + suffix);
             if (Files.isRegularFile(file)) {
                 try {
-                    return Files.readString(file, StandardCharsets.UTF_8);
+                    return new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
                 } catch (IOException e) {
                     return null;
                 }
@@ -352,7 +354,7 @@ public final class ServerPageManager {
 
     private static boolean matches(com.opendreamcore.page.Match match, String target, String title,
                                    org.bukkit.entity.Player player) {
-        if (match.when() != null && !match.when().isBlank()) {
+        if (match.when() != null && !match.when().trim().isEmpty()) {
             // 表达式条件：DreamLang 求值（player.xxx + 页面变量）
             try {
                 com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();

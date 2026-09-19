@@ -1,5 +1,7 @@
 package com.opendreamcore.ui;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.message.UiEvent;
 
 import java.util.concurrent.ThreadLocalRandom;
@@ -20,7 +22,7 @@ public final class UiSession {
 
     /** 服务端分配会话 id 时用（多人模式 page_control 下发）。 */
     public UiSession(String pageId, String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
+        if (sessionId == null || J8.isBlank(sessionId)) {
             throw new IllegalArgumentException("会话 id 不能为空");
         }
         this.pageId = pageId;

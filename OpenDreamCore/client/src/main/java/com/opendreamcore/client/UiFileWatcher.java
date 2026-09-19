@@ -38,9 +38,11 @@ public final class UiFileWatcher {
         Path game = mc.gameDirectory.toPath();
         this.uiDir = game.resolve("OpenDreamCore").resolve("UI");
         Path fontsDir = game.resolve("OpenDreamCore").resolve("fonts");
+        Path themesDir = game.resolve("OpenDreamCore").resolve("themes");
         try {
             Files.createDirectories(uiDir);
             Files.createDirectories(fontsDir);
+            Files.createDirectories(themesDir);
         } catch (IOException ignored) {
         }
         try {
@@ -48,6 +50,10 @@ public final class UiFileWatcher {
             registerRecursive(uiDir);
             if (Files.isDirectory(fontsDir)) {
                 registerSingle(fontsDir);
+            }
+            // themes/ 也盯着：改主题文件保存即全站换装，和页面热重载同一条路
+            if (Files.isDirectory(themesDir)) {
+                registerRecursive(themesDir);
             }
         } catch (IOException e) {
             LOGGER.warn("本地文件监听启动失败: {}", e.toString());

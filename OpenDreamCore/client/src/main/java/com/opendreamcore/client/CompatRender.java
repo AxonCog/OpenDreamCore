@@ -2,6 +2,7 @@ package com.opendreamcore.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.gui.GuiGraphics;
@@ -21,14 +22,14 @@ import java.util.function.Supplier;
  * 1.21.2 起 Mojang 移除了 GameRenderer::getPositionColorShader 等 shader getter，
  * GuiGraphics.blit(RL,…) 改为 blit(Function<ResourceLocation,RenderType>,…)。
  * 本类用"编译期只引用跨版本稳定类型 + 反射择路"的方式，让共享源码同时编译所有版本：
- *   - setColorShader()：存在 getter 则等价调用；缺失（≥1.21.2）静默跳过
+ *   setColorShader()：存在 getter 则等价调用；缺失（≥1.21.2）静默跳过
  *     （GuiGraphics.fill 系调用由新管线自动处理，不受影响）
- *   - blit(...)：运行时探测一次 GuiGraphics 的 11 参 blit 重载走对应分支，
+ *   blit(...)：运行时探测一次 GuiGraphics 的 11 参 blit 重载走对应分支，
  *     MethodHandle 缓存后热路径开销可忽略
  */
 public final class CompatRender {
 
-    // ---- ≥1.21.6 移除的管线开关：存在则调用，缺失静默跳过（新管线自动处理）----
+    // ≥1.21.6 移除的管线开关：存在则调用，缺失静默跳过（新管线自动处理）
     private static void rsToggle(String name, Class<?>[] types, Object[] args) {
         Method m = resolveMethod(RenderSystem.class, name, types);
         if (m == null) {
@@ -45,6 +46,28 @@ public final class CompatRender {
     public static void defaultBlendFunc() { rsToggle("defaultBlendFunc", new Class<?>[0], new Object[0]); }
     public static void enableDepthTest() { rsToggle("enableDepthTest", new Class<?>[0], new Object[0]); }
     public static void disableDepthTest() { rsToggle("disableDepthTest", new Class<?>[0], new Object[0]); }
+
+    /**
+     * 当前是否跑在渲染线程（Minecraft.getInstance().isSameThread() 的跨版本等价）。
+     *
+     * 直接调用该方法在 Forge 的 SRG reobf 阶段对"新增成员引用"很敏感，
+     * 这边用反射按方法名探测，字符串不参与重映射，Fabric / NeoForge / Forge 全线安全。
+     */
+    public static boolean isRenderThread() {
+        Object mc = Minecraft.getInstance();
+        if (mc == null) {
+            return true;
+        }
+        try {
+            Method m = resolveMethod(mc.getClass(), "isSameThread");
+            if (m == null) {
+                return true; // 探测不到就按渲染线程宽松放行，兜底逻辑（tick 补 flush）照样工作
+            }
+            return Boolean.TRUE.equals(m.invoke(mc));
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
 
     private CompatRender() {
     }
@@ -135,7 +158,7 @@ public final class CompatRender {
 
     /**
      * Registry.get(rl) 的版本安全等价：
-     * 1.21.1 返回 Item；≥1.21.2 返回 Optional&lt;Reference&lt;Item&gt;&gt;——统一解包为 Item 或 null。
+     * 1.21.1 返回 Item；≥1.21.2 返回 Optional<Reference<Item>>：统一解包为 Item 或 null。
      */
     public static Object registryGet(Object registry, ResourceLocation rl) {
         try {
@@ -150,8 +173,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= 反射方法解析（Fabric 生产环境方法名是 intermediary）=================
-    // 名称直查失败时按参数形状兜底：dev(mojmap) 与 NeoForge 生产(mojmap 运行时)名称直查命中；
+    // 反射方法解析（Fabric 生产环境方法名是 intermediary）    // 名称直查失败时按参数形状兜底：dev(mojmap) 与 NeoForge 生产(mojmap 运行时)名称直查命中；
     // Fabric 生产按名必失，靠唯一签名兜底。结果缓存，热路径零开销。
 
     private static final java.util.concurrent.ConcurrentHashMap<String, Method> METHOD_CACHE =
@@ -255,7 +277,7 @@ public final class CompatRender {
         return null;
     }
 
-    // ============ 物品/注册表信息族（1.20.1 ↔ 1.20.5+ 组件化重构） ============
+    // 物品/注册表信息族（1.20.1 ↔ 1.20.5+ 组件化重构）
 
     /**
      * 手持物品 tooltip 行：≥1.20.5 getTooltipLines(Item.TooltipContext,Player,Flag)；
@@ -409,7 +431,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= 顶点立即模式（Tesselator 方言吸收） =================
+    // 顶点立即模式（Tesselator 方言吸收）
 
     /** 探测结果：Tesselator 有 begin(Mode,VertexFormat) = ≥1.20.2 新式；否则走 getBuilder().begin。 */
     private static volatile Boolean modernBegin;
@@ -508,7 +530,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= GUI pose 栈方言（≥1.21.6 Matrix3x2fStack 替代 PoseStack） =================
+    // GUI pose 栈方言（≥1.21.6 Matrix3x2fStack 替代 PoseStack）
     // 两分支都是直接类型调用（PoseStack 与 JOML Matrix3x2fStack 在所有目标版本 classpath 上都存在），零反射热路径。
     // 注意：2D 栈无 Z 轴/四元数，X/Y 旋转在 GUI 平面无意义 → 新版路径仅应用 Z 分量。
 
@@ -527,6 +549,39 @@ public final class CompatRender {
             s.popMatrix();
         } else if (pose instanceof com.mojang.blaze3d.vertex.PoseStack p) {
             p.popPose();
+        }
+    }
+
+    /** 模型视图栈当前深度（joml Matrix4fStack 深度只在私有字段 curr 里）。
+     *  世界渲染钩子进出做深度守卫用；反射失败返回 -1（守卫静默跳过，不影响主流程）。 */
+    public static int modelViewStackDepth() {
+        try {
+            var stack = com.mojang.blaze3d.systems.RenderSystem.getModelViewStack();
+            var f = stack.getClass().getDeclaredField("curr");
+            f.setAccessible(true);
+            return f.getInt(stack);
+        } catch (Throwable ignored) {
+            return -1;
+        }
+    }
+
+    /** 把模型视图栈收回给定深度（多出来的矩阵弹掉；深度拿不到/已低于目标就什么都不做）。 */
+    public static void modelViewRestoreTo(int depth) {
+        var stack = com.mojang.blaze3d.systems.RenderSystem.getModelViewStack();
+        try {
+            if (depth < 0) {
+                return;
+            }
+            var f = stack.getClass().getDeclaredField("curr");
+            f.setAccessible(true);
+            int now = f.getInt(stack);
+            while (now > depth) {
+                // 弹栈走版本安全等价：1.20.1 的 PoseStack 是 popPose（没有 popMatrix），新版 joml 栈才是 popMatrix
+                posePop(stack);
+                now = f.getInt(stack);
+            }
+        } catch (Throwable ignored) {
+            // 反射读不到就放弃守卫（主修复在渲染阶段本身）
         }
     }
 
@@ -589,7 +644,7 @@ public final class CompatRender {
         return null;
     }
 
-    // ================= DynamicTexture 构造族（≥1.21.8 需 Supplier<String> 标签参） =================
+    // DynamicTexture 构造族（≥1.21.8 需 Supplier<String> 标签参）
 
     /** new DynamicTexture(NativeImage) 的版本安全等价；两参构造优先 null 标签，失败再带默认标签。 */
     public static DynamicTexture newDynamicTexture(NativeImage image) {
@@ -619,7 +674,7 @@ public final class CompatRender {
         return null;
     }
 
-    // ================= RenderSystem 纹理/染色族（世界 billboard 用） =================
+    // RenderSystem 纹理/染色族（世界 billboard 用）
 
     /**
      * RenderSystem.setShaderColor 的版本安全等价：缺失（≥1.21.6 移除）静默跳过。
@@ -681,7 +736,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= 实体/世界查询 getter 族（改名漂移） =================
+    // 实体/世界查询 getter 族（改名漂移）
 
     /** 布尔查询按候选名择路（isInWaterRainOrBubble/isDay/isNight 等）；全缺失返回默认值。 */
     public static boolean boolQuery(Object target, String[] candidateNames, boolean def) {
@@ -696,7 +751,7 @@ public final class CompatRender {
         return def;
     }
 
-    // ================= Inventory 字段私有化族（≥1.21.8 selected/items/armor） =================
+    // Inventory 字段私有化族（≥1.21.8 selected/items/armor）
 
     /** Inventory.selected（选中快捷栏槽位号）：getter 候选 → 公有字段 → 私有字段。 */
     public static int invSelectedIndex(Object inventory) {
@@ -780,7 +835,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= NBT 解析（TagParser.parseTag 改名漂移） =================
+    // NBT 解析（TagParser.parseTag 改名漂移）
 
     /** TagParser.parseTag(String) 的候选名等价（parseTag/parseCompoundFully/…）；全缺失返回 null。 */
     public static Object parseNbtCompound(String text) {
@@ -795,7 +850,7 @@ public final class CompatRender {
         return null;
     }
 
-    // ================= RenderTarget 读像素绑定族（≥1.21.6 移除 bindRead/unbindRead） =================
+    // RenderTarget 读像素绑定族（≥1.21.6 移除 bindRead/unbindRead）
 
     /** RenderTarget.bindRead() 的版本安全等价：新版直接绑颜色纹理的 GL id。 */
     public static boolean targetBindRead(Object rt) {
@@ -883,8 +938,7 @@ public final class CompatRender {
         }
     }
 
-    // ================= 版本信息（材质包目录化用）=================
-
+    // 版本信息（材质包目录化用）
     /**
      * 当前客户端的资源包格式版本号（pack.mcmeta 的 pack_format）。
      * 反射双路径：WorldVersion.getPackVersion()（新线）/ getDataVersion().getPackVersion()（旧线）。
@@ -920,5 +974,56 @@ public final class CompatRender {
         } catch (Exception e) {
             return new org.joml.Matrix4f();
         }
+    }
+
+    /**
+     * 当前 PoseStack 类（com.mojang.blaze3d.vertex.PoseStack），不存在返回 null。
+     */
+    public static Class<?> poseStackClass() {
+        try { return Class.forName("com.mojang.blaze3d.vertex.PoseStack"); } catch (ClassNotFoundException e) { return null; }
+    }
+
+    /**
+     * 当前渲染上下文的 PoseStack 实例（GuiGraphics.pose() 或 GuiGraphics.getPoseStack()），不存在返回 null。
+     */
+    public static Object currentPoseStack() {
+        try {
+            Class<?> gg = Class.forName("com.mojang.blaze3d.systems.GuiGraphics");
+            Method m = gg.getMethod("pose");
+            Object pose = m.invoke(null);
+            if (pose != null) return pose;
+        } catch (Exception ignored) {}
+        try {
+            Class<?> gg = Class.forName("com.mojang.blaze3d.systems.GuiGraphics");
+            Method m = gg.getMethod("getPoseStack");
+            return m.invoke(null);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /**
+     * 当前 MatrixStack 类（org.joml.Matrix3x2fStack 或 com.mojang.blaze3d.matrix.MatrixStack），不存在返回 null。
+     */
+    public static Class<?> matrixStackClass() {
+        try { return Class.forName("org.joml.Matrix3x2fStack"); } catch (ClassNotFoundException e) {}
+        try { return Class.forName("com.mojang.blaze3d.matrix.MatrixStack"); } catch (ClassNotFoundException e) {}
+        return null;
+    }
+
+    /**
+     * 当前渲染上下文的 MatrixStack 实例，不存在返回 null。
+     */
+    public static Object currentMatrixStack() {
+        try {
+            Class<?> gg = Class.forName("com.mojang.blaze3d.systems.GuiGraphics");
+            Method m = gg.getMethod("matrixStack");
+            return m.invoke(null);
+        } catch (Exception ignored) {}
+        try {
+            Class<?> gg = Class.forName("com.mojang.blaze3d.systems.GuiGraphics");
+            Method m = gg.getMethod("getMatrixStack");
+            return m.invoke(null);
+        } catch (Exception ignored) {}
+        return null;
     }
 }

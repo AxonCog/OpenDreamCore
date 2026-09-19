@@ -11,6 +11,7 @@ import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataNode;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -34,8 +35,10 @@ public final class GifPlayer {
 
     private final List<Frame> frames = new ArrayList<>();
     private final List<Integer> starts = new ArrayList<>();
-    private final int totalMs;
     private final ResourceLocation textureId;
+    private volatile int totalMs;
+    /** 统一帧间隔覆盖：>0 时忽略 gif 自带延迟，全部帧按 1000/fps 切（FontConfig fps 字段）。 */
+    private volatile int uniformDelayMs;
     private int lastIndex = -1;
 
     private GifPlayer(List<Frame> frames, int totalMs) {
@@ -48,6 +51,22 @@ public final class GifPlayer {
             starts.add(acc);
             acc += frame.delayMs();
         }
+    }
+
+    /** FontConfig 帧率落地：>0 用统一间隔（1000/fps 毫秒），否则回到 gif 自带帧间隔。 */
+    public void setUniformFps(double fps) {
+        uniformDelayMs = fps > 0 && fps <= 1000 ? (int) Math.max(1, Math.round(1000.0 / fps)) : 0;
+        int acc = 0;
+        starts.clear();
+        for (Frame f : frames) {
+            starts.add(acc);
+            acc += delayOf(f);
+        }
+        totalMs = Math.max(acc, 1);
+    }
+
+    private int delayOf(Frame f) {
+        return uniformDelayMs > 0 ? uniformDelayMs : f.delayMs();
     }
 
     /** 取当前帧纹理（按时间循环，帧变化才重建动态纹理）。 */
@@ -130,6 +149,28 @@ public final class GifPlayer {
             });
         }).exceptionally(t -> null);
         return null;
+    }
+
+    /** 内存字节流解析（散装扫描/资源云统一入口）：按 key 缓存，失败/非 gif 返回 null。 */
+    public static GifPlayer ofBytes(String key, byte[] data) {
+        if (key == null || data == null || data.length == 0) {
+            return null;
+        }
+        GifPlayer cached = CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        try (var in = new ByteArrayInputStream(data)) {
+            List<Frame> frames = decode(in);
+            if (frames.isEmpty()) {
+                return null;
+            }
+            GifPlayer player = new GifPlayer(frames, frames.stream().mapToInt(Frame::delayMs).sum());
+            CACHE.put(key, player);
+            return player;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 资源引用解析为本地路径（与 UiStyle.texture 同规则）。 */

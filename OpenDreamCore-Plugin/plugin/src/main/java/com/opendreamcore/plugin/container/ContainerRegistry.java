@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ContainerRegistry {
 
     /** 绑定：会话 → 玩家 + 真实容器。 */
+    @com.github.bsideup.jabel.Desugar
     public record Binding(String sessionId, Player player, Inventory inventory,
                           String pageId, String type, String title, long boundAt) {
     }
@@ -96,29 +97,29 @@ public final class ContainerRegistry {
         List<ContainerSync.Slot> slots = new ArrayList<>();
         for (int i = 0; i < inventory.getSize(); i++) {
             ItemStack item = inventory.getItem(i);
-            if (item != null && !item.getType().isAir()) {
-                slots.add(new ContainerSync.Slot(i, item.getType().getKey().toString(), item.getAmount()));
+            if (item != null && !com.opendreamcore.plugin.util.LegacyItemCompat.isAir(item)) {
+                slots.add(new ContainerSync.Slot(i, com.opendreamcore.plugin.util.LegacyItemCompat.key(item), item.getAmount()));
             }
         }
         ItemStack cursor = cursor(binding.player());
         return new ContainerSync(binding.sessionId(), binding.type(), binding.title(),
                 inventory.getSize(), slots,
-                cursor == null ? null : cursor.getType().getKey().toString(),
+                cursor == null ? null : com.opendreamcore.plugin.util.LegacyItemCompat.key(cursor),
                 cursor == null ? 0 : cursor.getAmount());
     }
 
-    // ---------- 槽位拖放光标（服务端权威） ----------
+    // 槽位拖放光标（服务端权威）
 
     private final Map<UUID, org.bukkit.inventory.ItemStack> cursors = new ConcurrentHashMap<>();
 
     /** 玩家光标物品（null = 无）。 */
     public org.bukkit.inventory.ItemStack cursor(Player player) {
         org.bukkit.inventory.ItemStack c = cursors.get(player.getUniqueId());
-        return c == null || c.getType().isAir() ? null : c;
+        return c == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(c) ? null : c;
     }
 
     public void setCursor(Player player, org.bukkit.inventory.ItemStack stack) {
-        if (stack == null || stack.getType().isAir() || stack.getAmount() <= 0) {
+        if (stack == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(stack) || stack.getAmount() <= 0) {
             cursors.remove(player.getUniqueId());
         } else {
             cursors.put(player.getUniqueId(), stack.clone());

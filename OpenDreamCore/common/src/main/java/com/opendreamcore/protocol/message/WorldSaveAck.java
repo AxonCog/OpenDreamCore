@@ -4,7 +4,7 @@ import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
  * 世界布局保存确认（S→C）：服务端烘焙完成后回执，客户端据此显示成功/失败反馈
- * （baked &gt; 0 = 已写入 N 项/键；0 = 无租约或文件不可写）。
+ * （baked > 0 = 已写入 N 项/键；0 = 无租约或文件不可写）。
  */
 public final class WorldSaveAck implements Message {
 

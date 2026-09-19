@@ -1,0 +1,188 @@
+// common-j8：把高版本共享树（OpenDreamCore/common）原样编成 JDK8 字节码。
+//
+// 远古线的 1.12.2 / 1.7.10 / 1.6.4 跑的是真 JDK8 的 javac 与运行时，
+// 而共享树里全是 var、instanceof 模式匹配、switch 表达式、文本块、record 这类现代语法。
+// 以前的做法是手工抄一份 common-legacy、再脚本降级出 common-legacy-jdk8-pure，
+// 三棵树各 139 个文件，其中两棵还从没提交进 git，抄着抄着就漂了（139 个里 55 个已经不一致）。
+//
+// 现在只留一份源码：
+//   语法层 —— Jabel 脱糖（1.16.5 那套配置直接搬过来）
+//   API 层 —— 共享树自己守着，不写 JDK9+ 的 API，一律走 com.opendreamcore.util.J8，
+//            由 tools/j8_compat.py 当门禁
+// 这样高版本改完，低版本下次构建自动跟上。
+//
+// 产物是 jar，远古 target 直接依赖它，不再把源码塞进自己的 sourceSets。
+
+plugins {
+    id 'java-library'
+}
+
+version = '0.1.2'
+group = 'com.opendreamcore'
+
+java {
+    toolchain {
+        // Jabel 1.0.0 在 JDK17 上最稳，跟 1.16.5 用同一个
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://maven.aliyun.com/repository/public' }
+}
+
+// 测试源码直接用共享树 common/src/test（纯逻辑层零 MC 依赖，common-j8 是它的 JUnit 宿主）
+sourceSets {
+    test {
+        java {
+            srcDir '../../OpenDreamCore/common/src/test/java'
+            // RemoteMedia 在 j8 主源里被排除（JDK8 无 java.net.http），它的测试同样不编
+            exclude 'com/opendreamcore/remote/**'
+        }
+        resources { srcDir '../../OpenDreamCore/common/src/test/resources' }
+    }
+}
+
+dependencies {
+    api 'com.google.code.gson:gson:2.10.1'
+    api 'org.yaml:snakeyaml:2.2'
+    api 'org.antlr:antlr4-runtime:4.13.1'
+    annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
+    compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
+    // 共享树 common/src/test 的 JUnit 宿主：console-standalone 一个 jar 全包
+    // （jupiter-api 编译测试源 + engine 跑测试；不依赖 Gradle Test worker 的 launcher 集成）
+    testImplementation 'org.junit.platform:junit-platform-console-standalone:1.10.2'
+}
+
+// Gradle 7.6 的 Test worker 在本机 fork 后扫不到 build/classes/java/test（CNFE），
+// 测试改用 JavaExec + ConsoleLauncher 直跑：classpath 就是 runtimeClasspath，可控可查。
+tasks.register('runUiCoordTests', JavaExec) {
+    group = 'verification'
+    description = 'Runs Viewport/Length/DesignCoord coordinate tests via ConsoleLauncher.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.junit.platform.console.ConsoleLauncher'
+    args '--select-class', 'com.opendreamcore.ui.ViewportTest',
+         '--select-class', 'com.opendreamcore.ui.LengthTest',
+         '--select-class', 'com.opendreamcore.ui.DesignCoordTest',
+         '--details', 'tree'
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+
+tasks.register('runAllTests', JavaExec) {
+    group = 'verification'
+    description = 'Runs the entire common/src/test suite via ConsoleLauncher.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.junit.platform.console.ConsoleLauncher'
+    args '--scan-class-path',
+         '--details', 'tree'
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Jabel 只在类型上看到名为 com.github.bsideup.jabel.Desugar 的注解时才脱糖 record，
+// 而且是拿 FQN 做 equals——自建同名注解没用（javap 看过字节码，确认是精确匹配）。
+// 那个注解是 @Retention(SOURCE)，编译完不留痕迹，所以别把它写进共享树污染 12 个现代 target，
+// 在这里复制源码时注入就行：共享树保持干净，Jabel 也认账。
+def jabelDesugar = 'com.github.bsideup.jabel.Desugar'
+
+tasks.register('prepareJ8Sources') {
+    def srcDir = file('../../OpenDreamCore/common/src/main/java')
+    def genDir = file("$buildDir/generated/common-j8-src")
+    inputs.dir srcDir
+    outputs.dir genDir
+    doLast {
+        genDir.deleteDir()
+        genDir.mkdirs()
+        def decl = java.util.regex.Pattern.compile(
+                '(?m)^([ \\t]*)((?:public |private |protected |static |final )*record [A-Za-z_]\\w*)')
+        def srcRoot = srcDir.toPath()
+        fileTree(srcDir).matching { include '**/*.java' }.each { File f ->
+            def rel = srcRoot.relativize(f.toPath()).toString().replace('\\', '/')
+            // RemoteMedia 用 java.net.http（JDK11+）和 HexFormat（JDK17+），JDK8 上没有对应物。
+            // 它是可选能力（拉远端图片/音频），远古线不启用，跟 1.16.5 的处理一致。
+            if (rel == 'com/opendreamcore/remote/RemoteMedia.java') {
+                return
+            }
+            def out = new File(genDir, rel)
+            out.parentFile.mkdirs()
+            def text = f.getText('UTF-8')
+            def m = decl.matcher(text)
+            if (m.find()) {
+                def sb = new StringBuffer()
+                m.reset()
+                while (m.find()) {
+                    def indent = m.group(1)
+                    m.appendReplacement(sb,
+                            java.util.regex.Matcher.quoteReplacement(indent + '@Desugar\n' + m.group(0)))
+                }
+                m.appendTail(sb)
+                text = sb.toString()
+                text = text.replaceFirst('(?m)^(package [^;]+;)', '$1\n\nimport ' + jabelDesugar + ';')
+            }
+            out.setText(text, 'UTF-8')
+        }
+    }
+}
+
+sourceSets {
+    main {
+        java.srcDir "$buildDir/generated/common-j8-src"
+    }
+}
+
+tasks.named('compileJava') { dependsOn 'prepareJ8Sources' }
+
+tasks.withType(JavaCompile).configureEach {
+    // 源码里中文注释与中文字符串是常态，Windows 默认 GBK 会读坏
+    options.encoding = 'UTF-8'
+    // 一次性把 JDK9+ API 错误列全，别挤牙膏式看前 100 个
+    options.compilerArgs += ['-Xmaxerrs', '1000']
+    if (name == 'compileTestJava') {
+        // 测试源只在本机 JVM 跑、不进 jar：直接 release 17 直编（含 record），
+        // 不套 -Xplugin:jabel（test classpath 没有 jabel 插件，套了反而报"找不到插件"）
+        options.release = 17
+    } else {
+        options.release = 8
+        options.compilerArgs += ['-Xplugin:jabel']
+    }
+}
+
+tasks.named('jar') {
+    archiveBaseName = 'opendreamcore-common-j8'
+}
+
+// 出包后验一下字节码版本，别哪天脱糖没生效、默默产出 major 61 的 class
+tasks.register('verifyBytecodeLevel') {
+    group = 'verification'
+    description = 'Checks every class in the jar is Java 8 bytecode (major version 52).'
+    dependsOn tasks.named('jar')
+    doLast {
+        def jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        int bad = 0
+        int total = 0
+        new java.util.zip.ZipInputStream(new FileInputStream(jarFile)).withCloseable { zis ->
+            def e
+            while ((e = zis.nextEntry) != null) {
+                if (!e.name.endsWith('.class')) {
+                    continue
+                }
+                total++
+                def head = new byte[8]
+                zis.read(head)
+                int major = ((head[6] & 0xFF) << 8) | (head[7] & 0xFF)
+                if (major != 52) {
+                    bad++
+                    println "不是 Java 8 字节码: ${e.name} (major ${major})"
+                }
+            }
+        }
+        println "检查 ${total} 个 class，非 52 的 ${bad} 个"
+        if (bad > 0) {
+            throw new GradleException('Jabel 脱糖没生效，产出了非 Java 8 字节码')
+        }
+    }
+}

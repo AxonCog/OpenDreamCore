@@ -14,19 +14,19 @@ import java.nio.file.Path;
  * 外置编辑器：用系统默认程序打开 YAML 文件，保存后 UiFileWatcher 自动热重载。
  *
  * 支持两种模式：
- * <ul>
- *   <li>系统默认编辑器（Desktop.edit）— 适合 .yaml 关联了 VSCode/Notepad++ 等</li>
- *   <li>指定编辑器命令（options 编辑器路径）— 适合指定 IDE 打开</li>
- * </ul>
+ * 
+ *   系统默认编辑器（Desktop.edit），适合 .yaml 关联了 VSCode/Notepad++ 等
+ *   指定编辑器命令（options 编辑器路径），适合指定 IDE 打开
+ * 
  *
  * 工作流：
- * <ol>
- *   <li>/odc edit shop → 游戏 UI 高亮元素 + 文件已就绪</li>
- *   <li>/odc edit external shop → 系统编辑器打开 shop.yaml</li>
- *   <li>在外置编辑器中修改并保存</li>
- *   <li>UiFileWatcher 监听到文件变化 → 自动热重载</li>
- *   <li>游戏内页面实时刷新</li>
- * </ol>
+ * 
+ *   /odc edit shop → 游戏 UI 高亮元素 + 文件已就绪
+ *   /odc edit external shop → 系统编辑器打开 shop.yaml
+ *   在外置编辑器中修改并保存
+ *   UiFileWatcher 监听到文件变化 → 自动热重载
+ *   游戏内页面实时刷新
+ * 
  */
 public final class ExternalEditor {
 
@@ -63,8 +63,8 @@ public final class ExternalEditor {
      * 确保 YAML 文件存在：存在则返回路径，不存在则用模板创建。
      * 支持子路径：pageId="hud/help" → OpenDreamCore/UI/hud/help.yaml
      *
-     * @param pageId 页面 id（不含扩展名，支持斜杠子路径）
-     * @return YAML 文件路径（已存在或已创建）
+     * pageId：页面 id（不含扩展名，支持斜杠子路径）
+     * 返回：YAML 文件路径（已存在或已创建）
      */
     public static Path ensureFile(String pageId) {
         Path file = findFile(pageId);
@@ -83,8 +83,8 @@ public final class ExternalEditor {
     /**
      * 用系统默认程序打开 YAML 文件（外置编辑器）。
      *
-     * @param pageId 页面 id
-     * @return true = 打开成功
+     * pageId：页面 id
+     * 返回：true = 打开成功
      */
     public static boolean open(String pageId) {
         Path file = ensureFile(pageId);
@@ -97,9 +97,9 @@ public final class ExternalEditor {
     /**
      * 用指定编辑器命令打开文件（如 VSCode: code, Notepad++: notepad++）。
      *
-     * @param editorCmd 编辑器命令（如 "code", "notepad++", "subl"）
-     * @param pageId    页面 id
-     * @return true = 打开成功
+     * editorCmd：编辑器命令（如 "code", "notepad++", "subl"）
+     * pageId：页面 id
+     * 返回：true = 打开成功
      */
     public static boolean openWith(String editorCmd, String pageId) {
         Path file = ensureFile(pageId);
@@ -159,8 +159,8 @@ public final class ExternalEditor {
      * 在游戏目录下查找页面文件路径（支持 .yaml 和 .yml，支持子路径）。
      * pageId="hud/help" → OpenDreamCore/UI/hud/help.yaml
      *
-     * @param pageId 页面 id（支持斜杠子路径）
-     * @return 文件路径（优先 .yaml，其次 .yml；都不存在返回 .yaml 路径供创建）
+     * pageId：页面 id（支持斜杠子路径）
+     * 返回：文件路径（优先 .yaml，其次 .yml；都不存在返回 .yaml 路径供创建）
      */
     public static Path findFile(String pageId) {
         Path uiDir = Minecraft.getInstance().gameDirectory.toPath()

@@ -1,5 +1,7 @@
 package com.opendreamcore.plugin;
 
+import com.opendreamcore.util.J8;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -13,7 +15,7 @@ public final class Registry<T> {
     private final Map<String, T> entries = new LinkedHashMap<>();
 
     public void register(String id, T value) {
-        if (id == null || id.isBlank()) {
+        if (id == null || J8.isBlank(id)) {
             throw new IllegalArgumentException("注册 id 不能为空");
         }
         if (entries.containsKey(id)) {
@@ -24,7 +26,7 @@ public final class Registry<T> {
 
     /** 覆盖式注册（插件重载时用）。 */
     public void registerOrReplace(String id, T value) {
-        if (id == null || id.isBlank()) {
+        if (id == null || J8.isBlank(id)) {
             throw new IllegalArgumentException("注册 id 不能为空");
         }
         entries.put(id, value);
@@ -55,6 +57,6 @@ public final class Registry<T> {
     }
 
     public Map<String, T> snapshot() {
-        return Map.copyOf(entries);
+        return J8.mapCopy(entries);
     }
 }

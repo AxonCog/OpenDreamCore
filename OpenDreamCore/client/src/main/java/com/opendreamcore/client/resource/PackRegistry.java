@@ -10,9 +10,9 @@ import java.util.function.Supplier;
 /**
  * 材质包注册表：全局可用包表 + 统一重载入口。
  *
- * <p>平台差异（如何把目录/zip 变成引擎资源包对象）全部收敛在
+ * 平台差异（如何把目录/zip 变成引擎资源包对象）全部收敛在
  * {@link com.opendreamcore.client.spi.ResourcePackInjector} 的各 target 实现里；
- * 本类与其余内容处理器只面向"已安装"语义工作，跨版本零改动。</p>
+ * 本类与其余内容处理器只面向"已安装"语义工作，跨版本零改动。
  */
 public final class PackRegistry {
 

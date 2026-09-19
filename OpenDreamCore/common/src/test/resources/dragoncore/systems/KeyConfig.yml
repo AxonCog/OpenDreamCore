@@ -1,0 +1,104 @@
+﻿T:
+  cooldown: 1
+  commands:
+    - "[console]dragoncore opengui %player% 菜单"
+V:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 点券充值 %player%"
+J:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 肉鸽配套菜单 %player%"
+地区传送:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 地区传送 %player%"
+环球商店:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 环球商店 %player%"
+点券商城:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 点券商城 %player%"
+功能:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 功能 %player%"
+活动:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 假期活动 %player%"
+充值:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 点券充值 %player%"
+精灵治疗:
+  cooldown: 1
+  commands:
+    - "[op]pokeheal %player%"
+世界传送:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 世界传送 %player%"
+快捷商店:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 环球商店 %player%"
+充值界面:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 点券充值 %player%"
+指令界面:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 新手辅助菜单 %player%"
+远程电脑:
+  cooldown: 1
+  commands:
+    - "[op]pc"
+礼包管理:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 每周礼包 %player%"
+#时装:
+  #cooldown: 1
+  #commands:
+   # "[op]say 按p键打开"
+精灵信息:
+  cooldown: 1
+  commands:
+    - "[op]pi"
+玩家战队:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 创建队伍 %player%"
+游戏攻略:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 宝可梦大师 %player%"
+头衔称号:
+  cooldown: 1
+  commands:
+    - "tags"
+头衔称号:
+  cooldown: 1
+  commands:
+    - "tags"
+成就:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 成就大师 %player%"
+更新活动:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 暑假活动 %player%"
+绑定系统:
+  cooldown: 1
+  commands:
+    - "[console]trmenu open 邀请系统 %player%"
+跨服背包:
+  cooldown: 1
+  commands:
+    - "[op]PlayerInv"

@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 public final class TimeDelayLegacy {
@@ -10,7 +12,7 @@ public final class TimeDelayLegacy {
             String script = LegacyMethods.str(a, 1);
             long ms = (long) LegacyMethods.num2(a, 0);
             if (script != null && ms > 0) {
-                java.util.concurrent.CompletableFuture.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+                J8.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
                         .execute(() -> com.opendreamcore.script.DreamLang.execute(script, null));
             }
             return null;
@@ -19,7 +21,7 @@ public final class TimeDelayLegacy {
             String fn = LegacyMethods.str(a, 0);
             long ms = (long) LegacyMethods.num2(a, 1);
             if (fn != null && ms > 0) {
-                java.util.concurrent.CompletableFuture.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+                J8.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
                         .execute(() -> com.opendreamcore.script.DreamLang.execute(fn + "()", null));
             }
             return null;

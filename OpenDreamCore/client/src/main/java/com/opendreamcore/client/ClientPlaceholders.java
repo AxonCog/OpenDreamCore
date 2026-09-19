@@ -34,7 +34,7 @@ public final class ClientPlaceholders {
         return Minecraft.getInstance().player;
     }
 
-    // ========== color：命名颜色 → 色值 ==========
+    // color：命名颜色 → 色值
 
     private static void registerColor() {
         Map<String, String> colors = new java.util.LinkedHashMap<>();
@@ -63,7 +63,7 @@ public final class ClientPlaceholders {
         PlaceholderRegistry.register("color", key -> colors.get(key));
     }
 
-    // ========== system：时间/日期/毫秒；未知回落 global ==========
+    // system：时间/日期/毫秒；未知回落 global
 
     private static void registerSystem() {
         PlaceholderRegistry.register("system", key -> {
@@ -89,7 +89,7 @@ public final class ClientPlaceholders {
         });
     }
 
-    // ========== query：窗口/FPS ==========
+    // query：窗口/FPS
 
     private static void registerQuery() {
         PlaceholderRegistry.register("query", key -> {
@@ -127,7 +127,7 @@ public final class ClientPlaceholders {
         });
     }
 
-    // ========== player：当前玩家 ==========
+    // player：当前玩家
 
     private static void registerPlayer() {
         PlaceholderRegistry.register("player", key -> {
@@ -168,7 +168,7 @@ public final class ClientPlaceholders {
         });
     }
 
-    // ========== entity：准星指向实体 / 附近实体 ==========
+    // entity：准星指向实体 / 附近实体
 
     private static void registerEntity() {
         PlaceholderRegistry.register("entity", key -> {
@@ -196,7 +196,7 @@ public final class ClientPlaceholders {
         });
     }
 
-    // ========== item：手持物品 ==========
+    // item：手持物品
 
     private static void registerItem() {
         PlaceholderRegistry.register("item", key -> {

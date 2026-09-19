@@ -1,0 +1,8 @@
+[{
+  "modid": "opendreamcore",
+  "name": "OpenDreamCore",
+  "version": "0.1.2",
+  "description": "老版本线：YAML 界面引擎（1.12.2）",
+  "authorList": ["OpenDreamCore"],
+  "license": "Apache-2.0"
+}]

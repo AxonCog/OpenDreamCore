@@ -336,7 +336,7 @@ public final class OdcEvents {
         }
     }
 
-    // ---- 工厂（插件内部用） ----
+    // 工厂（插件内部用）
 
     public static OpenEvent open(Player player, String pageId, String sessionId) {
         return new OpenEvent(player, pageId, sessionId);

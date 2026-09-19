@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -34,7 +36,7 @@ public final class ChatMessage implements Message {
     private final String text;
 
     public ChatMessage(String channel, Action action, long id, String text) {
-        if (channel == null || channel.isBlank() || channel.length() > 32) {
+        if (channel == null || J8.isBlank(channel) || channel.length() > 32) {
             throw new IllegalArgumentException("通道名非法");
         }
         this.channel = channel;

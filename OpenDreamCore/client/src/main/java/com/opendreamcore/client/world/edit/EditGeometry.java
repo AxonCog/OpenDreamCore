@@ -13,7 +13,7 @@ public final class EditGeometry {
     /**
      * 组对齐：计算整组包围盒 (minX..maxX, minY..maxY) 对齐到 bounds 所需的整体位移。
      *
-     * @return {dx, dy}；mode 不支持时返回 null
+     * 返回：{dx, dy}；mode 不支持时返回 null
      */
     public static double[] alignDelta(String mode, double[] bounds,
                                       double minX, double maxX, double minY, double maxY) {
@@ -36,7 +36,7 @@ public final class EditGeometry {
      * 单元素对齐：宽 w 高 h 的元素在 bounds 内按 mode 对齐后的中心点。
      * 未被该模式约束的一轴保持元素当前坐标。
      *
-     * @return {x, y}；mode 不支持时返回 null
+     * 返回：{x, y}；mode 不支持时返回 null
      */
     public static double[] alignTarget(String mode, double[] bounds, double w, double h,
                                        double curX, double curY) {
@@ -58,8 +58,8 @@ public final class EditGeometry {
     /**
      * 等间距分布：把若干元素（按轴中心排序后）均匀铺满 [lo, hi]。
      *
-     * @param sizes 每个元素沿该轴的尺寸（与排序后顺序一致）
-     * @return 每个元素的新轴中心；少于 2 个元素时返回 null
+     * sizes：每个元素沿该轴的尺寸（与排序后顺序一致）
+     * 返回：每个元素的新轴中心；少于 2 个元素时返回 null
      */
     public static double[] distributeCenters(double lo, double hi, double[] sizes) {
         if (sizes == null || sizes.length < 2) {

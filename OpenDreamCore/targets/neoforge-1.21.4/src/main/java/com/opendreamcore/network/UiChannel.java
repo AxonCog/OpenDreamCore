@@ -37,6 +37,10 @@ public final class UiChannel {
         return new CustomPacketPayload.Type<>(channel(Protocol.PAGE_SYNC));
     }
 
+    public static CustomPacketPayload.Type<RawPayload> visualRulesType() {
+        return new CustomPacketPayload.Type<>(channel(Protocol.VISUAL_RULES));
+    }
+
     public static CustomPacketPayload.Type<RawPayload> uiEventType() {
         return new CustomPacketPayload.Type<>(channel(Protocol.UI_EVENT));
     }
@@ -137,6 +141,11 @@ public final class UiChannel {
         return new CustomPacketPayload.Type<>(channel(Protocol.WORLD_ELEMENT_STATE));
     }
 
+    public static CustomPacketPayload.Type<RawPayload> chunkType() {
+        // 大件专用：分片帧都走这条，帧头里带真实业务通道名
+        return new CustomPacketPayload.Type<>(channel(Protocol.CHUNK));
+    }
+
     public static CustomPacketPayload.Type<RawPayload> windowTitleType() {
         return new CustomPacketPayload.Type<>(channel(Protocol.WINDOW_TITLE));
     }
@@ -172,6 +181,30 @@ public final class UiChannel {
      * 直接走 Connection.send(ServerboundCustomPayloadPacket) 是原版 vanilla 路径，不经过 checkPacket。
      */
     public static void sendRaw(Connection connection, String channelPath, byte[] bytes) {
+        // minecraft:register 是已知类型，原版编解码按 ID 分发并强转对应 Payload 类；
+        // 必须用专用 MinecraftRegisterPayload 承载，塞 RawPayload 会 ClassCastException（1.21.8 实机断连实证）
+        if (channelPath.equals("minecraft:register")) {
+            java.util.Set<net.minecraft.resources.ResourceLocation> channels = new java.util.LinkedHashSet<>();
+            for (String c : Protocol.CLIENTBOUND_CHANNELS) {
+                int i = c.indexOf(':');
+                channels.add(i >= 0
+                        ? net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(c.substring(0, i), c.substring(i + 1))
+                        : net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(Protocol.NAMESPACE, c));
+            }
+            connection.send(new ServerboundCustomPayloadPacket(
+                    new net.neoforged.neoforge.network.payload.MinecraftRegisterPayload(channels)));
+            return;
+        }
+        // 上行 32767 这条线 Mojang 从 1.7 画到现在没挪过窝，大件在这几自动切块走 chunk 通道，
+        // 插件端拼好再当一条消息处理（ClientController.sendRaw 是上行切包的主收口，这里对齐同样逻辑）
+        if (bytes != null && bytes.length > com.opendreamcore.protocol.LegacyFraming.MAX_CHUNK_PAYLOAD) {
+            for (byte[] frame : com.opendreamcore.protocol.LegacyFraming.frames(
+                    channelPath, bytes, com.opendreamcore.protocol.LegacyFraming.MAX_CHUNK_PAYLOAD)) {
+                connection.send(new ServerboundCustomPayloadPacket(
+                        RawPayload.of(chunkType(), frame)));
+            }
+            return;
+        }
         CustomPacketPayload.Type<RawPayload> type = typeFor(channelPath);
         RawPayload payload = RawPayload.of(type, bytes);
         connection.send(new ServerboundCustomPayloadPacket(payload));
@@ -194,9 +227,11 @@ public final class UiChannel {
         registrar.commonToServer(cloudDiffType(), rawCodec(cloudDiffType()), HandshakeHandler::handleCloudDiff);
         registrar.commonToServer(tooltipResyncType(), rawCodec(tooltipResyncType()), HandshakeHandler::handleTooltipResync);
         registrar.commonToServer(pageCloseType(), rawCodec(pageCloseType()), HandshakeHandler::handlePageClose);
+        registrar.commonBidirectional(chunkType(), rawCodec(chunkType()), HandshakeHandler::handleChunk);
         registrar.commonToClient(readyAckType(), rawCodec(readyAckType()), HandshakeHandler::handleReadyAck);
         registrar.commonToClient(pageControlType(), rawCodec(pageControlType()), HandshakeHandler::handlePageControl);
         registrar.commonToClient(pageSyncType(), rawCodec(pageSyncType()), HandshakeHandler::handlePageSync);
+        registrar.commonToClient(visualRulesType(), rawCodec(visualRulesType()), HandshakeHandler::handleVisualRules);
         registrar.commonToClient(cloudManifestType(), rawCodec(cloudManifestType()), HandshakeHandler::handleCloudManifest);
         registrar.commonToClient(cloudFileType(), rawCodec(cloudFileType()), HandshakeHandler::handleCloudFile);
         registrar.commonToClient(cloudDeleteType(), rawCodec(cloudDeleteType()), HandshakeHandler::handleCloudDelete);

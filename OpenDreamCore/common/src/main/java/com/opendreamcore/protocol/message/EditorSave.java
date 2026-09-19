@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -12,10 +14,10 @@ public final class EditorSave implements Message {
     private final String yaml;
 
     public EditorSave(String pageId, String yaml) {
-        if (pageId == null || pageId.isBlank() || pageId.length() > 64) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
             throw new IllegalArgumentException("页面 id 非法: " + pageId);
         }
-        if (yaml == null || yaml.isBlank()) {
+        if (yaml == null || J8.isBlank(yaml)) {
             throw new IllegalArgumentException("页面内容为空: " + pageId);
         }
         this.pageId = pageId;

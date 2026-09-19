@@ -44,6 +44,9 @@ public final class RemoteImageStore {
             return ready;
         }
         if (!RemoteMedia.isSafeUrl(url)) {
+            // SSRF 防护拒掉的（内网/非 http 协议）也吱一声，玩家知道自己写错了
+            ClientController.chatWarnOnce("unsafe-url:" + url,
+                    "§e[OpenDreamCore] §f已拒绝不安全的图片地址（仅公网 http/https）: " + url);
             return null;
         }
         if (!LOADING.add(url)) {
@@ -53,6 +56,11 @@ public final class RemoteImageStore {
             Minecraft.getInstance().execute(() -> loadTexture(url, path));
         }).exceptionally(t -> {
             LOADING.remove(url);
+            // 下载失败别哑巴：聊天栏说一声（去重，同一 URL 只提醒一次）
+            Minecraft.getInstance().execute(() -> ClientController.chatWarnOnce(
+                    "remote-img:" + url,
+                    "§e[OpenDreamCore] §f远程图片加载失败: " + url
+                            + "（" + ClientController.shortReason(t) + "）"));
             return null;
         });
         return null;

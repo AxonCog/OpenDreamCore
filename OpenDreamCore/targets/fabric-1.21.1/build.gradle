@@ -96,7 +96,7 @@ dependencies {
     shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
 }
 
-// ---- shadow 配置 ----
+// shadow 配置
 // 仅把 antlr4-runtime 重定向并打平进主 jar，不再使用 include/jarinjar。
 shadowJar {
     archiveClassifier = 'shadow'
@@ -134,14 +134,15 @@ tasks.named('processResources') {
 // build 完自动复制 jar 到 ../../../output
 tasks.register('collectOutput') {
     group = 'build'
-    description = 'Copy built jar to ../../../output'
+    description = 'Copy built jar to ../../../output/client'
     doLast {
-        def out = file('../../../output')
+        def out = file('../../../output/client')
         out.mkdirs()
         // 只收集当前版本产物，并清掉 output 里旧版本残留，防止误用陈旧 jar
         tasks.named('remapJar').get().archiveFile.get().asFile.parentFile.listFiles()?.each { f ->
             if (f.name.endsWith('.jar') && !f.name.contains('-dev') && !f.name.contains('-sources') && !f.name.contains('-shadow')) {
                 copy { from f; into out }
+                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
                 println "collected ${f.name} -> ${out.absolutePath}"
             }
         }
@@ -151,7 +152,14 @@ tasks.register('collectOutput') {
                 delete f
                 println "removed stale ${f.name}"
             }
+        }        // all 里也同步清掉非当前版本的残留，避免拿到陈旧 jar
+        file(out.parentFile.path + "/all").listFiles()?.each { f ->
+            if (f.name.startsWith("${mod_name}-") && f.name.endsWith('.jar')
+                    && !f.name.contains("-${mod_version}.jar")) {
+                delete f
+            }
         }
+
     }
 }
 tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }

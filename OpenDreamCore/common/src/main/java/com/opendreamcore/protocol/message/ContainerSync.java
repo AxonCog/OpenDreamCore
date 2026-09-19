@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 import java.util.ArrayList;
@@ -32,14 +34,14 @@ public final class ContainerSync implements Message {
 
     public ContainerSync(String sessionId, String type, String title, int size, List<Slot> slots,
                          String cursorItemId, int cursorCount) {
-        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+        if (sessionId == null || J8.isBlank(sessionId) || sessionId.length() > 64) {
             throw new IllegalArgumentException("会话 id 非法");
         }
         this.sessionId = sessionId;
         this.type = type == null ? "" : type;
         this.title = title == null ? "" : title;
         this.size = size;
-        this.slots = slots == null ? List.of() : List.copyOf(slots);
+        this.slots = slots == null ? J8.list() : J8.listCopy(slots);
         this.cursorItemId = cursorItemId == null || cursorItemId.isEmpty() ? null : cursorItemId;
         this.cursorCount = this.cursorItemId == null ? 0 : Math.max(0, cursorCount);
     }

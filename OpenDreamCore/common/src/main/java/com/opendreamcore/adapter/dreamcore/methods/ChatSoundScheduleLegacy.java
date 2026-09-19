@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 public final class ChatSoundScheduleLegacy {
@@ -55,7 +57,7 @@ public final class ChatSoundScheduleLegacy {
         LegacyMethods.register("open_web_url", a -> {
             try {
                 String url = s(a, 0);
-                if (url != null && !url.isBlank()) {
+                if (url != null && !J8.isBlank(url)) {
                     java.awt.Desktop.getDesktop().browse(new java.net.URI(url));
                 }
             } catch (Exception ignored) { }
@@ -222,7 +224,7 @@ public final class ChatSoundScheduleLegacy {
 
     private static void delayed(long ms, Object fn) {
         if (fn == null) return;
-        java.util.concurrent.CompletableFuture.delayedExecutor(
+        J8.delayedExecutor(
                         Math.max(0, ms), java.util.concurrent.TimeUnit.MILLISECONDS)
                 .execute(() -> invokeFn(fn));
     }

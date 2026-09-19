@@ -25,3 +25,6 @@ type = "required"
 versionRange = "[1.21.1,1.21.2)"
 ordering = "NONE"
 side = "CLIENT"
+
+[[mixins]]
+config = "odc-nf.mixins.json"

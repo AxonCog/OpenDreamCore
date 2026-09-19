@@ -6,7 +6,7 @@ package com.opendreamcore.protocol;
  */
 public interface OdcByteBuf {
 
-    // ---- 写 ----
+    // 写
     void writeByte(int b);
 
     void writeVarInt(int value);
@@ -22,7 +22,7 @@ public interface OdcByteBuf {
 
     void writeInt(int value);
 
-    // ---- 读 ----
+    // 读
     int readByte();
 
     int readVarInt();

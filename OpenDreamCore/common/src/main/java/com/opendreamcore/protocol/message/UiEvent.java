@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -42,10 +44,10 @@ public final class UiEvent implements Message {
     private final String data;
 
     public UiEvent(String sessionId, String elementId, Trigger trigger, long sequence, String data) {
-        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+        if (sessionId == null || J8.isBlank(sessionId) || sessionId.length() > 64) {
             throw new IllegalArgumentException("会话 id 非法");
         }
-        if (elementId == null || elementId.isBlank() || elementId.length() > 64) {
+        if (elementId == null || J8.isBlank(elementId) || elementId.length() > 64) {
             throw new IllegalArgumentException("元素 id 非法");
         }
         this.sessionId = sessionId;

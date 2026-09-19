@@ -16,6 +16,9 @@ public final class MouseKeyLegacy {
     public static void install() {
         LegacyMethods.register("取鼠标X", a -> m("getX"));
         LegacyMethods.register("取鼠标Y", a -> m("getY"));
+        // 龙核真实配置（ItemTip.yml）里写的是小写 x/y——方法表大小写敏感，两种写法都得能命中
+        LegacyMethods.register("取鼠标x", a -> m("getX"));
+        LegacyMethods.register("取鼠标y", a -> m("getY"));
         LegacyMethods.register("取鼠标deltax", a -> m("getScaledX"));
         LegacyMethods.register("取鼠标deltay", a -> m("getScaledY"));
         LegacyMethods.register("获取鼠标XV2", a -> m("getX"));

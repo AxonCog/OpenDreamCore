@@ -8,8 +8,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 世界面板多语言：`{lang.键名}` 占位符 → 客户端语言文件。
- * 查找顺序：游戏目录 OpenDreamCore/lang/&lt;locale&gt;.properties →
- * 模组资源 assets/opendreamcore/lang/&lt;locale&gt;.properties →
+ * 查找顺序：游戏目录 OpenDreamCore/lang/<locale>.properties →
+ * 模组资源 assets/opendreamcore/lang/<locale>.properties →
  * en_us 回退 → 找不到保留原文。
  */
 public final class WorldLang {
@@ -65,7 +65,7 @@ public final class WorldLang {
     private static void load(String locale) {
         Properties props = new Properties();
         boolean any = false;
-        // 1) 游戏目录 OpenDreamCore/lang/<locale>.properties（作者自定义覆盖）
+        // 游戏目录 OpenDreamCore/lang/<locale>.properties（作者自定义覆盖）
         try {
             Path file = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
                     .resolve("OpenDreamCore").resolve("lang").resolve(locale + ".properties");
@@ -77,7 +77,7 @@ public final class WorldLang {
             }
         } catch (Exception ignored) {
         }
-        // 2) 模组资源 assets/opendreamcore/lang/<locale>.properties
+        // 模组资源 assets/opendreamcore/lang/<locale>.properties
         if (!any) {
             try (InputStream in = WorldLang.class.getResourceAsStream(
                     "/assets/opendreamcore/lang/" + locale + ".properties")) {

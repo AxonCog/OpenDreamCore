@@ -1,5 +1,7 @@
 package com.opendreamcore.config;
 
+import com.opendreamcore.util.J8;
+
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
@@ -17,8 +19,17 @@ public final class YamlParser implements ConfigParser {
     private final Yaml yaml;
 
     public YamlParser() {
+        this(false);
+    }
+
+    /** 旧格式兼容模式：龙核配置里有重复键（Bukkit 语义后者覆盖），严格模式直接拒收。 */
+    public static YamlParser lenient() {
+        return new YamlParser(true);
+    }
+
+    private YamlParser(boolean allowDuplicateKeys) {
         LoaderOptions options = new LoaderOptions();
-        options.setAllowDuplicateKeys(false);
+        options.setAllowDuplicateKeys(allowDuplicateKeys);
         this.yaml = new Yaml(new SafeConstructor(options));
     }
 
@@ -30,10 +41,14 @@ public final class YamlParser implements ConfigParser {
     @Override
     @SuppressWarnings("unchecked")
     public Map<String, Object> parse(String text) throws ConfigParseException {
+        if (text != null && !text.isEmpty() && text.charAt(0) == '\uFEFF') {
+            // Windows 记事本写的配置常带 BOM，不刹掉首个键名就多个隐形前缀
+            text = text.substring(1);
+        }
         try {
             Object root = yaml.load(text);
             if (root == null) {
-                return Map.of();
+                return J8.map();
             }
             if (!(root instanceof Map)) {
                 throw new ConfigParseException("配置根必须是键值表", 1, 1);

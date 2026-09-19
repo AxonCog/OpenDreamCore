@@ -31,8 +31,8 @@ public final class ElementRenderRegistry {
     /**
      * 注册自定义元素渲染器。
      *
-     * @param type     元素类型名（YAML 里 type: "你的类型"）
-     * @param renderer 渲染回调
+     * type：元素类型名（YAML 里 type: "你的类型"）
+     * renderer：渲染回调
      */
     public static void register(String type, Renderer renderer) {
         REGISTRY.put(type, renderer);
@@ -46,5 +46,10 @@ public final class ElementRenderRegistry {
     /** 已注册的所有自定义类型名。 */
     public static Set<String> registeredTypes() {
         return REGISTRY.keySet();
+    }
+
+    /** 摘掉一个类型（附属模组卸载时用），返回是否真删了。 */
+    public static boolean unregister(String type) {
+        return type != null && REGISTRY.remove(type) != null;
     }
 }

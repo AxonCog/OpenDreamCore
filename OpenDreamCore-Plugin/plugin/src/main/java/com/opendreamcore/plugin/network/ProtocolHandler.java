@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ProtocolHandler {
 
     /** 会话记录：客户端上报事件时用 sessionId 找回页面。 */
+    @com.github.bsideup.jabel.Desugar
     public record Session(String pageId, long openedAt) {
     }
 
@@ -166,6 +167,9 @@ public final class ProtocolHandler {
                 if (binding == null) {
                     plugin.getLogger().warning("容器槽位点击但会话未绑定真实容器（需打开真实箱子触发替换）: "
                             + player.getName() + " 会话=" + event.sessionId());
+                } else if (slotConfigDenies(player, element, event.data(), binding)) {
+                    // SlotConfig 规则否决（服务端权威裁决）：不执行、不重同步，
+                    // 规则配了 fail_message 就提示，没配就静默——别让客户端绕过限制
                 } else if (handleSlotClick(player, binding, element, event.data(), generatedSlot, generatedHot)) {
                     plugin.networkLayer().sendContainerSync(binding.player(),
                             plugin.containerRegistry().snapshot(binding));
@@ -175,7 +179,7 @@ public final class ProtocolHandler {
             if (!fireEvent(player, page, event.sessionId(), event, element)) {
                 return;
             }
-            if (script == null || script.isBlank()) {
+            if (script == null || (script).trim().isEmpty()) {
                 return;
             }
             // 容器会话：槽位点击注入 slot / container 变量（脚本里用 vars.slot 区分槽位）
@@ -200,7 +204,76 @@ public final class ProtocolHandler {
                 + (runs > 0 ? "（平均 " + String.format("%.2f", ms / (double) runs) + " ms）" : "");
     }
 
-    // ---------- 容器槽位物品交互（服务端权威：光标 + 槽位操作） ----------
+    /**
+     * SlotConfig 服务端裁决：
+     * chest_slot 元素用 slot_name 引用槽位规则，点击时在这里做权威校验。
+     * 放入类动作（L/R/D/S 且光标有物品）校验光标物品，取出类动作（Q/A 及
+     * 光标为空的 L/R/D）校验槽位物品——规则没配的名字一律放行。
+     * 返回 true = 规则否决（调用方跳过执行与重同步）。
+     */
+    private boolean slotConfigDenies(Player player, Element element, String data,
+                                     com.opendreamcore.plugin.container.ContainerRegistry.Binding binding) {
+        try {
+            var guard = plugin.visualRules().slotGuard();
+            if (guard == null || guard.size() == 0) {
+                return false; // 没配任何 SlotConfig 规则，零开销放行
+            }
+            // 解析动作字符：data = "slot:action"（旧纯数字 = L 拿起/放置）
+            String[] parts = data.split(":");
+            char action = 'L';
+            if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                action = Character.toUpperCase(parts[1].trim().charAt(0));
+            }
+            // 槽位物品 + 光标物品都从容器快照取（与服务端执行器同一数据源）
+            var sync = plugin.containerRegistry().snapshot(binding);
+            String slotItemId = null;
+            try {
+                int slot = Integer.parseInt(parts[0].trim());
+                for (var s : sync.slots()) {
+                    if (s.slot() == slot) {
+                        slotItemId = s.itemId();
+                        break;
+                    }
+                }
+            } catch (NumberFormatException ignored) {
+            }
+            String cursorItemId = sync.cursorItemId();
+            boolean putting = switch (action) {
+                case 'Q', 'A' -> false;                        // 快捷移动/整组拿取 = 取出
+                default -> cursorItemId != null && !cursorItemId.trim().isEmpty(); // 光标有货 = 放入
+            };
+            String itemId = putting ? cursorItemId : slotItemId;
+            String deny = guard.checkProps(element.props(), itemViewOf(itemId), player);
+            if (deny == null) {
+                return false;
+            }
+            if (!deny.isEmpty()) {
+                player.sendMessage(deny); // fail_message 已在装载时转 § 色码
+            }
+            return true;
+        } catch (Exception e) {
+            // 裁决器自身异常不能挡住正常槽位交互——放行并记一条日志
+            plugin.getLogger().warning("SlotConfig 裁决异常（已放行）: " + e);
+            return false;
+        }
+    }
+
+    /** 容器物品 id → ItemView（剥命名空间与数量尾巴，与客户端匹配同一形态）。 */
+    private static com.opendreamcore.visual.ItemView itemViewOf(String itemId) {
+        if (itemId == null || itemId.trim().isEmpty()) {
+            return null;
+        }
+        String s = itemId.trim();
+        int sp = s.indexOf(' ');
+        if (sp > 0) {
+            s = s.substring(0, sp); // "minecraft:diamond x64" 的数量尾巴
+        }
+        int colon = s.indexOf(':');
+        String id = colon >= 0 ? s.substring(colon + 1) : s;
+        return new com.opendreamcore.visual.ItemView(id.toLowerCase(), "", java.util.Collections.emptyList(), java.util.Collections.emptyMap());
+    }
+
+    // 容器槽位物品交互（服务端权威：光标 + 槽位操作）
 
     /** 槽位点击执行：data = "slot:action"（L 拿起/放置、R 半组/放一、Q 快捷移动；旧纯数字 = L）。
      *  chest_slot → 绑定容器槽位；hot_slot → 玩家背包 0..35（快捷移动 = 背包 ↔ 容器）；
@@ -217,7 +290,7 @@ public final class ProtocolHandler {
         } catch (NumberFormatException e) {
             return false;
         }
-        if (parts.length > 1 && !parts[1].isBlank()) {
+        if (parts.length > 1 && !parts[1].trim().isEmpty()) {
             action = Character.toUpperCase(parts[1].trim().charAt(0));
         }
         boolean isHot = "hot_slot".equals(element.type()) || generatedHot;
@@ -248,13 +321,13 @@ public final class ProtocolHandler {
         org.bukkit.inventory.ItemStack cursor = registry.cursor(player);
         org.bukkit.inventory.ItemStack inSlot = target.getItem(slot);
         if (cursor == null) {
-            if (inSlot != null && !inSlot.getType().isAir()) {
+            if (inSlot != null && !com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot)) {
                 registry.setCursor(player, inSlot);
                 target.setItem(slot, null);
             }
             return;
         }
-        if (inSlot == null || inSlot.getType().isAir()) {
+        if (inSlot == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot)) {
             target.setItem(slot, cursor);
             registry.setCursor(player, null);
         } else if (inSlot.isSimilar(cursor)) {
@@ -282,7 +355,7 @@ public final class ProtocolHandler {
         org.bukkit.inventory.ItemStack cursor = registry.cursor(player);
         org.bukkit.inventory.ItemStack inSlot = target.getItem(slot);
         if (cursor == null) {
-            if (inSlot != null && !inSlot.getType().isAir() && inSlot.getAmount() > 1) {
+            if (inSlot != null && !com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot) && inSlot.getAmount() > 1) {
                 int half = (inSlot.getAmount() + 1) / 2;
                 org.bukkit.inventory.ItemStack picked = inSlot.clone();
                 picked.setAmount(half);
@@ -292,7 +365,7 @@ public final class ProtocolHandler {
             }
             return;
         }
-        if (inSlot == null || inSlot.getType().isAir()) {
+        if (inSlot == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot)) {
             org.bukkit.inventory.ItemStack one = cursor.clone();
             one.setAmount(1);
             target.setItem(slot, one);
@@ -322,7 +395,7 @@ public final class ProtocolHandler {
             return;
         }
         org.bukkit.inventory.ItemStack item = from.getItem(slot);
-        if (item == null || item.getType().isAir()) {
+        if (item == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(item)) {
             return;
         }
         int moved = 0;
@@ -338,7 +411,7 @@ public final class ProtocolHandler {
         }
         for (int i = 0; i < to.getSize() && item.getAmount() > 0; i++) {
             org.bukkit.inventory.ItemStack existing = to.getItem(i);
-            if (existing == null || existing.getType().isAir()) {
+            if (existing == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(existing)) {
                 to.setItem(i, item);
                 moved += item.getAmount();
                 item.setAmount(0);
@@ -354,13 +427,13 @@ public final class ProtocolHandler {
                                    com.opendreamcore.plugin.container.ContainerRegistry registry) {
         org.bukkit.inventory.ItemStack cursor = registry.cursor(player);
         org.bukkit.inventory.ItemStack inSlot = target.getItem(slot);
-        if (cursor == null && (inSlot == null || inSlot.getType().isAir())) {
+        if (cursor == null && (inSlot == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot))) {
             return; // 两边都空，无操作
         }
         if (cursor == null) {
             registry.setCursor(player, inSlot);
             target.setItem(slot, null);
-        } else if (inSlot == null || inSlot.getType().isAir()) {
+        } else if (inSlot == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot)) {
             target.setItem(slot, cursor);
             registry.setCursor(player, null);
         } else {
@@ -375,7 +448,7 @@ public final class ProtocolHandler {
                                  com.opendreamcore.plugin.container.ContainerRegistry registry) {
         org.bukkit.inventory.ItemStack cursor = registry.cursor(player);
         org.bukkit.inventory.ItemStack inSlot = target.getItem(slot);
-        if (inSlot == null || inSlot.getType().isAir()) {
+        if (inSlot == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(inSlot)) {
             return; // 空槽位无操作
         }
         if (cursor != null) {
@@ -399,7 +472,7 @@ public final class ProtocolHandler {
         for (int i = 0; i < target.getSize() && remaining > 0; i++) {
             if (i == slot) continue; // 跳过当前槽
             org.bukkit.inventory.ItemStack existing = target.getItem(i);
-            if (existing == null || existing.getType().isAir()) {
+            if (existing == null || com.opendreamcore.plugin.util.LegacyItemCompat.isAir(existing)) {
                 org.bukkit.inventory.ItemStack one = cursor.clone();
                 one.setAmount(1);
                 target.setItem(i, one);
@@ -462,6 +535,13 @@ public final class ProtocolHandler {
                 return true;
             }
             case KEY -> {
+                // 视觉系统按键组合：
+                // 客户端把命中的组合串原样上报，这里按 KeyConfig 规则执行命令/脚本
+                if (data != null && data.startsWith("keyconfig:")) {
+                    String combo = data.substring("keyconfig:".length());
+                    plugin.visualRules().keyExecutor().feed(player, combo);
+                    return true;
+                }
                 if (data != null && data.startsWith("mouse:")) {
                     String[] parts = data.split(":");
                     String name = parts.length > 1 ? parts[1] : "";
@@ -519,7 +599,8 @@ public final class ProtocolHandler {
                 container.put("title", binding.title());
                 scope.assignVar("container", container);
             }
-            DreamLang.execute(script, scope);
+            // 方言脚本先进适配器链过一遍（页面是老龙核搬来的？方法.xxx 也能跑）
+            DreamLang.execute(com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             plugin.getLogger().warning("动作脚本执行失败 (" + player.getName() + "): " + e);
         }
@@ -537,7 +618,7 @@ public final class ProtocolHandler {
             double z = Double.parseDouble(parts[2].trim());
             Object raw = element.props().get("hologram");
             java.util.Map<Object, Object> holo = new java.util.LinkedHashMap<>(
-                    raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Map.of());
+                    raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Collections.emptyMap());
             holo.put("x", x);
             holo.put("y", y);
             holo.put("z", z);

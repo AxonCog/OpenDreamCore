@@ -323,7 +323,7 @@ public final class ScreenMethods {
             return true;
         }, "视频跳转", "seekVideo", "seek_video", "跳转视频");
         NamespaceRegistry.register("Screen", args -> {
-            // Screen.隐藏原版界面(true/false) — 隐藏准星/物品栏/聊天等全部原版 HUD（F1 同款）
+            // Screen.隐藏原版界面(true/false) — 隐藏准星/物品栏/聊天等全部原版 HUD（跟按 F1 一个效果）
             boolean hide = args.length > 0 && Boolean.parseBoolean(String.valueOf(args[0]));
             Minecraft.getInstance().options.hideGui = hide;
             return true;

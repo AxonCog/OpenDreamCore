@@ -47,14 +47,14 @@ public final class WindowTitlePush implements Message {
     private final boolean loop;
 
     /**
-     * @param text       SET_STATIC 的单文本 / SET_CONFIG 的兜底文本（其余 op 忽略）
-     * @param titles     SET_CONFIG 轮播序列（可空）
-     * @param typewriter 打字机逐字显现
-     * @param random     随机轮换（多句时按时间格哈希随机选句）
-     * @param speed      每字符毫秒
-     * @param interval   轮播间隔/每句展示时长基准毫秒
-     * @param holdMs     打字完成后停留毫秒（-1 = 取 interval）
-     * @param loop       播完是否循环
+     * text：SET_STATIC 的单文本 / SET_CONFIG 的兜底文本（其余 op 忽略）
+     * titles：SET_CONFIG 轮播序列（可空）
+     * typewriter：打字机逐字显现
+     * random：随机轮换（多句时按时间格哈希随机选句）
+     * speed：每字符毫秒
+     * interval：轮播间隔/每句展示时长基准毫秒
+     * holdMs：打字完成后停留毫秒（-1 = 取 interval）
+     * loop：播完是否循环
      */
     public WindowTitlePush(Op op, String text, List<String> titles,
                            boolean typewriter, boolean random, int speed, int interval,

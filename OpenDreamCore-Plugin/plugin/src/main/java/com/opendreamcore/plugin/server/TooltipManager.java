@@ -17,8 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 作者：梦幻 QQ:2496599413
  *
  * 加载来源：
- * 1. tooltip/ 文件夹（多文件，按文件名排序，后覆盖先）
- * 2. tooltips.yml（旧单文件，向后兼容）
+ * tooltip/ 文件夹（多文件，按文件名排序，后覆盖先）
+ * tooltips.yml（旧单文件，向后兼容）
  *
  * 文件内容：键 = 元素 id，值 = 文本或样式对象
  * 样式对象：{text, color, background, border, width, permission}

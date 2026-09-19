@@ -1,5 +1,7 @@
 package com.opendreamcore.protocol.message;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.protocol.OdcByteBuf;
 
 /**
@@ -13,7 +15,7 @@ public final class ItemTipSync implements Message {
     private final int durationMs;
 
     public ItemTipSync(String itemId, int count, int durationMs) {
-        if (itemId == null || itemId.isBlank()) {
+        if (itemId == null || J8.isBlank(itemId)) {
             throw new IllegalArgumentException("物品 id 非法");
         }
         this.itemId = itemId;

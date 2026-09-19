@@ -41,10 +41,10 @@ class RemoteMediaTest {
 
     @Test
     void acceptsPublicIps() {
-        // TEST-NET-1（RFC 5737 文档保留段是安全测试用公网示例）
+        // 只用数值 IP 做离线稳定断言，域名受 DNS/网络波动影响不做强断言
         assertTrue(RemoteMedia.isSafeUrl("http://93.184.216.34/x.png"));
         assertTrue(RemoteMedia.isSafeUrl("http://8.8.8.8/x.png"));
-        assertTrue(RemoteMedia.isSafeUrl("https://example.com/a.png"));
+        assertTrue(RemoteMedia.isSafeUrl("https://93.184.216.34/a.png"));
     }
 
     @Test

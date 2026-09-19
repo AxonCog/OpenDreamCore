@@ -40,18 +40,18 @@ public final class LegacyPackInjector implements ResourcePackInjector {
                     Component.literal("OpenDreamCore 材质包"), true, supplier,
                     PackType.CLIENT_RESOURCES, Pack.Position.TOP, PackSource.BUILT_IN);
 
-            // 生产环境是 SRG 名，按字段名找不到；改按类型扫描 List<RepositorySource> 字段
+            // 生产环境是 SRG 名，且泛型签名里的类名也可能被重映射，靠字符串匹配不可靠。
+            // sources 是全类唯一的 Set 字段（available 是 Map、selected 是 List），按类型扫最稳。
             java.lang.reflect.Field sourcesField = null;
+            int setFields = 0;
             for (var f : PackRepository.class.getDeclaredFields()) {
-                // 1.20.1 实际是 Set<RepositorySource>，按泛型内容匹配、Collection 接收
-                if (java.util.Collection.class.isAssignableFrom(f.getType())
-                        && String.valueOf(f.getGenericType()).contains("RepositorySource")) {
+                if (java.util.Set.class.isAssignableFrom(f.getType())) {
                     sourcesField = f;
-                    break;
+                    setFields++;
                 }
             }
-            if (sourcesField == null) {
-                throw new NoSuchFieldException("RepositorySource collection not found");
+            if (setFields != 1) {
+                throw new NoSuchFieldException("PackRepository 应该只有一个 Set 字段，扫到 " + setFields);
             }
             sourcesField.setAccessible(true);
             @SuppressWarnings("unchecked")

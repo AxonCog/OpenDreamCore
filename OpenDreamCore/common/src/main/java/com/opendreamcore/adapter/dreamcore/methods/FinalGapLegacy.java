@@ -1,5 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
+import com.opendreamcore.util.J8;
+
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
 
 public final class FinalGapLegacy {
@@ -67,7 +69,7 @@ public final class FinalGapLegacy {
             String name = str(a, 1);
             Object val = arg(a, 2);
             if (name != null && ms >= 0) {
-                java.util.concurrent.CompletableFuture.delayedExecutor(ms,
+                J8.delayedExecutor(ms,
                                 java.util.concurrent.TimeUnit.MILLISECONDS)
                         .execute(() -> LegacyMethods.delegate("Var", "设置变量", name, val));
             }

@@ -23,11 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 世界编辑器行为模块。
  * 交互（射线拾取/拖拽/手柄/框选/微调）、变换（旋转/缩放/描边/层级/透明度/流光）、
  * undo/redo、元素 CRUD/剪贴板、对齐/分布/镜像、模板、保存/放弃。
- * 状态字段暂留 ClientController（渲染与协议层共用），经 cc 前缀访问；后续轮次再迁状态。
+ * 状态字段暂留 ClientController（渲染与协议层共用），经 cc 前缀访问，暂时没跟着搬过来。
  */
 final class WorldEditor {
 
-    // ---- 静态常量（必须在 INSTANCE 之前初始化：构造器/实例字段初始化依赖它们）----
     // 这些 static final 必须在 INSTANCE 之前初始化，因为 INSTANCE = new ClientController()
     // 会触发实例字段初始化，而实例字段 toolbarTypeRects 依赖 WORLD_TYPE_CHIPS.length。
     static final String[] WORLD_TYPE_CHIPS = {"text", "rect", "item_slot", "image",
@@ -67,7 +66,7 @@ final class WorldEditor {
     /** 宿主控制器（世界页面/编辑状态字段）。 */
     private final ClientController cc = ClientController.get();
 
-    // ---- 世界编辑状态（从 ClientController 迁入，round 4）----
+    // 世界编辑状态（从 ClientController 迁入，round 4）
     // 世界面板射线交互状态（悬停元素 + 左键边沿）
     String worldHoverId;
     boolean worldMousePrev;
@@ -296,7 +295,7 @@ final class WorldEditor {
     /** 拖拽距离标注（拖拽中：最近可见元素连线的两端世界坐标 + 间距；{ax,ay,az,bx,by,bz,dist}）。 */
     double[] worldDistAnno;
     boolean toolbarVisible;
-    // ---------- 世界悬停光标（GLFW，元素级样式可配） ----------
+    // 世界悬停光标（GLFW，元素级样式可配）
     long worldHandCursor = -1;
     long worldCrossCursor = -1;
     long worldIbeamCursor = -1;
@@ -1033,7 +1032,6 @@ final class WorldEditor {
                     worldEditSelected = pressed.id();
                     return;
                 }
-                // 世界开关/复选框：点击切换状态 → INPUT true/false 上报
                 // 世界开关/复选框：点击切换状态 → INPUT true/false 上报
                 if ("toggle".equals(pressed.type()) || "checkbox".equals(pressed.type())) {
                     String tkey = cc.wkey(cc.worldPage.id() == null ? "world" : cc.worldPage.id(), pressed.id());

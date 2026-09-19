@@ -1,5 +1,7 @@
 package com.opendreamcore.page;
 
+import com.opendreamcore.util.J8;
+
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -22,7 +24,7 @@ public final class PageExporter {
         if (page.match() != null && page.match().target() != null) {
             out.put("match", page.match().target());
         }
-        if (page.title() != null && !page.title().isBlank()) {
+        if (page.title() != null && !J8.isBlank(page.title())) {
             out.put("title", page.title());
         }
         if (page.displayMode() != null) {

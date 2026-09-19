@@ -1,0 +1,5 @@
+// 共享树自身的运行时依赖（协议/配置/脚本）：
+    // antlr-runtime 必须 api 透出——DreamLang 执行器/调用入口是公共 API，
+    // 使用方引用 DreamLangExecutor.Callable 等类型时要解析 antlr visitor 层级，
+    // 不透出去 plugin/nms 以及将来的附属插件全会"找不到 ParseTreeVisitor"
+    api 'org.antlr:antlr4-runtime:4.13.1'
