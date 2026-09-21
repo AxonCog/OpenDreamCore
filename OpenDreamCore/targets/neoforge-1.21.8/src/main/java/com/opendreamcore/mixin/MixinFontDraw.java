@@ -1,16 +1,14 @@
 package com.opendreamcore.mixin;
 
-import com.opendreamcore.client.resources.LooseResourceLoader;
-import com.opendreamcore.client.visual.VisualFontReplace;
+import com.opendreamcore.client.visual.GlyphRenderer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 1.21.8+ 全局字符替换：这代字体管线两段化了（prepareText 收集 → 统一渲染），
@@ -76,73 +74,14 @@ public abstract class MixinFontDraw {
         }
     }
 
-    /**
-     * 真替换：普通段递归回原方法（这段不含命名字符，不会再次进本方法），
-     * 命中字符画彩色贴图 quad。返回 true = 本次绘制已被接管，调用方该 cancel。
-     */
+    /** 委托 GlyphRenderer 拆段绘制（普通段原版、命中段贴图 quad、贴图缺失回退原版）。 */
     private boolean renderReplaced(String text, float x, float y, int color, boolean shadow,
                                    Matrix4f matrix, MultiBufferSource buffer, Font.DisplayMode mode,
                                    int colorBg, int packedLight) {
-        if (text == null || text.isEmpty() || !VisualFontReplace.hasAny() || !containsReplaced(text)) {
+        if (text == null || text.isEmpty()) {
             return false;
         }
-        float fx = x;
-        int i = 0;
-        StringBuilder seg = new StringBuilder();
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            VisualFontReplace.CharGlyph g = VisualFontReplace.glyphFor(c);
-            if (g == null) {
-                seg.append(c);
-                i++;
-                continue;
-            }
-            if (seg.length() > 0) {
-                ((Font) (Object) this).drawInBatch(seg.toString(), fx, y, color, shadow,
-                        matrix, buffer, mode, colorBg, packedLight);
-                seg.setLength(0);
-            }
-            drawGlyph(g, fx, y, matrix, buffer, packedLight);
-            fx += g.fontWidth() + (shadow ? 1.0F : 0.0F);
-            i++;
-        }
-        if (seg.length() > 0) {
-            ((Font) (Object) this).drawInBatch(seg.toString(), fx, y, color, shadow,
-                    matrix, buffer, mode, colorBg, packedLight);
-        }
-        return true;
-    }
-
-    private static boolean containsReplaced(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (VisualFontReplace.glyphFor(text.charAt(i)) != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 彩色贴图 quad：uv 按实际贴图像素归一化（与 TextElements.blit 同语义）。 */
-    private static void drawGlyph(VisualFontReplace.CharGlyph g, float x, float y,
-                                  Matrix4f matrix, MultiBufferSource buffer, int packedLight) {
-        ResourceLocation rl = LooseResourceLoader.lookup(g.texture());
-        if (rl == null) {
-            return;
-        }
-        var consumer = buffer.getBuffer(RenderType.text(rl));
-        float w = Math.max(1, g.frameW());
-        float h = Math.max(1, g.frameH());
-        LooseResourceLoader.Size size = LooseResourceLoader.sizeOf(g.texture());
-        float texW = size != null && size.width() > 0 ? size.width() : Math.max(1, g.frameW());
-        float texH = size != null && size.height() > 0 ? size.height() : Math.max(1, g.frameH());
-        float u0 = g.u() / texW;
-        float v0 = g.v() / texH;
-        float u1 = (g.u() + g.frameW()) / texW;
-        float v1 = (g.v() + g.frameH()) / texH;
-        float z = 0.0F;
-        consumer.addVertex(matrix, x, y, z).setUv(u0, v0).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x, y + h, z).setUv(u0, v1).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x + w, y + h, z).setUv(u1, v1).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x + w, y, z).setUv(u1, v0).setColor(255, 255, 255, 255).setLight(packedLight);
+        return com.opendreamcore.client.visual.GlyphRenderer.renderBuffer(
+                (Font) (Object) this, text, x, y, color, shadow, matrix, buffer, mode, colorBg, packedLight);
     }
 }

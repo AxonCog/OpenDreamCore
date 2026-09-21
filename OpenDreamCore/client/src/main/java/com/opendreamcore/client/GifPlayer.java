@@ -10,6 +10,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataNode;
 import javax.imageio.stream.ImageInputStream;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -27,8 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class GifPlayer {
 
-    /** 一帧：图片 + 显示时长（毫秒）。 */
-    private record Frame(NativeImage image, int delayMs) {
+    /** 一帧：合成后的全尺寸图片 + 显示时长（毫秒）。解码线程产生，纹理注册在渲染线程。 */
+    private record Frame(BufferedImage image, int delayMs) {
     }
 
     private static final Map<String, GifPlayer> CACHE = new ConcurrentHashMap<>();
@@ -39,7 +40,9 @@ public final class GifPlayer {
     private volatile int totalMs;
     /** 统一帧间隔覆盖：>0 时忽略 gif 自带延迟，全部帧按 1000/fps 切（FontConfig fps 字段）。 */
     private volatile int uniformDelayMs;
-    private int lastIndex = -1;
+
+    /** 当前帧索引（客户端 tickAll→tick 推进，纯 int 运算，任意线程安全）。 */
+    private volatile int activeIndex;
 
     private GifPlayer(List<Frame> frames, int totalMs) {
         this.frames.addAll(frames);
@@ -69,10 +72,91 @@ public final class GifPlayer {
         return uniformDelayMs > 0 ? uniformDelayMs : f.delayMs();
     }
 
-    /** 取当前帧纹理（按时间循环，帧变化才重建动态纹理）。 */
+    /** 首帧整图纹理（UI/业务走静态整图：字形层动画走帧表 sheet，二者互不干扰）。 */
+    private DynamicTexture staticTex;
+
+    private boolean sheetReady;
+
+    /** 帧表纹理 RL（全帧横向拼一张：字形按 activeIndex 切 uv，永不 upload 永不换纹理对象）。 */
+    private ResourceLocation sheetRl;
+
+    /** 纹理 RL（opendreamcore:gif/<hash>），供 LooseResourceLoader 反查播放器。 */
+    public ResourceLocation textureLocation() {
+        return textureId;
+    }
+
+    /** 当前帧索引（0..n-1），渲染时切 uv 用。 */
+    public int currentFrame() {
+        return frames.isEmpty() ? 0 : Math.min(activeIndex, frames.size() - 1);
+    }
+
+    /** 帧数（字形层算 uStep 用）。 */
+    public int frameCount() {
+        return frames.size();
+    }
+
+    /** 单帧像素宽（帧表横向等分）。 */
+    public int frameW() {
+        return frames.isEmpty() ? 1 : frames.get(0).image().getWidth();
+    }
+
+    /** 单帧像素高（帧表高方向完整一帧）。 */
+    public int frameH() {
+        return frames.isEmpty() ? 1 : frames.get(0).image().getHeight();
+    }
+
+    /** 取当前帧纹理（渲染线程静态整图首帧）：纯读、固定注册一次、绝不 upload。 */
     public ResourceLocation currentTexture() {
         if (frames.isEmpty()) {
             return null;
+        }
+        try {
+            if (staticTex == null) {
+                staticTex = CompatRender.newDynamicTexture(toNative(frames.get(0).image()));
+                Minecraft.getInstance().getTextureManager().register(textureId, staticTex);
+            }
+        } catch (Throwable ignored) {
+            // 注册失败（非渲染线程等）静默，渲染线程重试
+        }
+        return textureId;
+    }
+
+    /** 字形层帧表：全部帧横向拼成一张纹理（内容在构造时既定，运行时零 upload 零重建）。
+     *  DIRECT 每帧按 currentFrame() 换 uv 切片——动画只是顶点 UV 变化，驱动层零风险。 */
+    public ResourceLocation sheetTexture() {
+        if (frames.isEmpty()) {
+            return null;
+        }
+        if (sheetReady) {
+            return sheetRl;
+        }
+        try {
+            int w = frames.get(0).image().getWidth();
+            int h = frames.get(0).image().getHeight();
+            if (w <= 0 || h <= 0) {
+                return null;
+            }
+            BufferedImage sheet = new BufferedImage(w * frames.size(), h, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = sheet.createGraphics();
+            for (int i = 0; i < frames.size(); i++) {
+                g2.drawImage(frames.get(i).image(), i * w, 0, null);
+            }
+            g2.dispose();
+            sheetRl = CompatRender.rl("opendreamcore", textureId.getPath() + "/sheet");
+            Minecraft.getInstance().getTextureManager().register(sheetRl,
+                    CompatRender.newDynamicTexture(toNative(sheet)));
+            sheetReady = true;
+            return sheetRl;
+        } catch (Throwable ignored) {
+            return sheetRl != null ? sheetRl : null;
+        }
+    }
+
+    /** 客户端 tick 全局推进：时间→帧索引。纯 CPU 运算，绝不 upload/建纹理
+     *  （NVIDIA 驱动 glTexSubImage2D 硬崩实测规避）。 */
+    public void tick() {
+        if (frames.isEmpty()) {
+            return;
         }
         int t = (int) (System.currentTimeMillis() % Math.max(totalMs, 1));
         int index = 0;
@@ -81,12 +165,7 @@ public final class GifPlayer {
                 index = i;
             }
         }
-        if (index != lastIndex) {
-            lastIndex = index;
-            DynamicTexture tex = CompatRender.newDynamicTexture(frames.get(index).image());
-            Minecraft.getInstance().getTextureManager().register(textureId, tex);
-        }
-        return textureId;
+        activeIndex = index;
     }
 
     /**
@@ -142,6 +221,8 @@ public final class GifPlayer {
                     if (!frames.isEmpty()) {
                         GifPlayer player = new GifPlayer(frames, frames.stream().mapToInt(Frame::delayMs).sum());
                         CACHE.put(url, player);
+                        // 远程 gif 就绪：清字形烘焙缓存，引用该 url 的替换字形下帧重新 bake 显示
+                        com.opendreamcore.client.visual.ReplaceFontProvider.clear();
                     }
                 } catch (Exception ignored) {
                     // 解码失败：保持占位，下次请求可重试
@@ -198,14 +279,70 @@ public final class GifPlayer {
         try (ImageInputStream stream = ImageIO.createImageInputStream(in)) {
             reader.setInput(stream);
             int count = reader.getNumImages(true);
+            if (count == 0) {
+                return frames;
+            }
+            // GIF 优化帧只存变化区域（后续帧可能 1x1）——必须逐帧合成到逻辑屏幕画布，
+            // 否则帧尺寸不一致（DynamicTexture.setPixels 会崩）且画面残缺。
+            int width = reader.getWidth(0);
+            int height = reader.getHeight(0);
+            BufferedImage canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             for (int i = 0; i < count; i++) {
-                BufferedImage img = reader.read(i);
-                frames.add(new Frame(toNative(img), frameDelay(reader, i)));
+                BufferedImage frame = reader.read(i);
+                int dx = 0;
+                int dy = 0;
+                int disposal = 1;
+                try {
+                    IIOMetadata meta = reader.getImageMetadata(i);
+                    IIOMetadataNode root = (IIOMetadataNode) meta.getAsTree(meta.getNativeMetadataFormatName());
+                    dx = Integer.parseInt(gifAttr(root, "imageLeftPosition", "0"));
+                    dy = Integer.parseInt(gifAttr(root, "imageTopPosition", "0"));
+                    disposal = Integer.parseInt(gifAttr(root, "disposalMethod", "1"));
+                } catch (Exception ignored) {
+                    // 元数据读不到就用默认（偏移 0 / 保留画布）
+                }
+                // disposal 2（恢复背景色）或 3（恢复上一帧前）：重置画布
+                if (disposal == 2 || disposal == 3) {
+                    canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                }
+                Graphics2D g2 = canvas.createGraphics();
+                g2.drawImage(frame, dx, dy, null);
+                g2.dispose();
+                // 快照当前画布（每帧独立 NativeImage，避免共享引用）
+                BufferedImage snap = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D gs = snap.createGraphics();
+                gs.drawImage(canvas, 0, 0, null);
+                gs.dispose();
+                // 铁定同尺寸：合成/快照万一受优化帧元数据影响出了非全尺寸帧，强制 resize 到逻辑尺寸
+                if (snap.getWidth() != width || snap.getHeight() != height) {
+                    BufferedImage fixed = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D gf = fixed.createGraphics();
+                    gf.drawImage(snap, 0, 0, width, height, null);
+                    gf.dispose();
+                    snap = fixed;
+                }
+                frames.add(new Frame(snap, frameDelay(reader, i)));
             }
         } finally {
             reader.dispose();
         }
         return frames;
+    }
+
+    /** 遍历 GIF 元数据节点找属性（imageDescriptor 的偏移 / GraphicControlExtension 的 disposalMethod）。 */
+    private static String gifAttr(IIOMetadataNode root, String attrName, String fallback) {
+        for (int i = 0; i < root.getLength(); i++) {
+            IIOMetadataNode node = (IIOMetadataNode) root.item(i);
+            String v = node.getAttribute(attrName);
+            if (v != null && !v.isEmpty()) {
+                return v;
+            }
+            String child = gifAttr(node, attrName, null);
+            if (child != null) {
+                return child;
+            }
+        }
+        return fallback;
     }
 
     /** BufferedImage → NativeImage（逐像素拷贝，GIF 帧通常不大）。 */

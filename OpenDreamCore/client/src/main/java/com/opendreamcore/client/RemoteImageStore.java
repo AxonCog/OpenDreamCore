@@ -23,6 +23,8 @@ public final class RemoteImageStore {
 
     /** URL → 已注册纹理。 */
     private static final Map<String, ResourceLocation> TEXTURES = new ConcurrentHashMap<>();
+    /** URL → 图片像素尺寸（注册时记录）。 */
+    private static final Map<String, int[]> SIZES = new ConcurrentHashMap<>();
     /** 加载中的 URL（避免重复下载）。 */
     private static final Set<String> LOADING = ConcurrentHashMap.newKeySet();
 
@@ -66,6 +68,12 @@ public final class RemoteImageStore {
         return null;
     }
 
+    /** 远程图片尺寸（注册时记录，供替换字形 uv 归一化）；未就绪/未知返回 null。 */
+    public static com.opendreamcore.client.resources.LooseResourceLoader.Size sizeOf(String url) {
+        int[] s = SIZES.get(url);
+        return s == null ? null : new com.opendreamcore.client.resources.LooseResourceLoader.Size(s[0], s[1]);
+    }
+
     /** 渲染线程：缓存文件 → NativeImage → 动态纹理。 */
     private static void loadTexture(String url, Path file) {
         try (NativeImage image = NativeImage.read(Files.newInputStream(file))) {
@@ -74,6 +82,9 @@ public final class RemoteImageStore {
                     "remote/" + Integer.toHexString(url.hashCode()));
             Minecraft.getInstance().getTextureManager().register(id, texture);
             TEXTURES.put(url, id);
+            SIZES.put(url, new int[]{image.getWidth(), image.getHeight()});
+            // 远程图就绪：清字形烘焙缓存，让引用该 url 的替换字形下帧重新 bake 显示
+            com.opendreamcore.client.visual.ReplaceFontProvider.clear();
         } catch (IOException ignored) {
             // 文件损坏/解码失败：不注册，下次请求会重试
         } finally {
@@ -86,6 +97,7 @@ public final class RemoteImageStore {
         var manager = Minecraft.getInstance().getTextureManager();
         TEXTURES.values().forEach(manager::release);
         TEXTURES.clear();
+        SIZES.clear();
         LOADING.clear();
     }
 }

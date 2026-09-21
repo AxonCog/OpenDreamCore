@@ -90,6 +90,10 @@ public final class ClientEvents {
     public static void onClientTick(net.neoforged.neoforge.client.event.ClientTickEvent.Pre event) {
         ClientController.get().tickBindings();
         WindowBranding.tick(); // title.json 打字机/轮播推进
+        try {
+            com.opendreamcore.client.resources.LooseResourceLoader.tickAll(); // gif 帧推进（渲染线程 tick 驱动）
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 收到聊天消息：转 legacy 格式串进 chat_display 缓存（颜色码保留，服务端聊天也能显示在自定义界面）。 */

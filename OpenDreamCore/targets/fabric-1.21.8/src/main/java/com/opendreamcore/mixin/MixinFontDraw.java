@@ -1,16 +1,14 @@
 package com.opendreamcore.mixin;
 
-import com.opendreamcore.client.resources.LooseResourceLoader;
-import com.opendreamcore.client.visual.VisualFontReplace;
+import com.opendreamcore.client.visual.GlyphRenderer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 1.21.8+ 全局字符替换：这代字体管线两段化了（prepareText 收集 → 统一渲染），
@@ -31,66 +29,59 @@ public abstract class MixinFontDraw {
     private void opendreamcore$replaceGlyph(String text, float x, float y, int color, boolean shadow,
                                             Matrix4f matrix, MultiBufferSource buffer, Font.DisplayMode mode,
                                             int colorBg, int packedLight, CallbackInfo ci) {
-        if (text == null || text.isEmpty() || !VisualFontReplace.hasAny() || !containsReplaced(text)) {
-            return;
+        if (renderReplaced(text, x, y, color, shadow, matrix, buffer, mode, colorBg, packedLight)) {
+            ci.cancel();
         }
-        float fx = x;
-        int i = 0;
-        StringBuilder seg = new StringBuilder();
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            VisualFontReplace.CharGlyph g = VisualFontReplace.glyphFor(c);
-            if (g == null) {
-                seg.append(c);
-                i++;
-                continue;
-            }
-            if (seg.length() > 0) {
-                ((Font) (Object) this).drawInBatch(seg.toString(), fx, y, color, shadow,
-                        matrix, buffer, mode, colorBg, packedLight);
-                seg.setLength(0);
-            }
-            drawGlyph(g, fx, y, matrix, buffer, packedLight);
-            fx += g.fontWidth() + (shadow ? 1.0F : 0.0F);
-            i++;
-        }
-        if (seg.length() > 0) {
-            ((Font) (Object) this).drawInBatch(seg.toString(), fx, y, color, shadow,
-                    matrix, buffer, mode, colorBg, packedLight);
-        }
-        ci.cancel();
     }
 
-    private static boolean containsReplaced(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (VisualFontReplace.glyphFor(text.charAt(i)) != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 彩色贴图 quad：uv 按实际贴图像素归一化（与 TextElements.blit 同语义）。 */
-    private static void drawGlyph(VisualFontReplace.CharGlyph g, float x, float y,
-                                  Matrix4f matrix, MultiBufferSource buffer, int packedLight) {
-        ResourceLocation rl = LooseResourceLoader.lookup(g.texture());
-        if (rl == null) {
+    /**
+     * 聊天/书籍/按钮走的 FormattedCharSequence 重载：1.21.8 聊天不走 String 重载，
+     * 不在这拦聊天里的命名字符永远是原版字形。先摊平成纯文本再复用同一套替换绘制。
+     */
+    @Inject(method = "drawInBatch(Lnet/minecraft/util/FormattedCharSequence;FFIZLorg/joml/Matrix4f;"
+            + "Lnet/minecraft/client/renderer/MultiBufferSource;"
+            + "Lnet/minecraft/client/gui/Font$DisplayMode;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$replaceGlyphSeq(net.minecraft.util.FormattedCharSequence text, float x, float y,
+                                               int color, boolean shadow, Matrix4f matrix,
+                                               MultiBufferSource buffer, Font.DisplayMode mode,
+                                               int colorBg, int packedLight, CallbackInfo ci) {
+        if (text == null) {
             return;
         }
-        var consumer = buffer.getBuffer(RenderType.text(rl));
-        float w = Math.max(1, g.frameW());
-        float h = Math.max(1, g.frameH());
-        LooseResourceLoader.Size size = LooseResourceLoader.sizeOf(g.texture());
-        float texW = size != null && size.width() > 0 ? size.width() : Math.max(1, g.frameW());
-        float texH = size != null && size.height() > 0 ? size.height() : Math.max(1, g.frameH());
-        float u0 = g.u() / texW;
-        float v0 = g.v() / texH;
-        float u1 = (g.u() + g.frameW()) / texW;
-        float v1 = (g.v() + g.frameH()) / texH;
-        float z = 0.0F;
-        consumer.addVertex(matrix, x, y, z).setUv(u0, v0).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x, y + h, z).setUv(u0, v1).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x + w, y + h, z).setUv(u1, v1).setColor(255, 255, 255, 255).setLight(packedLight);
-        consumer.addVertex(matrix, x + w, y, z).setUv(u1, v0).setColor(255, 255, 255, 255).setLight(packedLight);
+        StringBuilder sb = new StringBuilder();
+        text.accept((index, style, codePoint) -> {
+            sb.appendCodePoint(codePoint);
+            return true;
+        });
+        if (renderReplaced(sb.toString(), x, y, color, shadow, matrix, buffer, mode, colorBg, packedLight)) {
+            ci.cancel();
+        }
+    }
+
+    /** Component 重载同款兜底（牌子/原版按钮等直接传组件的路径）。 */
+    @Inject(method = "drawInBatch(Lnet/minecraft/network/chat/Component;FFIZLorg/joml/Matrix4f;"
+            + "Lnet/minecraft/client/renderer/MultiBufferSource;"
+            + "Lnet/minecraft/client/gui/Font$DisplayMode;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$replaceGlyphComponent(net.minecraft.network.chat.Component text, float x, float y,
+                                                     int color, boolean shadow, Matrix4f matrix,
+                                                     MultiBufferSource buffer, Font.DisplayMode mode,
+                                                     int colorBg, int packedLight, CallbackInfo ci) {
+        if (renderReplaced(text == null ? null : text.getString(), x, y, color, shadow,
+                matrix, buffer, mode, colorBg, packedLight)) {
+            ci.cancel();
+        }
+    }
+
+    /** 委托 GlyphRenderer 拆段绘制（普通段原版、命中段贴图 quad、贴图缺失回退原版）。 */
+    private boolean renderReplaced(String text, float x, float y, int color, boolean shadow,
+                                   Matrix4f matrix, MultiBufferSource buffer, Font.DisplayMode mode,
+                                   int colorBg, int packedLight) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        return com.opendreamcore.client.visual.GlyphRenderer.renderBuffer(
+                (Font) (Object) this, text, x, y, color, shadow, matrix, buffer, mode, colorBg, packedLight);
     }
 }

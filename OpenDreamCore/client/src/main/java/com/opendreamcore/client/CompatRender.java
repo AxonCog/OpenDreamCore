@@ -50,8 +50,9 @@ public final class CompatRender {
     /**
      * 当前是否跑在渲染线程（Minecraft.getInstance().isSameThread() 的跨版本等价）。
      *
-     * 直接调用该方法在 Forge 的 SRG reobf 阶段对"新增成员引用"很敏感，
-     * 这边用反射按方法名探测，字符串不参与重映射，Fabric / NeoForge / Forge 全线安全。
+     * yarn 下该方法名是 isOnThread、mojmap 是 isSameThread——只做精确名探测，
+     * 绝不走 resolveMethod 的"形状兜底"（0 参数兜底会误选 Minecraft.close()，
+     * 实机曾因反射 invoke close 导致启动即关闭崩溃）。探测不到按渲染线程宽松放行。
      */
     public static boolean isRenderThread() {
         Object mc = Minecraft.getInstance();
@@ -59,14 +60,18 @@ public final class CompatRender {
             return true;
         }
         try {
-            Method m = resolveMethod(mc.getClass(), "isSameThread");
-            if (m == null) {
-                return true; // 探测不到就按渲染线程宽松放行，兜底逻辑（tick 补 flush）照样工作
-            }
+            Method m = mc.getClass().getMethod("isSameThread");
             return Boolean.TRUE.equals(m.invoke(mc));
+        } catch (NoSuchMethodException ignored) {
         } catch (Exception ignored) {
-            return true;
         }
+        try {
+            Method m = mc.getClass().getMethod("isOnThread");
+            return Boolean.TRUE.equals(m.invoke(mc));
+        } catch (NoSuchMethodException ignored) {
+        } catch (Exception ignored) {
+        }
+        return true; // 探测不到按渲染线程宽松放行，兜底逻辑（tick 补 flush）照样工作
     }
 
     private CompatRender() {
@@ -200,8 +205,13 @@ public final class CompatRender {
         } catch (NoSuchMethodException nameMiss) {
             outer:
             for (Method m : owner.getMethods()) {
+                String mn = m.getName();
                 if (m.getDeclaringClass() == Object.class
-                        || m.getParameterCount() != types.length) {
+                        || m.getParameterCount() != types.length
+                        // 生命周期/清理类方法一旦被"形状兜底"误选并反射调用会直接炸（实测 close）
+                        || mn.equals("close") || mn.equals("shutdown") || mn.equals("destroy")
+                        || mn.equals("dispose") || mn.equals("clear") || mn.equals("stop")
+                        || mn.equals("reset") || mn.equals("release")) {
                     continue;
                 }
                 for (int i = 0; i < types.length; i++) {
@@ -530,6 +540,26 @@ public final class CompatRender {
         }
     }
 
+    /**
+     * KongCore 式 GUI_TEXTURED 管线 blit（1.21.2+：blit(RenderPipeline, RL, x, y, u, v, w, h, tw, th, color)）。
+     * 字体重绘/自定义贴图用这个比 Function 版 blit 可靠；旧版本没有 RenderPipelines 时回退 blit()。
+     */
+    public static void blitGuiTextured(GuiGraphics g, ResourceLocation tex,
+                                       int x, int y, int w, int h,
+                                       float u, float v, int uw, int vh, int tw, int th) {
+        try {
+            Class<?> pipelines = Class.forName("net.minecraft.client.renderer.RenderPipelines");
+            Object pipeline = pipelines.getField("GUI_TEXTURED").get(null);
+            Class<?> pipelineCls = Class.forName("net.minecraft.client.renderer.RenderPipeline");
+            Method m = GuiGraphics.class.getMethod("blit", pipelineCls, ResourceLocation.class,
+                    int.class, int.class, float.class, float.class,
+                    int.class, int.class, int.class, int.class, int.class);
+            m.invoke(g, pipeline, tex, x, y, u, v, uw, vh, tw, th, 0xFFFFFFFF);
+        } catch (Throwable ignored) {
+            blit(g, tex, x, y, w, h, u, v, uw, vh, tw, th);
+        }
+    }
+
     // GUI pose 栈方言（≥1.21.6 Matrix3x2fStack 替代 PoseStack）
     // 两分支都是直接类型调用（PoseStack 与 JOML Matrix3x2fStack 在所有目标版本 classpath 上都存在），零反射热路径。
     // 注意：2D 栈无 Z 轴/四元数，X/Y 旋转在 GUI 平面无意义 → 新版路径仅应用 Z 分量。
@@ -687,11 +717,78 @@ public final class CompatRender {
 
     private static volatile MethodHandle texViewGetter;
 
+    /** 字形贴图 quad 完整写入。1.20.1 顶点 API 是 vertex/uv/color/light，1.21.x 是 addVertex/setUv/setColor/setLight——
+     *  全链反射垫片，跨版本编译安全。 */
+    public static void glyphQuad(Object consumer, Object matrix, float x, float y, float w, float h,
+                                 float u0, float v0, float u1, float v1, int packedLight) {
+        try {
+            quadVertex(consumer, matrix, x, y, u0, v0, packedLight);
+            quadVertex(consumer, matrix, x, y + h, u0, v1, packedLight);
+            quadVertex(consumer, matrix, x + w, y + h, u1, v1, packedLight);
+            quadVertex(consumer, matrix, x + w, y, u1, v0, packedLight);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void quadVertex(Object consumer, Object matrix, float x, float y, float u, float v,
+                                   int light) throws Exception {
+        Object cur = consumer;
+        cur = glyphInvoke(cur, "addVertex", "vertex", matrix, x, y, 0.0F);
+        cur = glyphInvoke(cur, "setUv", "uv", u, v);
+        cur = glyphInvoke(cur, "setColor", "color", 255, 255, 255, 255);
+        glyphInvoke(cur, "setLight", "light", light);
+    }
+
+    private static Object glyphInvoke(Object target, String n1, String n2, Object... args) throws Exception {
+        for (String n : new String[]{n1, n2}) {
+            for (Method m : target.getClass().getMethods()) {
+                if (m.getName().equals(n) && m.getParameterCount() == args.length
+                        && glyphParamsOk(m, args)) {
+                    return m.invoke(target, args);
+                }
+            }
+        }
+        throw new NoSuchMethodException(n1 + "/" + n2);
+    }
+
+    private static boolean glyphParamsOk(Method m, Object[] args) {
+        Class<?>[] ps = m.getParameterTypes();
+        for (int i = 0; i < args.length; i++) {
+            Object a = args[i];
+            if (a instanceof Float || a instanceof Integer) {
+                Class<?> p = ps[i];
+                if (p != float.class && p != int.class && p != Float.class && p != Integer.class) {
+                    return false;
+                }
+            } else if (a != null && !ps[i].isInstance(a)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
      * RenderSystem.setShaderTexture(sampler, RL) 的版本安全等价：
      * 旧版第二参 ResourceLocation 直调；新版需 GpuTextureView —— 从 TextureManager 解析后取视图。
      */
     public static void setShaderTexture(int sampler, ResourceLocation rl) {
+        try {
+            // 本地散装/动态纹理直通；opendreamcore 包资源引用缺失时跳过绑定，
+            // 避免 TextureManager 对不存在的贴图反复打 Missing resource WARN
+            if (rl != null && "opendreamcore".equals(rl.getNamespace())) {
+                String p = rl.getPath();
+                if (!p.startsWith("loose/") && !p.startsWith("gif/")) {
+                    var rm = net.minecraft.client.Minecraft.getInstance().getResourceManager();
+                    if (rm != null) {
+                        java.util.Optional<?> opt = rm.getResource(rl);
+                        if (opt == null || opt.isEmpty()) {
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         try {
             for (Method m : RenderSystem.class.getMethods()) {
                 if ("setShaderTexture".equals(m.getName()) && m.getParameterCount() == 2
@@ -711,6 +808,26 @@ public final class CompatRender {
                 }
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    /** 纹理是否真的可渲染（TextureManager 已注册且不是 missing 纹理）。
+     *  页面/世界引用不存在的贴图时 UiStyle.texture 会返回"假 rl"——直接绑定会渲染成紫色黑格，
+     *  绘制前用它挡一道。 */
+    public static boolean textureUsable(ResourceLocation rl) {
+        if (rl == null) {
+            return false;
+        }
+        try {
+            var manager = net.minecraft.client.Minecraft.getInstance().getTextureManager();
+            var tex = manager.getTexture(rl);
+            if (tex == null) {
+                return false;
+            }
+            var missing = manager.getTexture(CompatRender.rl("minecraft", "textures/missingno"));
+            return tex != missing;
+        } catch (Throwable t) {
+            return false;
         }
     }
 

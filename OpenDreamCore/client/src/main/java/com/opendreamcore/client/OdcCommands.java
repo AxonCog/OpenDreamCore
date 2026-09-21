@@ -122,19 +122,22 @@ public final class OdcCommands {
         var mc = Minecraft.getInstance();
         var conn = mc.getConnection();
         if (conn == null) {
-            line("§7[OpenDreamCore] §f没连服务器没有 /odc，本地命令用 §e/codc");
-            return 0;
+            // 未连服：/odc 降级成本地命令（open/close/hud/list/reload 照常生效），
+            // 别让玩家敲 /odc 半天没反应——连上服务器后同一句话会转发给插件
+            return execLocalOdc(args);
         }
         forwarding = true;
         try {
             String full = "odc" + (args == null || args.isEmpty() ? "" : " " + args);
             logForward(full);
             sendChatCommandRaw(conn, full);
+            ok("§7[OpenDreamCore] §f已发送 /" + full + " → 服务器");
             return Command.SINGLE_SUCCESS;
         } catch (Throwable t) {
             // 反射发包失败兜底：退回 sendCommand（NeoForge 会再进客户端命令树，护栏截断不递归）
             try {
                 conn.sendCommand("odc" + (args == null || args.isEmpty() ? "" : " " + args));
+                ok("§7[OpenDreamCore] §f已发送 /odc" + (args == null || args.isEmpty() ? "" : " " + args) + " → 服务器");
                 return Command.SINGLE_SUCCESS;
             } catch (Throwable t2) {
                 err("odc 转发失败: " + t2.toString());
@@ -145,6 +148,54 @@ public final class OdcCommands {
         }
     }
 
+        /** 未连服时 /odc 的本地降级：与 /codc 相同的页面/常驻控制动作。 */
+    private static int execLocalOdc(String args) {
+        if (args == null || args.isBlank()) {
+            ok("§e=== OpenDreamCore ===§r\n§f/odc open|close|hud|list|reload|state §7— 本地动作（连服后自动转服务器插件执行）");
+            return Command.SINGLE_SUCCESS;
+        }
+        String[] p = args.trim().split("\\s+", 2);
+        var cc = ClientController.get();
+        switch (p[0]) {
+            case "open" -> {
+                if (p.length < 2 || p[1].trim().isEmpty()) {
+                    err("用法: /odc open <页面>");
+                    return 0;
+                }
+                Page page = cc.localPages().get(p[1].trim());
+                if (page == null) {
+                    err("没有这个页面: " + p[1].trim());
+                    return 0;
+                }
+                cc.open(page);
+            }
+            case "close" -> cc.close();
+            case "hud" -> {
+                if (cc.isHudOpen()) {
+                    cc.closeHud();
+                    ok("HUD 已关闭");
+                } else {
+                    cc.autoMountHud();
+                    ok(cc.isHudOpen() ? "HUD 已挂载" : "没有 match: hud 的本地页面");
+                }
+            }
+            case "list" -> {
+                var msg = cc.isServerMode()
+                        ? "服务器页面 (" + cc.serverPageIds().size() + "): " + String.join(", ", cc.serverPageIds())
+                        : "本地页面 (" + cc.localPages().ids().size() + "): " + String.join(", ", cc.localPages().ids());
+                ok(msg);
+            }
+            case "reload" -> cc.reloadAll();
+            case "state" -> {
+                for (String s : Diagnostics.state()) {
+                    ok(s);
+                }
+            }
+            default -> ok("§7/odc 子命令: open|close|hud|list|reload|state（本地动作）；连服后 /odc 整条转发服务器插件执行");
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
     /**
      * 直发聊天命令包绕开客户端命令分发（sendCommand 会再进我们的树无限递归）。
      * 跨版本：新版 ServerboundChatCommandPacket 有 (String) 单参构造；
@@ -152,7 +203,19 @@ public final class OdcCommands {
      * 反射挑一个能用的，别在共享树里写死构造器签名。
      */
     private static void sendChatCommandRaw(Object conn, String command) throws Exception {
-        Class<?> cls = Class.forName("net.minecraft.network.protocol.game.ServerboundChatCommandPacket");
+        Class<?> cls = null;
+        for (String cn : new String[]{
+                "net.minecraft.network.protocol.game.ServerboundChatCommandPacket", // mojmap
+                "net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket"}) { // yarn
+            try {
+                cls = Class.forName(cn);
+                break;
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
+        if (cls == null) {
+            throw new IllegalStateException("ServerboundChatCommandPacket 找不到（mojmap/yarn 均无）");
+        }
         java.lang.reflect.Constructor<?> single = null;
         java.lang.reflect.Constructor<?> any = null;
         for (var c : cls.getConstructors()) {
@@ -172,9 +235,11 @@ public final class OdcCommands {
         if (ctor == single) {
             packet = ctor.newInstance(command);
         } else {
-            // 老版 record：command + 时间戳 + 盐 + 空签名 + 空已读回执
-            Class<?> sigCls = Class.forName("net.minecraft.commands.arguments.ArgumentSignatures");
-            Class<?> luCls = Class.forName("net.minecraft.network.chat.LastSeenMessages$Update");
+            // 老版 record：command + 时间戳 + 盐 + 空签名 + 空已读回执（类名 mojmap/yarn 双候选）
+            Class<?> sigCls = forNameAny("net.minecraft.commands.arguments.ArgumentSignatures",
+                    "net.minecraft.network.message.ArgumentSignatures");
+            Class<?> luCls = forNameAny("net.minecraft.network.chat.LastSeenMessages$Update",
+                    "net.minecraft.network.message.LastSeenMessages$Update");
             packet = ctor.newInstance(command, java.time.Instant.now(),
                     new java.util.Random().nextLong(),
                     sigCls.getField("EMPTY").get(null),
@@ -183,6 +248,19 @@ public final class OdcCommands {
         Object connection = conn.getClass().getMethod("getConnection").invoke(conn);
         connection.getClass().getMethod("send", net.minecraft.network.protocol.Packet.class)
                 .invoke(connection, packet);
+    }
+
+    /** 按候选类名逐个找（mojmap/yarn 映射差异都覆盖）。 */
+    private static Class<?> forNameAny(String... names) throws ClassNotFoundException {
+        ClassNotFoundException last = null;
+        for (String n : names) {
+            try {
+                return Class.forName(n);
+            } catch (ClassNotFoundException e) {
+                last = e;
+            }
+        }
+        throw last;
     }
 
     /** 构建完整 /codc 命令树。 */

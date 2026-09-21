@@ -124,7 +124,8 @@ public final class FabricEvents {
                 client -> {
                     ClientController.get().tickBindings();
                     WindowBranding.tick(); // title.json 打字机/轮播推进（守卫见外层注册）
-});
+                    com.opendreamcore.client.resources.LooseResourceLoader.tickAll(); // gif 帧推进（渲染线程 tick 驱动）
+                });
 
         // 聊天消息进 chat_display 缓存（转 legacy 格式串保留颜色）
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register(

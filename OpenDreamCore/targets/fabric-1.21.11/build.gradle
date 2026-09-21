@@ -199,6 +199,10 @@ tasks.register('remapDrift') {
                         .replaceAll(/\bviewHeight\b/, 'height')
                         // 1.21.2+ DynamicTexture 构造器需标签参数（贴图调试名）
                         .replaceAll(/new DynamicTexture\(img\)/, 'new DynamicTexture(() -> "opendreamcore_loose", img)')
+                // 1.21.9+ 渲染管线重构：RenderType 移入 rendertype 包，text 工厂在 RenderTypes（参数 Identifier）
+                r = r.replace('net.minecraft.client.renderer.RenderType', 'net.minecraft.client.renderer.rendertype.RenderTypes')
+                        .replace('RenderType.text(', 'RenderTypes.text(')
+
                         .replaceAll(/\.getPosition\(\)/, '.position()')
                 if (f.name in INPUT_FILES) {
                         def MBE = 'net.minecraft.client.input.MouseButtonEvent'

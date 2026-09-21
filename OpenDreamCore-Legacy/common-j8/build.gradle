@@ -17,7 +17,7 @@ plugins {
     id 'java-library'
 }
 
-version = '0.1.2'
+version = '0.1.2.1'
 group = 'com.opendreamcore'
 
 java {
@@ -186,3 +186,4 @@ tasks.register('verifyBytecodeLevel') {
         }
     }
 }
+

@@ -9,9 +9,12 @@
     "MixinTooltip",
     "MixinCursor",
     "MixinArmorLayer",
+    "MixinEquipmentRenderer",
     "MixinNameTag",
     "MixinItemEffect",
-    "MixinFontDraw"
+    "MixinFontDraw",
+    "FontSetMixin",
+    "MixinGlyphRenderState"
   ],
   "injectors": {
     "defaultRequire": 1

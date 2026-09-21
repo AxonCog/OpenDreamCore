@@ -11,7 +11,7 @@ buildscript {
 apply plugin: 'net.minecraftforge.gradle'
 apply plugin: 'java'
 
-version = '0.1.2'
+version = '0.1.2.1'
 group = 'com.opendreamcore'
 archivesBaseName = 'OpenDreamCore-Legacy-forge-1.16.5'
 
@@ -94,3 +94,4 @@ task collectLegacyOutput {
     }
 }
 build.dependsOn collectLegacyOutput
+

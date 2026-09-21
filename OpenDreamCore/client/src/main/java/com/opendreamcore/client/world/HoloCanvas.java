@@ -221,7 +221,8 @@ public final class HoloCanvas {
                                     double sx, double sy, double worldW, double worldH, float alphaMul) {
         String src = com.opendreamcore.client.UiRenderer.str(m.get("src"));
         net.minecraft.resources.ResourceLocation texture = com.opendreamcore.client.UiStyle.texture(src);
-        if (texture == null) {
+        // 贴图不存在（UiStyle 对缺失文件也返回"假 rl"）时跳过，避免绑定 missing 渲染紫色黑格
+        if (texture == null || !com.opendreamcore.client.CompatRender.textureUsable(texture)) {
             return;
         }
         double bx = WorldHologram.num(m.get("x"), 0);

@@ -1,0 +1,55 @@
+﻿
+
+Functions:
+  open: |-
+    方法.异步执行方法('屏幕自适应');
+    方法.异步执行方法('参数判定');
+    方法.异步执行方法('每秒重新计算绘制起始点和更新变量');
+  屏幕自适应: |-
+    界面变量.x比=方法.取屏幕宽度()/960;
+    界面变量.y比=方法.取屏幕高度()/508.5;
+    界面变量.xy比 = 界面变量.x比/界面变量.y比;
+    界面变量.x=(方法.取屏幕宽度-方法.取组件值('主界面_texture','width'))/2;
+    界面变量.y=(方法.取屏幕高度-方法.取组件值('主界面_texture','height'))/2;
+    方法.延时(500);
+    方法.异步执行方法('屏幕自适应');
+背景_texture:
+  x: "界面变量.x*0"
+  y: "界面变量.y*0"
+  width: "方法.取屏幕宽度"
+  height: "方法.取屏幕高度"
+  texture: "http://image.mcshare.cn/LightPicture/2024/07/f823418235a56ddf.jpg"
+选择区服_texture:
+  x: "界面变量.x*0.65"
+  y: "界面变量.y*1.45"
+  alpha: "方法.取界面存活时间/700"
+  width: "界面变量.x比*1000/3"
+  height: "界面变量.y比*105/3"
+  texture: "http://s1.mcstory.cc:23778/%E5%A4%A7%E5%8C%BA%E7%95%8C%E9%9D%A2/%E9%80%89%E6%8B%A9%E5%8C%BA%E6%9C%8D1.png"
+  textureHovered: "http://s1.mcstory.cc:23778/%E5%A4%A7%E5%8C%BA%E7%95%8C%E9%9D%A2/%E9%80%89%E6%8B%A9%E5%8C%BA%E6%9C%8D2.png"
+  visible: true
+  actions:
+    click: 
+        设置组件值('区服选择界面_texture','visible','true');
+        设置组件值('关都大区_texture','visible','true');
+        设置组件值('选择区服_texture','visible','false');
+区服选择界面_texture:
+  x: "界面变量.x*0"
+  y: "界面变量.y*0"
+  width: "方法.取屏幕宽度"
+  height: "方法.取屏幕高度"
+  alpha: "方法.取界面存活时间/700"
+  texture: "http://s1.mcstory.cc:23778/%E5%A4%A7%E5%8C%BA%E7%95%8C%E9%9D%A2/%E5%8C%BA%E6%9C%8D%E9%80%89%E6%8B%A9%E7%95%8C%E9%9D%A2.png"
+  visible: false
+关都大区_texture:
+  x: "界面变量.x*0.6"
+  y: "界面变量.y*0.35"
+  alpha: "方法.取界面存活时间/700"
+  width: "界面变量.x比*820/3"
+  height: "界面变量.y比*300/3"
+  texture: "http://s1.mcstory.cc:23778/%E5%A4%A7%E5%8C%BA%E7%95%8C%E9%9D%A2/%E5%85%B3%E9%83%BD%E5%A4%A7%E5%8C%BA1.png"
+  textureHovered: "http://s1.mcstory.cc:23778/%E5%A4%A7%E5%8C%BA%E7%95%8C%E9%9D%A2/%E5%85%B3%E9%83%BD%E5%A4%A7%E5%8C%BA2.png"
+  visible: false
+  actions:
+    click: 
+        方法.关闭界面;方法.执行按键指令('关都大区');

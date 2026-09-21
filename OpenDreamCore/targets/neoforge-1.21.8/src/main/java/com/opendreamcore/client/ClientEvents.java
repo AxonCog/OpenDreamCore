@@ -91,6 +91,10 @@ public final class ClientEvents {
             com.opendreamcore.client.WindowBranding.tick(); // 标题每帧推进（主菜单也刷新）
         } catch (Exception ignored) {
         }
+        try {
+            com.opendreamcore.client.resources.LooseResourceLoader.tickAll(); // gif 动画帧推进（渲染线程 tick 驱动）
+        } catch (Throwable ignored) {
+        }
         if (net.minecraft.client.Minecraft.getInstance().player != null) {
             ClientController.get().tickBindings();
         }

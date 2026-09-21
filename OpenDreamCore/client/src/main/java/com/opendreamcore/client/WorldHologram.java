@@ -1714,7 +1714,9 @@ public final class WorldHologram {
         Map<?, ?> spec = UiRenderer.propsMap(node, "image");
         String src = UiRenderer.str(spec.get("src"));
         net.minecraft.resources.ResourceLocation texture = UiStyle.texture(src);
-        if (texture == null) {
+        // 引用的贴图实际不存在（UiStyle 对缺失文件也会返回"假 rl"）时直接跳过，
+        // 避免绑定 missing 纹理在世界里渲染出紫色黑格
+        if (texture == null || !CompatRender.textureUsable(texture)) {
             return;
         }
         Map<?, ?> holo = holo(node);

@@ -22,6 +22,12 @@ import java.util.Map;
  */
 public final class VisualArmorLayer {
 
+    /**
+     * 当前渲染实体的上下文（1.21.8 两段式管线：HumanoidArmorLayer.render 记录 → EquipmentLayerRenderer.renderLayers 消费）。
+     * 放共享类而非 mixin 里：mixin 类不允许非 private 的普通 static 方法/字段外露，跨类共享要借道普通类。
+     */
+    public static final ThreadLocal<String> ODC_CUR_ENTITY = new ThreadLocal<>();
+
     /** 一条盔甲覆写条目：实体匹配 + 槽位→贴图。 */
     public record ArmorEntry(MatchSpec spec, int priority, Map<String, String> layers) {
     }

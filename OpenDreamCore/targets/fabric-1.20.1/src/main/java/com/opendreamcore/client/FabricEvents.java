@@ -38,6 +38,10 @@ public final class FabricEvents {
                 com.opendreamcore.client.WindowBranding.tick();
             } catch (Exception ignored) {
             }
+            try {
+                com.opendreamcore.client.resources.LooseResourceLoader.tickAll(); // gif 帧推进（渲染线程 tick 驱动）
+            } catch (Throwable ignored) {
+            }
             if (client.player != null) {
                 try {
                     ClientController.get().tickBindings();

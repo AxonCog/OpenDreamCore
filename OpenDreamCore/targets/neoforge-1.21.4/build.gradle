@@ -7,6 +7,10 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.6'
 }
 
+repositories {
+    mavenCentral()
+}
+
 // 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
 def properties = new Properties()
 file('../../gradle.properties').withInputStream { properties.load(it) }
@@ -77,6 +81,8 @@ neoForge {
 
 // neoforge 依赖由 moddev 插件自动提供（手动加会触发 variant 冲突）
 dependencies {
+    // mixinextras @WrapMethod（neoforge 自带运行期 mixinextras 0.5.3，编译期只声明注解）
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
     // common 源码需要 antlr4-runtime（MC 不自带）。
     // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
     implementation 'org.antlr:antlr4-runtime:4.13.1'

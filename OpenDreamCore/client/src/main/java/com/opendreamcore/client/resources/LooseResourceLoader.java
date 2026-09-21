@@ -83,6 +83,14 @@ public final class LooseResourceLoader {
             return null;
         }
         String want = fileName.replace('\\', '/');
+        // 远程 url：gif 走 GifPlayer 远程解码、静态图走 RemoteImageStore（未就绪返回 null，下载完成自动出现）
+        if (want.startsWith("https://") || want.startsWith("http://")) {
+            if (want.toLowerCase(java.util.Locale.ROOT).endsWith(".gif")) {
+                GifPlayer remoteGif = GifPlayer.of(want);
+                return remoteGif == null ? null : remoteGif.currentTexture();
+            }
+            return com.opendreamcore.client.RemoteImageStore.get(want);
+        }
         // gif 动画优先：播放器按时间切帧，每次拿当前帧
         ResourceLocation anim = animated(want);
         if (anim != null) {
@@ -116,7 +124,92 @@ public final class LooseResourceLoader {
         }
     }
 
-    /** gif 当前帧纹理；不是 gif/没注册返回 null。 */
+    /** 渲染线程客户端 tick 全局驱动：推进所有 gif 播放器帧上传（与每帧查询解耦，渲染路径零 upload）。 */
+    public static void tickAll() {
+        if (GIFS.isEmpty()) {
+            return;
+        }
+        for (GifPlayer p : GIFS.values()) {
+            try {
+                p.tick();
+            } catch (Throwable ignored) {
+                // 单播放器异常不拖垮其他 gif/客户端 tick
+            }
+        }
+    }
+
+    /** 帧信息：字形层动画切 uv 用（未匹配/静态恒 0 帧 / 1 帧）。 */
+    public record GifFrames(int frame, int frames) {
+    }
+
+    /** 替换字形贴图绘制信息：rl=要绑定的纹理，frame=当前帧，frames=总帧数，
+     *  frameW/frameH=单帧像素（png 就是整图尺寸）。 */
+    public record SheetInfo(ResourceLocation rl, int frame, int frames, int frameW, int frameH) {
+    }
+
+    /** 替换字形贴图取图信息：gif 返回帧表纹理+当前帧（自绘路径切 uv 出动画），png 走静态整图。 */
+    public static SheetInfo sheetOf(String fileName) {
+        if (fileName == null) {
+            return null;
+        }
+        String want = fileName.replace('\\', '/');
+        // 远程 url：gif 走帧表（未就绪 null），静态图走 RemoteImageStore
+        if (want.startsWith("https://") || want.startsWith("http://")) {
+            GifPlayer remoteGif = GifPlayer.of(want);
+            if (remoteGif != null) {
+                ResourceLocation rl = remoteGif.sheetTexture();
+                if (rl != null) {
+                    int total = Math.max(remoteGif.frameCount(), 1);
+                    return new SheetInfo(rl, Math.min(Math.max(remoteGif.currentFrame(), 0), total - 1), total,
+                            Math.max(remoteGif.frameW(), 1), Math.max(remoteGif.frameH(), 1));
+                }
+            }
+            ResourceLocation staticRl = com.opendreamcore.client.RemoteImageStore.get(want);
+            if (staticRl == null) {
+                return null;
+            }
+            var sz = com.opendreamcore.client.RemoteImageStore.sizeOf(want);
+            return new SheetInfo(staticRl, 0, 1, sz != null ? Math.max(sz.width(), 1) : 1,
+                    sz != null ? Math.max(sz.height(), 1) : 1);
+        }
+
+        GifPlayer p = gifOf(want);
+        if (p != null) {
+            ResourceLocation rl = p.sheetTexture();
+            if (rl != null) {
+                int total = Math.max(p.frameCount(), 1);
+                return new SheetInfo(rl, Math.min(Math.max(p.currentFrame(), 0), total - 1), total,
+                        Math.max(p.frameW(), 1), Math.max(p.frameH(), 1));
+            }
+        }
+        ResourceLocation rl = lookup(want);
+        if (rl == null) {
+            return null;
+        }
+        Size sz = sizeOf(want);
+        return new SheetInfo(rl, 0, 1, sz != null ? Math.max(sz.width(), 1) : 16,
+                sz != null ? Math.max(sz.height(), 1) : 16);
+    }
+
+    /** 按纹理 RL path（gif/<hash> 或 gif/<hash>/sheet）反查播放器当前帧信息。 */
+    public static GifFrames gifFrames(String rlPath) {
+        if (rlPath == null || GIFS.isEmpty()) {
+            return new GifFrames(0, 1);
+        }
+        for (GifPlayer p : GIFS.values()) {
+            ResourceLocation loc = p.textureLocation();
+            if (loc != null) {
+                String base = loc.getPath();
+                if (rlPath.equals(base) || rlPath.startsWith(base + "/")) {
+                    int total = Math.max(p.frameCount(), 1);
+                    return new GifFrames(Math.min(Math.max(p.currentFrame(), 0), total - 1), total);
+                }
+            }
+        }
+        return new GifFrames(0, 1);
+    }
+
+    /** gif 当前帧纹理 RL（纯读返回动画同一纹理对象，绝不 upload——帧推进由 tickAll 驱动）；不是 gif/没注册返回 null。 */
     private static ResourceLocation animated(String want) {
         GifPlayer p = gifOf(want);
         return p == null ? null : p.currentTexture();
@@ -140,9 +233,31 @@ public final class LooseResourceLoader {
         return null;
     }
 
+    /** 字形层按文件名拿播放器（null=非 gif/未注册）。远程 gif 也认（未就绪返回 null）。 */
+    public static GifPlayer gifPlayerOf(String fileName) {
+        if (fileName == null) {
+            return null;
+        }
+        String want = fileName.replace('\\', '/');
+        if (want.startsWith("https://") || want.startsWith("http://")) {
+            return GifPlayer.of(want);
+        }
+        return gifOf(want);
+    }
+
     private static String tailOf(String name) {
         int slash = name.lastIndexOf('/');
         return slash >= 0 ? name.substring(slash + 1) : name;
+    }
+
+    /** gif 的动画纹理 RL（字形层/静态引用统一拿动画同纹理：对象不变 view 不失效，内容由 tickAll 更新）；非 gif/未注册返回 null。 */
+    public static ResourceLocation staticOf(String fileName) {
+        if (fileName == null) {
+            return null;
+        }
+        String want = fileName.replace('\\', '/');
+        GifPlayer p = gifOf(want);
+        return p == null ? null : p.currentTexture();
     }
 
     /** 按文件名查图片尺寸（range 批量替换要按贴图横向等分算帧宽）。未注册返回 null。 */

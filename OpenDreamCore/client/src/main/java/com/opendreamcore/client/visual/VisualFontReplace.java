@@ -94,6 +94,26 @@ public final class VisualFontReplace {
         ranges = List.copyOf(rs);
         regexes = List.copyOf(xs);
         defaultTtf = ttf;
+        syncReplaceFonts(s, rs);
+    }
+
+    /** 字形层同步：单字符 + 区间展开注册（正则类无法枚举命中字符，drawInBatch 路径仍处理）。 */
+    private static void syncReplaceFonts(Map<Character, CharGlyph> s, List<RangeGlyph> rs) {
+        com.opendreamcore.client.visual.ReplaceFontProvider.clear();
+        try {
+            for (Map.Entry<Character, CharGlyph> e : s.entrySet()) {
+                com.opendreamcore.client.visual.ReplaceFontProvider.register(
+                        e.getKey(), e.getValue().texture(), e.getValue().fontWidth(), e.getValue().height());
+            }
+            for (RangeGlyph r : rs) {
+                for (int i = 0; i < r.count(); i++) {
+                    com.opendreamcore.client.visual.ReplaceFontProvider.register(
+                            r.start() + i, r.texture(), r.fontWidth(), r.height());
+                }
+            }
+        } catch (Exception ignored) {
+            // 字形层同步失败不影响 GlyphRenderer 路径
+        }
     }
 
     /** 解析单条规则：ruleId=单字符时即替换键；range/match/ttf 各就各位。 */

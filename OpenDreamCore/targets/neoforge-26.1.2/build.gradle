@@ -10,6 +10,10 @@ plugins {
     id 'com.gradleup.shadow' version '9.0.0'
 }
 
+repositories {
+    mavenCentral()
+}
+
 import org.gradle.api.attributes.Usage
 
 // 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
@@ -89,6 +93,8 @@ neoForge {
 }
 
 dependencies {
+    // mixinextras @WrapMethod（neoforge 自带运行期 mixinextras 0.5.3，编译期只声明注解）
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
     implementation 'org.antlr:antlr4-runtime:4.13.1'
     compileOnly 'org.yaml:snakeyaml:2.2'
     compileOnly 'com.google.code.gson:gson:2.10.1'
@@ -212,7 +218,11 @@ tasks.register('remapDrift') {
                         .replaceAll(/\.getPosition\(\)/, '.position()')
                         .replaceAll(/[.]dimension[(][)][.]location[(][)]/, '.dimension().identifier()')
                         .replace('ChatScreen(initialText == null ? "" : initialText) {', 'ChatScreen(initialText == null ? "" : initialText, false) {')
+
                         .replaceAll(/mc[.]player[.]playNotifySound[(]/, 'com.opendreamcore.client.CompatPlayer.playNotifySound(mc.player, ')
+                // 1.21.9+ 渲染管线重构：RenderType 移入 rendertype 包，text 工厂在 RenderTypes（参数 Identifier）
+                r = r.replace('net.minecraft.client.renderer.RenderType', 'net.minecraft.client.renderer.rendertype.RenderTypes')
+                        .replace('RenderType.text(', 'RenderTypes.text(')
                 // Screen.render → extractRenderState（26.x 提交管线）
                 r = r.replace('public void render(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {',
                               'public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {')

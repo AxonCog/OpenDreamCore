@@ -6,6 +6,7 @@
   "client": [
     "MixinGui",
     "MixinFontDraw",
+    "FontSetMixin",
     "MixinSubtitleOverlay",
     "MixinItemIcon",
     "MixinItemEffect",

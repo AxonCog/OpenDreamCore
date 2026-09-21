@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 
 @Mixin(EquipmentLayerRenderer.class)
-public abstract class MixinArmorLayer {
+public abstract class MixinEquipmentRenderer {
 
     @Shadow
     public void renderLayers(EquipmentClientInfo.LayerType layerType, ResourceKey key, Model model,
@@ -42,8 +42,9 @@ public abstract class MixinArmorLayer {
         if (stack != null) {
             Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
             String slot = equippable == null ? null : slotName(equippable.slot());
-            if (slot != null) {
-                tex = VisualArmorLayer.textureForGlobal(slot);
+            String type = VisualArmorLayer.ODC_CUR_ENTITY.get();
+            if (slot != null && type != null) {
+                tex = VisualArmorLayer.textureFor(type, slot);
             }
         }
         if (tex == null) {
