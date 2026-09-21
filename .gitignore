@@ -24,16 +24,11 @@ _mdk_tmp/
 # output 供本地/CI 收集产物（不入库，按需生成）
 output/
 
-# 参考模组（内部资料，不上传）
-参考模组/
-
-# 内部规划/分析文档（不上传）
 OpenDreamCore跨版本规划.md
 OpenDreamCore开发分析.md
-.commandcode/
 
-# docs 只上传对外文档（README 有链接的），其余排除
-docs/*
+
+# docs/*
 !docs/YAML语法.md
 !docs/协议.md
 !docs/验收-实机冒烟.md
@@ -42,9 +37,8 @@ docs/*
 !docs/梦想核心语法适配Wiki.md
 !docs/附属开发指南.md
 
-showreel/
 
-# gradle 备份/缓存（自动生成，不入库）
+# gradle 备份
 .gradle_backup/
 **/.gradle_backup/
 temp/
@@ -54,12 +48,8 @@ _b5*.log
 _bfab*.log
 _z420.log
 
-# pi 内部归档（自动生成，不入库）
-.pi-glla/archive/
-.pi-glla/reviews/
-.pi-glla/goals/
 
-# 不上传的本地规划（中文目录）
+# 跑的验证脚本
 不上*/
 # verify logs
 verify_*.log
@@ -78,15 +68,13 @@ OpenDreamCore-Legacy/targets/*/*.log
 OpenDreamCore-Legacy/targets/*/build_error.txt
 OpenDreamCore-Legacy/targets/*/build_output.txt
 OpenDreamCore-Legacy/targets/forge-1.7.10/test_asset
-# 插件工程的构建日志与一次性转换脚本，都是本地过程稿
+# 插件工程的构建日志
 OpenDreamCore-Plugin/*.log
 tmp_backup*/
 
-# 本地开发过程稿（一次性工具/旧规划/素材），不参与发布
-dev/
-.pi-glla/
 
-# 编译工具链与本地库（发布仓不入库，开发机保留）
+
+# 编译工具链与本地库
 OpenDreamCore-Legacy/libs/
 OpenDreamCore-Legacy/tools/
 OpenDreamCore-Legacy/targets/*/fg/
