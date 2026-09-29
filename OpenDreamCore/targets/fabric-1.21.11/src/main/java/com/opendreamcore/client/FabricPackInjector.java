@@ -1,6 +1,7 @@
 package com.opendreamcore.client;
 
 import com.opendreamcore.client.spi.ResourcePackInjector;
+import com.opendreamcore.packs.PackInstaller;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.packs.PackLocationInfo;
@@ -40,12 +41,18 @@ public final class FabricPackInjector implements ResourcePackInjector {
             // 同 id 重装：先摘除旧条目避免 available 冲突
             repo.removePack(id);
 
+            // 目录 supplier 各版漂移（1.21.11 的 FilePackResources 是严格 zip 语义，包目录报
+            // "拒绝访问"→元数据 null→null 包 NPE）——统一打真 zip 注入（全版本通用正确形态）。
             Pack pack = Pack.readMetaAndCreate(
                     new PackLocationInfo(id, Component.literal("OpenDreamCore 材质包"),
                             PackSource.BUILT_IN, Optional.empty()),
-                    new FilePackResources.FileResourcesSupplier(dir),
+                    new FilePackResources.FileResourcesSupplier(PackInstaller.zipForInjection(dir)),
                     PackType.CLIENT_RESOURCES,
                     new PackSelectionConfig(true, Pack.Position.TOP, false));
+            if (pack == null) {
+                // null 包绝不能进仓库：reload() 遍历时 streamSelfAndChildren() NPE（1.21.11 实锤）
+                throw new IllegalStateException("包元数据读取失败（缺 pack.mcmeta 或文件不可读）");
+            }
 
             // vanilla 的 sources 构造时就固定了，只能反射塞 finder。
             // 别按 "sources" 查字段——线上环境是混淆名/intermediary 名，必炸；

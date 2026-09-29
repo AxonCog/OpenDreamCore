@@ -8,16 +8,17 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 龙核（DragonCore）配置文件 → 九系统规则的翻译路由。
+ * 龙核（DragonCore）配置文件 → 十系统规则的翻译路由。
  *
  * 服务器上装着龙核时，plugins/DragonCore/ 下的原生配置不该作废：
- * 这里按文件名认领（Blood 就是我们的 HeadTag，其余同名直译），
+ * 这里按文件名认领（Blood 重路由到我们的 Blood 独立系统，其中名字组件块
+ * 另出一份 HeadTag 规则——两系统独立认领，名字+血条同屏；其余同名直译），
  * 翻译本体全在 common 的 adapter/dreamcore/DreamCoreSystems（纯函数，
  * 有单测兜着），本类只负责「读文件 + 选翻译器」，装包和并入规则库
  * 由 VisualRuleManager 做——它要管去重前缀和版本号。
  *
  * 两个都要管的家伙：ItemTip.yml 是一整个界面页（走 Gui 适配器），
- * config.yml 是龙核自己的运行配置——都不归九系统，直接不认领。
+ * config.yml 是龙核自己的运行配置——都不归十系统，直接不认领。
  */
 public final class DreamCoreBridge {
 
@@ -57,7 +58,8 @@ public final class DreamCoreBridge {
             case "ArmorLayer" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.armorLayer(root);
             case "FontConfig" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.fontConfig(root);
             case "SlotConfig" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.slotConfig(root);
-            case "HeadTag" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.blood(root);
+            case "Blood" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.blood(root);
+            case "HeadTag" -> rules = com.opendreamcore.adapter.dreamcore.DreamCoreSystems.headTag(root);
             default -> {
                 return Collections.emptyMap();
             }
@@ -67,6 +69,15 @@ public final class DreamCoreBridge {
         }
         Map<String, Map<String, Map<String, Object>>> out = new LinkedHashMap<>();
         out.put(system, rules);
+        if ("Blood".equals(system)) {
+            // 血条件归 Blood 之外，同一条龙核规则里的名字件（名字_texture/名字_label）
+            // 另出一份 HeadTag 规则：两系统独立认领，名字+血条同屏（龙核原生行为）
+            Map<String, Map<String, Object>> nameRules =
+                    com.opendreamcore.adapter.dreamcore.DreamCoreSystems.headTag(root);
+            if (!nameRules.isEmpty()) {
+                out.put("HeadTag", nameRules);
+            }
+        }
         return out;
     }
 }

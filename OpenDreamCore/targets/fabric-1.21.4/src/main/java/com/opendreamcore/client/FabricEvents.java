@@ -140,10 +140,13 @@ public final class FabricEvents {
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register(
                 (message, overlay) -> ClientController.get().addChatMessage(LegacyText.toLegacy(message)));
 
-        // 世界全息（实体渲染后）
-        WorldRenderEvents.AFTER_ENTITIES.register(context ->
-                ClientController.get().renderWorld(context.camera(),
-                        context.tickCounter().getGameTimeDeltaPartialTick(false)));
+        // 世界全息 + 实体名牌（实体渲染后；名牌含服务端推送与 HeadTag 规则两条路）
+        // 挂 LAST（世界渲染最末），理由同 1.20.1 侧：避免在实体中段插入世界叠加几何。
+        WorldRenderEvents.LAST.register(context -> {
+            float pt = context.tickCounter().getGameTimeDeltaPartialTick(false);
+            ClientController.get().renderWorld(context.camera(), pt);
+            ClientController.get().renderNameTags(context.camera(), pt);
+        });
 
         // 容器替换：原版容器打开后，命中本地 match 就换掉
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {

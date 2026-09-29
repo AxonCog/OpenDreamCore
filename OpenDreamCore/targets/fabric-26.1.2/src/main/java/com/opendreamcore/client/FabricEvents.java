@@ -142,7 +142,13 @@ public final class FabricEvents {
                 (message, overlay) -> ClientController.get().addChatMessage(LegacyText.toLegacy(message)));
 
         // 世界全息 + 名牌。26.x：WorldRenderEvents 移除 → LevelRenderEvents（实体/不透明特征后）
-        LevelRenderEvents.AFTER_SOLID_FEATURES.register(context -> {
+        // 世界全息 + 名牌：挂 LevelRenderEvents.END_MAIN（世界渲染最末）。
+        // 原先挂 AFTER_SOLID_FEATURES——按同一份事件源码的声明顺序，它后面还有
+        // COLLECT_SUBMITS / AFTER_TRANSLUCENT_FEATURES / BEFORE_GIZMOS /
+        // BEFORE_TRANSLUCENT_TERRAIN / AFTER_TRANSLUCENT_TERRAIN，本帧的
+        // 半透明与水还没画完。在这中间插世界叠加几何，开光影时几何会落错 gbuffer 阶段，
+        // 表现就是物品、生物、水体部分透明。END_MAIN 是最末时点，与其余 11 个目标一致。
+        LevelRenderEvents.END_MAIN.register(context -> {
             var camera = context.gameRenderer().getMainCamera();
             float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
             ClientController.get().renderWorld(camera, partialTick);

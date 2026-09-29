@@ -90,42 +90,18 @@ public final class EntityRenderBridgeImpl implements EntityRenderBridge {
                 0.0F, (float) mx, (float) my, e);
     }
 
-    /** 26.1.2 反射取 EntityType：Identifier 键 + BuiltInRegistries，get 可能返回 Optional<Reference>。 */
+    /** 按 id 取实体类型：直调注册表（26.x 用 Identifier）。 */
     private static Object resolveEntityType26(String id) {
-        try {
-            Class<?> regClass = Class.forName("net.minecraft.core.registries.BuiltInRegistries");
-            Object reg = regClass.getField("ENTITY_TYPE").get(null);
-            Class<?> idClass = Class.forName("net.minecraft.resources.Identifier");
-            Object key = idClass.getMethod("of", String.class).invoke(null, id);
-            Object got = reg.getClass().getMethod("get", Object.class).invoke(reg, key);
-            if (got instanceof java.util.Optional<?> opt) {
-                return opt.map(o -> {
-                    try {
-                        return o.getClass().getMethod("value").invoke(o);
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }).orElse(null);
-            }
-            return got;
-        } catch (Throwable t) {
-            LOGGER.warn("[ODC] 实体类型反射解析失败（{}）: {}", id, t.toString());
+        net.minecraft.resources.Identifier key = net.minecraft.resources.Identifier.tryParse(id);
+        if (key == null) {
             return null;
         }
+        return net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(key);
     }
 
-    /** 26.1.2 反射创建实体：单参 create 且参数能接收该 level。 */
-    private static Object createEntity26(Object type, Object level) {
-        try {
-            for (var m : type.getClass().getMethods()) {
-                if (m.getName().equals("create") && m.getParameterCount() == 1) {
-                    if (m.getParameterTypes()[0].isAssignableFrom(level.getClass())) {
-                        return m.invoke(type, level);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+    /** 造展示实体：26.x 的 create 需要 EntitySpawnReason。 */
+    private static Object createEntity26(net.minecraft.world.entity.EntityType<?> type,
+                                        net.minecraft.world.level.Level level) {
+        return type.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
     }
 }

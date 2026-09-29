@@ -15,11 +15,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 原版 tooltip 替换（1.16.5）：服务端用物品 id 注册的 tooltip/ 条目，
  * 悬停原版物品时按 id 命中就自绘顶掉原版。
+ *
+ * 注入串写 srg 名：这代没有运行时反混淆，注解里的名字不会被重映射。
  */
 @Mixin(Screen.class)
 public abstract class MixinTooltip {
 
-    @Inject(method = "renderTooltip(Lcom/mojang/blaze3d/matrix/MatrixStack;"
+    @Inject(method = "func_230457_a_(Lcom/mojang/blaze3d/matrix/MatrixStack;"
             + "Lnet/minecraft/item/ItemStack;II)V",
             at = @At("HEAD"), cancellable = true)
     private void opendreamcore$replaceTooltip(MatrixStack ms, ItemStack stack, int x, int y,

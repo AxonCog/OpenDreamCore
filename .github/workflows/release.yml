@@ -1,14 +1,134 @@
 name: Release
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 构建矩阵（2026-09 重写）
+#
+# 旧版只编 fabric-1.21.1 + neoforge-1.21.1 两件，且在通用 Runner 上必然失败，原因有三：
+#   1) 每个目标目录的 gradle.properties 都写死了开发机的 JDK 绝对路径
+#      （org.gradle.java.home=C:/Users/… ；9 个目标指 21、2 个指 17、1 个指 25），
+#      Ubuntu Runner 上该路径不存在 → 直接 "Java home supplied is invalid"。
+#   2) 12 个目标里只有 5 个带 unix 版 gradlew（其余只有 gradlew.bat），Linux 上没法 ./gradlew。
+#   3) fabric-26.1.2 编译必需同目录的 mappings-noop.jar，而它被 .gitignore 排除。
+#
+# 现方案：
+#   · 12 个现代目标 + 插件全部进矩阵，各自在自己的目录用自带的 ./gradlew 构建
+#     （这是开发机上唯一验证通过的形态；根 wrapper 对 1.21.8+ 新 loom 目标解析不到 classpath）。
+#   · 统一追加 -Dorg.gradle.java.home="$JAVA_HOME" 覆盖写死的路径。命令行 -D 优先级高于
+#     gradle.properties —— 已本机实测：传不存在的路径会直接报
+#     "Value '…' given for org.gradle.java.home Gradle property is invalid"，
+#     证明覆盖确实生效（不是被静默忽略）。
+#   · 守护 JVM 按各目标原有钉值：17（fabric-1.20.1 / forge-1.20.1）、21（其余）、
+#     25（fabric-26.1.2）；neoforge-26.1.2 特殊：守护 JVM 是 21 而编译工具链要 25，
+#     所以额外装一个 JDK 25，并用 -Dorg.gradle.java.installations.paths 指给工具链探测。
+#   · 产物按 gradle.properties 的 mod_version 精确匹配上传 —— build/libs 里堆着历史版本
+#     （0.1.0/0.1.1/0.1.2/0.1.2.1/1.2）与 -shadow 中间产物，通配符会误传。
+#   · 矩阵里的 java 值有自检：若与本目标 gradle.properties 钉的版本不一致，构建立即失败，
+#     避免以后改了钉值而矩阵没跟着改。
+#
+# 未纳入 CI 的 4 个 Legacy 目标（forge-1.6.4 / 1.7.10 / 1.12.2 / 1.16.5）：
+#   它们需要 OpenDreamCore-Legacy/libs 与 tools（.gitignore 覆盖，内含 mcp/srg/
+#   SpecialSource/minecraft-mcp 等第三方与本地产物），Runner 上没有这些文件。
+#   发布时由维护者本地补这 4 件，再挂到同一个 Release：
+#     cd OpenDreamCore-Legacy/targets/forge-1.6.4 && ./gradlew build --no-daemon
+#     gh release upload <tag> OpenDreamCore-Legacy-forge-1.6.4-<版本>.jar --clobber
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  mods:
+    name: ${{ matrix.target }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: fabric-1.20.1,    loader: fabric,   mc: '1.20.1',  java: 17 }
+          - { target: fabric-1.21.1,    loader: fabric,   mc: '1.21.1',  java: 21 }
+          - { target: fabric-1.21.4,    loader: fabric,   mc: '1.21.4',  java: 21 }
+          - { target: fabric-1.21.8,    loader: fabric,   mc: '1.21.8',  java: 21 }
+          - { target: fabric-1.21.11,   loader: fabric,   mc: '1.21.11', java: 21 }
+          - { target: fabric-26.1.2,    loader: fabric,   mc: '26.1.2',  java: 25 }
+          - { target: forge-1.20.1,     loader: forge,    mc: '1.20.1',  java: 17 }
+          - { target: neoforge-1.21.1,  loader: neoforge, mc: '1.21.1',  java: 21 }
+          - { target: neoforge-1.21.4,  loader: neoforge, mc: '1.21.4',  java: 21 }
+          - { target: neoforge-1.21.8,  loader: neoforge, mc: '1.21.8',  java: 21 }
+          - { target: neoforge-1.21.11, loader: neoforge, mc: '1.21.11', java: 21 }
+          - { target: neoforge-26.1.2,  loader: neoforge, mc: '26.1.2',  java: 21, extra_java: 25 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}（守护 JVM）
+        uses: actions/setup-java@v4
+        with:
+          java-version: '${{ matrix.java }}'
+          distribution: temurin
+
+      - name: Set up JDK ${{ matrix.extra_java }}（仅供工具链探测）
+        if: matrix.extra_java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '${{ matrix.extra_java }}'
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 自检矩阵 JDK 与目标钉值一致
+        working-directory: OpenDreamCore/targets/${{ matrix.target }}
+        run: |
+          PINNED=$(grep -m1 '^org.gradle.java.home' gradle.properties \
+                   | sed 's/.*ms-\([0-9][0-9]*\)\..*/\1/; s/.*jdk-\([0-9][0-9]*\)\..*/\1/')
+          echo "目标钉的 JDK=$PINNED / 矩阵给的 JDK=${{ matrix.java }}"
+          if [ -n "$PINNED" ] && [ "$PINNED" != "${{ matrix.java }}" ]; then
+            echo "::error::矩阵 JDK 与本目标 gradle.properties 钉的 JDK 不一致，请同步 matrix"
+            exit 1
+          fi
+
+      - name: 解析产物名
+        id: ver
+        run: |
+          V=$(grep -m1 '^mod_version' OpenDreamCore/gradle.properties | cut -d= -f2 | tr -d '\r')
+          echo "jar=OpenDreamCore-${{ matrix.loader }}-${{ matrix.mc }}-$V.jar" >> "$GITHUB_OUTPUT"
+          echo "版本=$V"
+
+      - name: Build ${{ matrix.target }}
+        working-directory: OpenDreamCore/targets/${{ matrix.target }}
+        run: |
+          chmod +x gradlew
+          EXTRA=""
+          if [ -n "${{ matrix.extra_java }}" ]; then
+            VAR="JAVA_HOME_${{ matrix.extra_java }}_X64"
+            if [ -n "${!VAR:-}" ]; then
+              EXTRA="-Dorg.gradle.java.installations.paths=${!VAR}"
+              echo "工具链补路径: ${!VAR}"
+            else
+              echo "未取到 $VAR，退回 Gradle 自动探测工具链"
+            fi
+          fi
+          ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" \
+                    -Dorg.gradle.java.installations.auto-download=false \
+                    $EXTRA build --no-daemon --console=plain
+          ls -l "build/libs/${{ steps.ver.outputs.jar }}"
+
+      - name: Upload ${{ matrix.target }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-${{ matrix.target }}
+          path: OpenDreamCore/targets/${{ matrix.target }}/build/libs/${{ steps.ver.outputs.jar }}
+          if-no-files-found: error
+          retention-days: 7
+
+  plugin:
+    name: OpenDreamCore-Plugin
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -16,34 +136,52 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
 
-      - name: Grant execute permission to gradlew
-        run: |
-          chmod +x OpenDreamCore/gradlew
-          chmod +x OpenDreamCore-Plugin/gradlew
-
-      - name: Build NeoForge
-        working-directory: OpenDreamCore
-        run: ./gradlew -p targets/neoforge-1.21.1 build --no-daemon
-
-      - name: Build Fabric
-        working-directory: OpenDreamCore
-        run: ./gradlew -p targets/fabric-1.21.1 build --no-daemon
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Build Plugin
         working-directory: OpenDreamCore-Plugin
-        run: ./gradlew build --no-daemon
-
-      - name: Collect jars
         run: |
-          mkdir -p output
-          find . -name "*.jar" -path "*/build/libs/*" \
-            ! -name "*-sources*" ! -name "*-javadoc*" ! -name "*-dev*" \
-            -exec cp {} output/ \;
+          chmod +x gradlew
+          # 插件的 gradle.properties 同样钉了开发机 JDK 路径，一起覆盖掉
+          ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" \
+                    -Dorg.gradle.java.installations.auto-download=false \
+                    build --no-daemon --console=plain
+
+      - name: Upload Plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-plugin
+          path: |
+            OpenDreamCore-Plugin/plugin/build/libs/OpenDreamCore-Plugin-*.jar
+            !OpenDreamCore-Plugin/plugin/build/libs/OpenDreamCore-Plugin-*-all.jar
+            !OpenDreamCore-Plugin/plugin/build/libs/OpenDreamCore-Plugin-*-sources.jar
+            !OpenDreamCore-Plugin/plugin/build/libs/OpenDreamCore-Plugin-*-javadoc.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: 汇总发布
+    needs: [mods, plugin]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 清点产物
+        run: |
+          ls -l dist
+          echo "共 $(ls dist/*.jar | wc -l) 件（12 现代目标 + 1 插件；4 件 Legacy 由维护者本地补挂）"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          files: dist/*.jar
           generate_release_notes: true
-          files: output/*.jar
+          fail_on_unmatched_files: true

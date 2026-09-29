@@ -56,11 +56,9 @@ public final class EntityRenderBridgeImpl implements EntityRenderBridge {
             case "zombie":
                 return new Zombie(net.minecraft.world.entity.EntityType.ZOMBIE, mc.level);
             default: {
-                var type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
-                        .get(net.minecraft.resources.ResourceLocation.tryParse(m));
-                if (type != null) {
-                    // create 签名 1.21.4+ 漂移，统一反射调单参重载
-                    Object e = createEntity(type, mc.level);
+                Object type = resolveEntityType(m);
+                if (type instanceof net.minecraft.world.entity.EntityType<?> et) {
+                    Object e = createEntity(et, mc.level);
                     if (e != null) {
                         return e;
                     }
@@ -70,18 +68,19 @@ public final class EntityRenderBridgeImpl implements EntityRenderBridge {
         }
     }
 
-    private static Object createEntity(Object type, Object level) {
-        try {
-            for (var m : type.getClass().getMethods()) {
-                if (m.getName().equals("create") && m.getParameterCount() == 1) {
-                    if (m.getParameterTypes()[0].isAssignableFrom(level.getClass())) {
-                        return m.invoke(type, level);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
+    /** 按 id 取实体类型：直调注册表（1.21.4 用 getValue，找不到返回 null）。 */
+    private static Object resolveEntityType(String id) {
+        net.minecraft.resources.ResourceLocation rl = net.minecraft.resources.ResourceLocation.tryParse(id);
+        if (rl == null) {
+            return null;
         }
-        return null;
+        return net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(rl);
+    }
+
+    /** 造展示实体：1.21.4+ 的 create 需要 EntitySpawnReason。 */
+    private static Object createEntity(net.minecraft.world.entity.EntityType<?> type,
+                                       net.minecraft.world.level.Level level) {
+        return type.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
     }
 
     @Override

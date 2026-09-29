@@ -26,31 +26,6 @@ public final class WorldHologram {
      * RenderLevelStageEvent 里调用。camera 用于对齐视角（billboard）。
      * 距离淡出：options.world.fadeDistance（米，0 = 关）+ fadeRange（淡出带，默认 3 米）。
      */
-    /** 深度写开关：部分版本 RenderSystem 不再暴露 depthMask，走反射兼容。 */
-    private static void rsDepthMask(boolean write) {
-        try {
-            com.mojang.blaze3d.systems.RenderSystem.class
-                    .getMethod("depthMask", boolean.class).invoke(null, write);
-        } catch (Throwable ignored) {
-        }
-    }
-
-/** 混合函数复位：同上走反射。 */
-    private static void rsDefaultBlendFunc() {
-        try {
-            com.mojang.blaze3d.systems.RenderSystem.class
-                    .getMethod("defaultBlendFunc").invoke(null);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    /** 无参 RenderSystem 状态调用反射版（1.21.5+ 状态 API 重构，方法可能不存在，静默跳过）。 */
-    private static void rsCall(String method) {
-        try {
-            com.mojang.blaze3d.systems.RenderSystem.class.getMethod(method).invoke(null);
-        } catch (Throwable ignored) {
-        }
-    }
 
     public static void render(List<RenderNode> nodes, Map<String, Object> options,
                               net.minecraft.client.Camera camera, float partialTick) {
@@ -153,12 +128,19 @@ public final class WorldHologram {
                 anchor.y - camera.getPosition().y,
                 anchor.z - camera.getPosition().z);
 
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-        // 世界面板统一渲染状态：混合开启（半透明背景可见）、双面（背对不消失）、深度只测不写
-        rsCall("enableBlend");
-        rsDefaultBlendFunc();
-        rsCall("disableCull");
-        rsDepthMask(false);
+        // 独立批次：不再借用原版正在用的共享 BufferSource（下面那个 buffers 仅在自建失败时兜底）。
+        // 借用共享源并调它的 endBatch() 会把原版正在攒的实体/粒子批次提前送走；开光影时
+        // （Iris/Oculus 按渲染类型重绘世界）这种错位会让原版几何落错 gbuffer 阶段，表现为部分透明。
+        CompatRender.WorldBatch worldBatch = CompatRender.beginWorldBatch();
+        MultiBufferSource buffers = worldBatch.source() != null
+                ? (MultiBufferSource) worldBatch.source()
+                : mc.renderBuffers().bufferSource();
+        // 世界面板统一渲染状态：混合开启（半透明背景可见）、双面（背对不消失）、只测深度不写深度。
+        // 状态改动交给守卫：进入前先把每一项原值快照，退出时逐项写回。以前这里退出时写死
+        // “depthMask(true) / enableCull / disableBlend”，一旦进入前原版本就把深度写关了
+        // （半透明阶段就是这样），我们退出时就把深度写永久打开，后续原版几何与深度缓冲不一致，
+        // 表现出来就是物品、生物部分透明、时隐时现。
+        RenderGuard guard = RenderGuard.enterWorldHolo();
         try {
             // 深度模式控制：
             // occluded（默认）：启用深度测试，被遮挡的元素不显示
@@ -207,7 +189,7 @@ public final class WorldHologram {
                 renderNode(pose, buffers, node, fade, hoverId, selectionId, activeTab, tabReveal,
                         scope, pageVars, dragOffsets, null);
             }
-            buffers.endBatch();
+            worldBatch.endBatch();
 
             // transparent 模式：第二遍——禁用深度测试，用低透明度重画被遮挡的元素
             if (transparentMode) {
@@ -218,15 +200,21 @@ public final class WorldHologram {
                     renderNode(pose, buffers, node, occludedFade, hoverId, selectionId, activeTab, tabReveal,
                             scope, pageVars, dragOffsets, null);
                 }
-                buffers.endBatch();
                 noDepthPass = false;
             }
-        // 面板绘制结束：恢复全局渲染状态（blend/cull/深度写回）
-        rsDepthMask(true);
-        rsCall("enableCull");
-        rsCall("disableBlend");
         } catch (Exception ignored) {
             // 全息渲染出错不拖垮帧
+        } finally {
+            // 关键修复：无论正常/异常都必须结束批次 + 还原 GL 状态——
+            // 否则本面板写出的批次不 flush 就残留，ByteBufferBuilder 每帧
+            // "Clearing BufferBuilder with unused batches" 刷屏，GL 状态也污染 LevelRenderer。
+            // close() 只结束我们自建的那一份并归还缓冲；回退到共享源时它不做任何事
+            // （共享源的批次由原版在阶段末自行 flush）。
+            worldBatch.close();
+            noDepthPass = false;
+            // 状态还原放在批次收尾之后：先把自己写的几何送出去，再按进入前的原值逐项恢复。
+            // 守卫内部逐项兑异常且可重复调用，异常路径也一定会走到这里。
+            guard.close();
         }
     }
 
@@ -259,6 +247,17 @@ public final class WorldHologram {
         } else {
             CompatRender.enableDepthTest();
         }
+    }
+
+    /**
+     * 当前是否处于「不测深度」的绘制趟（depthMode=always，或 transparent 模式的第二遍）。
+     *
+     * <p>世界几何挂的渲染类型要跟着这条语义走：不写深度是恒定要求（billboard 不该在深度缓冲
+     * 留痕），但是否连深度测试也关掉，取决于当前是穿透趟还是常规趟。渲染状态在高版本已归管线管，
+     * 光靠改 GL 状态不再生效，所以这条语义必须同时传给渲染类型的选取。
+     */
+    public static boolean isSeeThroughPass() {
+        return noDepthPass || "always".equals(currentDepthMode);
     }
 
     /**
@@ -1178,7 +1177,11 @@ public final class WorldHologram {
         if (mc.player == null || title == null || title.isEmpty()) {
             return;
         }
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        // 独立批次：不碰原版共享源（见 render 处的说明）。
+        CompatRender.WorldBatch worldBatch = CompatRender.beginWorldBatch();
+        MultiBufferSource buffers = worldBatch.source() != null
+                ? (MultiBufferSource) worldBatch.source()
+                : mc.renderBuffers().bufferSource();
         PoseStack pose = new PoseStack();
         pose.translate(anchor.x - camera.getPosition().x + px,
                 anchor.y - camera.getPosition().y + py,
@@ -1187,10 +1190,17 @@ public final class WorldHologram {
         // 字高 = 面板宽度的 4%（世界单位）；1px 字 → 字高/8 世界单位
         double pxPerWorld = Math.max(30, panelWidth * 12);
         pose.scale((float) (1.0 / pxPerWorld), (float) (-1.0 / pxPerWorld), (float) (1.0 / pxPerWorld));
-        mc.font.drawInBatch(title, -mc.font.width(title) / 2.0F, 0, 0xDDFFFFFF, true,
-                pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
-                0, 0xF000F0);
-        buffers.endBatch();
+        // 与主渲染入口同一套状态守卫：即便本入口目前只写字、自己不改 GL 状态，
+        // 也按同一契约成对进出——字体内部实现跨版本会动状态，不能假定它不动。
+        RenderGuard guard = RenderGuard.enterWorldHolo();
+        try {
+            mc.font.drawInBatch(title, -mc.font.width(title) / 2.0F, 0, 0xDDFFFFFF, true,
+                    pose.last().pose(), buffers, net.minecraft.client.gui.Font.DisplayMode.NORMAL,
+                    0, 0xF000F0);
+        } finally {
+            worldBatch.close();
+            guard.close();
+        }
     }
 
     /** 世界内滑块（slider）：轨道 + 填充 + 手柄，拖拽改值（INPUT 数值上报）。 */
@@ -1303,9 +1313,11 @@ public final class WorldHologram {
                                        double fade, String scope, double[] drag,
                                        java.util.Map<String, Object> pageVars) {
         Map<?, ?> spec = UiRenderer.propsMap(node, "progress");
-        double min = UiRenderer.num(spec.get("min"), 0);
-        double max = UiRenderer.num(spec.get("max"), 100);
-        double value = UiRenderer.num(spec.get("value"), min);
+        // value/min/max 每帧表达式求值（vars 驱动，线C③）：头顶血条随
+        // health/health_ratio 变量逐帧跳动（数字/数字字符串/表达式三态同 holoNum）
+        double min = holoNum(spec, "min", 0, pageVars);
+        double max = holoNum(spec, "max", 100, pageVars);
+        double value = holoNum(spec, "value", min, pageVars);
         double ratio = max > min ? (value - min) / (max - min) : 0;
         ratio = Math.max(0, Math.min(1, ratio));
         String shape = UiRenderer.str(spec.get("shape"));
@@ -1487,11 +1499,11 @@ public final class WorldHologram {
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
-        builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
-        builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
-        builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
-        builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
+                        CompatRender.worldTextureFormat());
+        CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
+        CompatRender.texturedVertex(builder, matrix, -hw, hh, 0, 1, alpha);
         drawSafe(builder);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
@@ -1534,11 +1546,11 @@ public final class WorldHologram {
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
-        builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
-        builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
-        builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
-        builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
+                        CompatRender.worldTextureFormat());
+        CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
+        CompatRender.texturedVertex(builder, matrix, -hw, hh, 0, 1, alpha);
         drawSafe(builder);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
@@ -1743,11 +1755,11 @@ public final class WorldHologram {
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
-        builder.addVertex(matrix, -hw, -hh, 0).setUv(0, 0);
-        builder.addVertex(matrix, hw, -hh, 0).setUv(1, 0);
-        builder.addVertex(matrix, hw, hh, 0).setUv(1, 1);
-        builder.addVertex(matrix, -hw, hh, 0).setUv(0, 1);
+                        CompatRender.worldTextureFormat());
+        CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
+        CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
+        CompatRender.texturedVertex(builder, matrix, -hw, hh, 0, 1, alpha);
         drawSafe(builder);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         applyContentDepth();
@@ -1764,7 +1776,13 @@ public final class WorldHologram {
         }
         PoseStack pose = new PoseStack();
         pose.translate(-camera.getPosition().x, -camera.getPosition().y, -camera.getPosition().z);
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        // 独立批次：不碰原版共享源（见 render 处的说明）。
+        CompatRender.WorldBatch worldBatch = CompatRender.beginWorldBatch();
+        MultiBufferSource buffers = worldBatch.source() != null
+                ? (MultiBufferSource) worldBatch.source()
+                : mc.renderBuffers().bufferSource();
+        // 名牌也是世界绘制点，按同一契約成对进出守卫（异常路径也要还原）。
+        RenderGuard guard = RenderGuard.enterWorldHolo();
         try {
             for (WorldUiStore.NameTag tag : tags) {
                 net.minecraft.world.entity.Entity entity = mc.level.getEntity(tag.entityId());
@@ -1781,9 +1799,13 @@ public final class WorldHologram {
                         0, 0xF000F0);
                 pose.popPose();
             }
-            buffers.endBatch();
+            worldBatch.endBatch();
         } catch (Exception ignored) {
             // 名牌渲染出错不拖垮帧
+        } finally {
+            // 异常路径也要结束批次并归还缓冲，否则每帧漏一个 ByteBufferBuilder。
+            worldBatch.close();
+            guard.close();
         }
     }
 

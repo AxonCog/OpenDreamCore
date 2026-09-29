@@ -12,9 +12,9 @@
     "MixinEquipmentRenderer",
     "MixinNameTag",
     "MixinItemEffect",
-    "MixinFontDraw",
     "FontSetMixin",
-    "MixinGlyphRenderState"
+    "MixinRenderPipelinesAccessor",
+    "MixinCompositeStateAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

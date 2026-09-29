@@ -9,11 +9,12 @@
     "MixinTooltip",
     "MixinNameTag",
     "MixinItemEffect",
-    "MixinGuiText",
     "MixinSubtitleOverlay",
-    "MixinWorldRender",
     "MixinArmorLayer",
-    "MixinCursor"
+    "MixinCursor",
+    "FontSetSourceMixin",
+    "WorldRenderPipelinesMixin",
+    "WorldRenderTypeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

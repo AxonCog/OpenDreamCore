@@ -4,7 +4,7 @@
   "package": "com.opendreamcore.mixin",
   "compatibilityLevel": "JAVA_8",
   "client": [
-    "MixinFontRenderer",
+    "MixinFontGlyphs",
     "MixinItemIcon",
     "MixinItemEffect",
     "MixinTooltip",

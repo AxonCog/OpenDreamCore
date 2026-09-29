@@ -65,12 +65,21 @@ public final class LegacyVisualItemIcons {
         loaded = true;
     }
 
-    /** 按物品类型找覆写贴图；无命中 null。类型去命名空间匹配。 */
+    /** 按物品类型找覆写贴图；无命中 null。类型去命名空间匹配（无显示名兑底）。 */
     public static String textureFor(String itemType) {
+        return textureFor(itemType, "");
+    }
+
+    /**
+     * 带显示名匹配：名称/包含（name/contains/包含）规则要拿到真实物品名
+     * 才认得出来（页面槽位只有物品 id 时走空名兑底）。显示名剥 § 色码。
+     */
+    public static String textureFor(String itemType, String displayName) {
         ensureLoaded();
         String t = stripNs(itemType);
+        String nm = displayName == null ? "" : displayName.replaceAll("§.", "");
         for (Entry e : entries) {
-            if (e.spec.matches(new ItemView(t, "", new java.util.ArrayList<String>(),
+            if (e.spec.matches(new ItemView(t, nm, new java.util.ArrayList<String>(),
                     new java.util.LinkedHashMap<String, Object>()))) {
                 return e.texture;
             }

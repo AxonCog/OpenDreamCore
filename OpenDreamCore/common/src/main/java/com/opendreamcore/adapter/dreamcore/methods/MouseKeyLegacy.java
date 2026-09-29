@@ -27,10 +27,12 @@ public final class MouseKeyLegacy {
         LegacyMethods.register("设置鼠标", a -> null);
         LegacyMethods.register("取按键", a -> k("isKeyDown", a.length > 0 ? a[0] : ""));
         LegacyMethods.register("取键", a -> k("isKeyDown", a.length > 0 ? a[0] : ""));
-        LegacyMethods.register("发送按键", a -> k("isKeyDown", a.length > 0 ? a[0] : ""));
-        LegacyMethods.register("执行按键指令", a -> k("isKeyDown", a.length > 0 ? a[0] : ""));
+        LegacyMethods.register("发送按键", a -> k("模拟按下", a.length > 0 ? a[0] : ""));
+        LegacyMethods.register("执行按键指令", a -> k("模拟按下", a.length > 0 ? a[0] : ""));
         LegacyMethods.register("获取按键名", a -> k("getKeyName", a.length > 0 ? a[0] : ""));
         LegacyMethods.register("获取控制按键名", a -> k("getKeyName", a.length > 0 ? a[0] : ""));
         LegacyMethods.register("设置控制按键", a -> null);
+        // DragonCore 配置里用的是 方法.取当前按下键（keyPress 分发期间写入的键名上下文）
+        LegacyMethods.register("取当前按下键", a -> k("当前按下键"));
     }
 }

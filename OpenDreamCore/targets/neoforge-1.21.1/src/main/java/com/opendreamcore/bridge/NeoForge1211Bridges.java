@@ -3,6 +3,7 @@ package com.opendreamcore.bridge;
 import com.opendreamcore.client.bridge.TargetBridges;
 import com.opendreamcore.client.entity.EntityRenderBridge;
 import com.opendreamcore.client.entity.ItemModelRenderBridge;
+import com.opendreamcore.client.spi.GlStateBridge;
 import com.opendreamcore.client.spi.ResourcePackInjector;
 
 /**
@@ -10,6 +11,9 @@ import com.opendreamcore.client.spi.ResourcePackInjector;
  * 加，漏了直接编译红，全版本对齐从结构上兜底。
  */
 public final class NeoForge1211Bridges implements TargetBridges {
+
+    /** 全局 GL / 着色器状态桥：这一族的调用点一律走它，绝不按签名反射（见 GlStateBridge 的 Javadoc）。 */
+    private static final GlStateBridge GL_STATE = new com.opendreamcore.client.GlStateBridgeImpl();
 
     private static final EntityRenderBridge ENTITY = new com.opendreamcore.client.entity.EntityRenderBridgeImpl();
     private static final ItemModelRenderBridge ITEM = new com.opendreamcore.client.entity.ItemModelRenderBridgeImpl();
@@ -28,5 +32,10 @@ public final class NeoForge1211Bridges implements TargetBridges {
     @Override
     public ResourcePackInjector packInjector() {
         return INJECTOR;
+    }
+
+    @Override
+    public GlStateBridge glStateBridge() {
+        return GL_STATE;
     }
 }

@@ -78,10 +78,8 @@ public final class Renderer1212 implements LegacyRenderer {
         }
         net.minecraft.client.renderer.entity.RenderManager rm = mc.getRenderManager();
         GlStateManager.pushMatrix();
-        GlStateManager.enableBlend();
-        GlStateManager.disableLighting();
-        GlStateManager.disableCull();
-        GlStateManager.depthMask(false);
+        // 混合/剔除/深度写/光照由世界相位总闸（PageDirector 里的 RenderStateSnapshot）统一按原值
+        // 设置与还原，这里不再各写一份：写固定值正是把原版深度写永久打开的旧病根。
         GlStateManager.translate(-camX, -camY, -camZ);
         GlStateManager.translate(anchorX, anchorY, anchorZ);
         GlStateManager.rotate(-rm.playerViewY, 0.0F, 1.0F, 0.0F);
@@ -93,9 +91,7 @@ public final class Renderer1212 implements LegacyRenderer {
 
     @Override
     public void endWorld() {
-        GlStateManager.depthMask(true);
-        GlStateManager.enableCull();
-        GlStateManager.enableLighting();
+        // 状态还原在总闸里按进入前的原值做（见 PageDirector.renderWorldPhase）
         GlStateManager.popMatrix();
     }
 

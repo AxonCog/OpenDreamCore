@@ -12,4 +12,10 @@ echo Using Java:
 java -version
 echo.
 echo Building with Gradle 2.14...
-gradlew.bat %*
+REM Default to "build" when no task is given. Bare "gradlew.bat" with no args only prints
+REM help and exits with code 0 -- looks like success but builds no jar, so the artifact
+REM silently stays at its previous timestamp. Keeping this file ASCII-only matters: a
+REM batch file is read as the OEM codepage, so non-ASCII comments corrupt the parse.
+set ODC_TASKS=%*
+if "%ODC_TASKS%"=="" set ODC_TASKS=build
+gradlew.bat %ODC_TASKS%

@@ -71,9 +71,13 @@ public final class FabricEvents {
         // HUD 常驻渲染
         HudRenderCallback.EVENT.register((g, tickDelta) -> ClientController.get().renderHud(g));
 
-        // 世界全息（实体渲染后）
-        WorldRenderEvents.AFTER_ENTITIES.register(context ->
-                ClientController.get().renderWorld(context.camera(), context.tickDelta()));
+        // 世界全息 + 实体名牌（实体渲染后；名牌含服务端推送与 HeadTag 规则两条路）
+        // 挂 LAST（世界渲染最末）：面板属于世界上的叠加元素，放在实体中段绘制会在原版
+        // 还在攒实体/粒子批次时插进去，开光影时几何会落错 gbuffer 阶段。
+        WorldRenderEvents.LAST.register(context -> {
+            ClientController.get().renderWorld(context.camera(), context.tickDelta());
+            ClientController.get().renderNameTags(context.camera(), context.tickDelta());
+        });
 
         // 容器替换：原版容器打开后，命中本地 match 就换掉（1.20.1 fabric-api 签名：client+screen+w+h）
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {

@@ -947,8 +947,8 @@ public final class UiRenderer {
         if (count > 1) {
             g.renderItemDecorations(font, stack, 0, 0);
         }
-        // ItemIcon 皮肤覆盖：规则命中就把图标盖成自定义贴图（静态走散装注册表，gif 走 GifPlayer）
-        overlayItemSkin(g, id);
+        // ItemIcon 皮肤覆盖：规则命中就把图标盖成自定义贴图（整图直出 + gif 动画）
+        overlayItemSkin(g, id, stack);
         CompatRender.posePop(pose);
     }
 
@@ -962,7 +962,7 @@ public final class UiRenderer {
         String[] parts = id.split("\\s+");
         if (parts.length >= 3 && "x".equalsIgnoreCase(parts[1])) {
             id = parts[0];
-            try { count = Integer.parseInt(parts[2]); } catch (NumberFormatException ignored) {}
+            try { count = Integer.parseInt(parts[2]); } catch (NumberFormatException ignored) { /* 数量解析失败：保持默认 1 */ }
         }
         ItemStack stack = parseItem(id);
         if (stack.isEmpty()) return;
@@ -984,8 +984,8 @@ public final class UiRenderer {
         CompatRender.poseTranslate(pose, -icon / 2.0, -icon / 2.0);
         g.renderItem(stack, 0, 0);
         if (count > 1) g.renderItemDecorations(font, stack, 0, 0);
-        // ItemIcon 皮肤覆盖（旋转展示同款待遇）
-        overlayItemSkin(g, id);
+        // ItemIcon 皮肤覆盖（旋转展示同款待遇：整图直出 + gif 动画）
+        overlayItemSkin(g, id, stack);
         CompatRender.posePop(pose);
     }
 
@@ -994,26 +994,24 @@ public final class UiRenderer {
      * 静态图走 LooseResourceLoader 注册表（资源云/托管目录都算），gif 走 GifPlayer 的当前帧。
      * 无规则命中或贴图还没就位就什么都不画——原版图标垫底，天然回落。
      */
-    private static void overlayItemSkin(GuiGraphics g, String itemId) {
-        String tex = com.opendreamcore.client.visual.VisualItemSkins.textureFor(itemId);
+    /**
+     * ItemIcon 皮肤覆盖：规则命中就在原版图标上盖自定义贴图（所有物品图标绘制都经过这）。
+     * 整图直出零切割：静态图用真实尺寸全幅 UV；gif 用帧表当前帧切片（由 tickAll 推进，自动播动画）。
+     * stack 用于按名匹配（龙核规则常按物品名命中）；无 stack 时传 null。
+     */
+    private static void overlayItemSkin(GuiGraphics g, String itemId, ItemStack stack) {
+        String tex = com.opendreamcore.client.visual.VisualItemSkins.textureFor(itemId,
+                stack == null ? null : stack.getHoverName().getString());
         if (tex == null) {
             return;
         }
-        boolean gif = tex.toLowerCase().endsWith(".gif");
-        net.minecraft.resources.ResourceLocation rl = gif ? gifFrame(tex)
-                : com.opendreamcore.client.resources.LooseResourceLoader.lookup(tex);
-        if (rl == null && gif) {
-            rl = gifFrame(tex);
+        var si = com.opendreamcore.client.resources.LooseResourceLoader.sheetOf(tex);
+        if (si == null) {
+            return;
         }
-        if (rl != null) {
-            CompatRender.blit(g, rl, 0, 0, 16, 16, 0, 0, 16, 16, 16, 16);
-        }
-    }
-
-    /** GIF 当前帧贴图；未就绪/文件缺失返回 null。 */
-    private static net.minecraft.resources.ResourceLocation gifFrame(String path) {
-        var player = com.opendreamcore.client.GifPlayer.of(path);
-        return player == null ? null : player.currentTexture();
+        CompatRender.blit(g, si.rl(), 0, 0, 16, 16,
+                si.frame() * si.frameW(), 0, si.frameW(), si.frameH(),
+                si.frameW() * si.frames(), si.frameH());
     }
 
     // 输入类：area_input / suggestion

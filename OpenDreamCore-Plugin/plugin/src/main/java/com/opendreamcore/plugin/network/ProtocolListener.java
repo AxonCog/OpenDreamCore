@@ -396,7 +396,7 @@ public final class ProtocolListener implements PluginMessageListener {
                 send(player, Protocol.CLOUD_MANIFEST, cloud.buildManifest());
             }
             // 视觉规则下发：
-            // 九系统的规则 YAML 原文打包同步，客户端自行解析渲染；
+            // 十系统的规则 YAML 原文打包同步，客户端自行解析渲染；
             // 无能力位门槛——规则数据无害，老客户端收不到也不影响
             try {
                 send(player, Protocol.VISUAL_RULES, plugin.visualRules().buildSync());

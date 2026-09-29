@@ -9,9 +9,9 @@
     "MixinNameTag",
     "MixinTooltip",
     "MixinItemEffect",
-    "MixinStringRenderOutput",
     "MixinArmorLayer",
-    "MixinCursor"
+    "MixinCursor",
+    "FontSetMixin"
   ],
   "injectors": {
     "defaultRequire": 1

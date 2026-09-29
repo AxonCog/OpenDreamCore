@@ -166,18 +166,24 @@ public final class CustomFonts {
             return cached;
         }
         Path file = resolveTtf(norm);
+        // 云端字体按裸名注册（cache/fonts/xxx.ttf → 名 xxx）：路径未命中时按裸名兜底
+        String bare = norm.substring(norm.lastIndexOf('/') + 1).replaceFirst("(?i)\\.tt[cf]$", "");
+        TtfRenderer byName = bare.isBlank() ? null : RENDERERS.get(bare);
         if (file == null) {
+            if (byName != null) {
+                return byName;
+            }
             return null;
         }
         try {
-            TtfFont font = new TtfFont(norm, file.toFile());
+            TtfFont font = TtfFont.fromFile(norm, file.toFile());
             TtfRenderer r = new TtfRenderer(font);
             RENDERERS.put(norm, r);
             LOGGER.info("字体加载(路径) {} <- {}", norm, file);
             return r;
         } catch (Exception e) {
             LOGGER.warn("字体加载失败(路径) {}: {}", norm, e.toString());
-            return null;
+            return byName != null ? byName : null;
         }
     }
 
@@ -203,6 +209,17 @@ public final class CustomFonts {
             Path abs = Path.of(rel);
             if (abs.isAbsolute() && Files.isRegularFile(abs)) {
                 return abs;
+            }
+        } catch (Exception ignored) {
+        }
+        // 4. 云字体缓存：cacheDir/fonts/<文件名>（资源云同步下来的 ttf/ttc）
+        try {
+            CloudSyncClient cloud = ClientController.get().cloud();
+            if (cloud != null) {
+                Path cloudFont = cloud.cacheDir().resolve("fonts").resolve(fn);
+                if (Files.isRegularFile(cloudFont)) {
+                    return cloudFont;
+                }
             }
         } catch (Exception ignored) {
         }

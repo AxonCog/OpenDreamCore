@@ -22,20 +22,69 @@ public final class TtfRenderer {
     private static final int PAGE_SIZE = 512;
     private static final int PAD = 1;
 
-    /** 图集页：NativeImage + 动态纹理。 */
+    /** 图集页：像素先在 BufferedImage 上合成，脏了再整体转成 NativeImage 重挂纹理。
+     *
+     *  <p>为什么不在 NativeImage 上逐像素写：Fabric 生产环境的方法名是 intermediary
+     *  （method_xxxx），按 Mojmap 名反射 setPixelRGBA/setPixelABGR/setPixel 必然全部落空
+     *  → 字形一个像素都写不进去 → 所有 TTF 文字整片不可见（实测单次会话 3 万条告警）。
+     *  BufferedImage 是纯 JDK 类型，没有映射问题；转 NativeImage 走 NativeImage.read 直调。 */
     private static final class Page {
-        final NativeImage image;
-        final DynamicTexture texture;
+        final BufferedImage buffer = new BufferedImage(PAGE_SIZE, PAGE_SIZE, BufferedImage.TYPE_INT_ARGB);
         final ResourceLocation id;
+        DynamicTexture texture;
+        boolean dirty;
         int cursorX = PAD;
         int cursorY = PAD;
         int rowHeight = 0;
 
         Page(ResourceLocation id) {
-            this.image = new NativeImage(PAGE_SIZE, PAGE_SIZE, true);
-            this.texture = CompatRender.newDynamicTexture(image);
             this.id = id;
-            net.minecraft.client.Minecraft.getInstance().getTextureManager().register(id, texture);
+            DynamicTexture t = upload();
+            this.texture = t;
+            if (t != null) {
+                net.minecraft.client.Minecraft.getInstance().getTextureManager().register(id, t);
+            }
+        }
+
+        private DynamicTexture upload() {
+            var img = com.opendreamcore.client.resources.LooseResourceLoader.toNativeOrNull(buffer);
+            return img == null ? null : CompatRender.newDynamicTexture(img);
+        }
+
+        /** 把一个字形块贴进页面（纯 JDK 像素操作，无映射依赖）。 */
+        void put(BufferedImage glyph, int x, int y) {
+            for (int py = 0; py < glyph.getHeight(); py++) {
+                for (int px = 0; px < glyph.getWidth(); px++) {
+                    int argb = glyph.getRGB(px, py);
+                    if (((argb >>> 24) & 0xFF) == 0) {
+                        continue;
+                    }
+                    buffer.setRGB(x + px, y + py, argb);
+                }
+            }
+            dirty = true;
+        }
+
+        /** 有新增字形才重挂纹理：每帧最多一次，避免「加一个字形就重编码整页」。 */
+        void flush() {
+            if (!dirty) {
+                return;
+            }
+            DynamicTexture fresh = upload();
+            if (fresh == null) {
+                return; // 转换失败：保留脏标记，下一帧再试（不抛异常、不阻断绘制）
+            }
+            dirty = false;
+            DynamicTexture old = texture;
+            texture = fresh;
+            net.minecraft.client.Minecraft.getInstance().getTextureManager().register(id, fresh);
+            if (old != null && old != fresh) {
+                try {
+                    old.close();
+                } catch (Throwable ignored) {
+                    // 旧纹理已被同 id 新纹理取代，关不掉也不影响正确性
+                }
+            }
         }
     }
 
@@ -89,6 +138,10 @@ public final class TtfRenderer {
         if (alpha <= 0) {
             return;
         }
+        // 本帧新加的字形在这里一次性转纹理（每页最多编码一次）
+        for (Page page : pages) {
+            page.flush();
+        }
         float r = ((color >> 16) & 0xFF) / 255.0F;
         float gr = ((color >> 8) & 0xFF) / 255.0F;
         float b = (color & 0xFF) / 255.0F;
@@ -138,27 +191,12 @@ public final class TtfRenderer {
             return null;
         }
         Page page = ensureSpace(img.getWidth() + PAD, img.getHeight() + PAD);
-        // 拷贝到图集（ARGB → RGBA）
-        for (int py = 0; py < img.getHeight(); py++) {
-            for (int px = 0; px < img.getWidth(); px++) {
-                int argb = img.getRGB(px, py);
-                int a = (argb >>> 24) & 0xFF;
-                if (a == 0) {
-                    continue;
-                }
-                int r = (argb >> 16) & 0xFF;
-                int gr = (argb >> 8) & 0xFF;
-                int b = argb & 0xFF;
-                CompatRender.nativeSetPixel(page.image, page.cursorX + px, page.cursorY + py,
-                        (r << 24) | (gr << 16) | (b << 8) | a);
-            }
-        }
+        page.put(img, page.cursorX, page.cursorY);
         Glyph glyph = new Glyph(c, page, page.cursorX, page.cursorY,
                 img.getWidth(), img.getHeight(), font.advance(c));
         glyphs.put(c, glyph);
         page.rowHeight = Math.max(page.rowHeight, img.getHeight() + PAD);
         page.cursorX += img.getWidth() + PAD;
-        page.texture.upload();
         return glyph;
     }
 

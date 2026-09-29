@@ -249,10 +249,11 @@ public final class FullGapLegacy {
         LegacyMethods.register("指数", a -> null);
         LegacyMethods.register("按宽度分割", a -> null);
         LegacyMethods.register("按钮声音", a -> null);
-        LegacyMethods.register("按键", a -> null);
-        LegacyMethods.register("按键指令", a -> null);
+        // 按键查询/触发桥：走客户端 Key 命名空间（是否按下 / 模拟按下），不再吞成空桩
+        LegacyMethods.register("按键", a -> LegacyMethods.delegate("Key", "是否按下", a));
+        LegacyMethods.register("按键指令", a -> LegacyMethods.delegate("Key", "模拟按下", a));
         LegacyMethods.register("排序", a -> null);
-        LegacyMethods.register("控制按键是否按下", a -> false);
+        LegacyMethods.register("控制按键是否按下", a -> LegacyMethods.delegate("Key", "是否按下", a));
         LegacyMethods.register("插值", a -> null);
         LegacyMethods.register("插入", a -> null);
         LegacyMethods.register("摆动", a -> null);
@@ -324,8 +325,8 @@ public final class FullGapLegacy {
         LegacyMethods.register("槽位lore", a -> null);
         LegacyMethods.register("槽位属性", a -> null);
         LegacyMethods.register("槽位物品", a -> null);
-        LegacyMethods.register("模拟按键", a -> null);
-        LegacyMethods.register("模拟控制按键", a -> null);
+        LegacyMethods.register("模拟按键", a -> LegacyMethods.delegate("Key", "模拟按下", a));
+        LegacyMethods.register("模拟控制按键", a -> LegacyMethods.delegate("Key", "模拟按下", a));
         LegacyMethods.register("模拟消息", a -> null);
         LegacyMethods.register("模拟点击槽位", a -> null);
         LegacyMethods.register("正切", a -> null);
@@ -862,7 +863,7 @@ public final class FullGapLegacy {
         return null;
     }
     private static Object SLEEP(Object[] a) {
-        try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { }
+        try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { /* 睡眠被打断：静默恢复 */ }
         return null;
     }
     private static Object FN_RUN(Object[] a) {
@@ -870,7 +871,7 @@ public final class FullGapLegacy {
         if (fn == null) { return null; }
         String code = String.valueOf(fn).trim();
         if (!code.isEmpty() && !code.contains("(")) { code = code + "()"; }
-        try { com.opendreamcore.script.DreamLang.execute(code, null); } catch (Throwable ignored) { }
+        try { com.opendreamcore.script.DreamLang.execute(code, null); } catch (Throwable ignored) { /* 脚本执行失败：静默（脚本自身容错） */ }
         return null;
     }
     private static Object IF_STMT(Object[] a) {
@@ -958,7 +959,7 @@ public final class FullGapLegacy {
         final String c = code;
         J8.delayedExecutor((long) num(a, 0),
                         java.util.concurrent.TimeUnit.MILLISECONDS)
-                .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { } });
+                .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
         return null;
     }
 
@@ -973,7 +974,7 @@ public final class FullGapLegacy {
             final long d = interval * k;
             J8.delayedExecutor(d,
                             java.util.concurrent.TimeUnit.MILLISECONDS)
-                    .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { } });
+                    .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
         }
         return null;
     }

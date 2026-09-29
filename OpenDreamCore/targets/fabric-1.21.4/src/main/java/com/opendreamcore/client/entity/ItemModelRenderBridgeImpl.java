@@ -35,41 +35,50 @@ public final class ItemModelRenderBridgeImpl implements ItemModelRenderBridge {
                 (float) Math.toRadians(yaw), (float) Math.toRadians(pitch), 0.0F));
         pose.translate(-0.5F, -0.5F, 0.0F);
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-        ir.renderStatic(stack, ItemDisplayContext.FIXED, 0xF000F0, 0, pose, buffers, mc.level, 0);
+        // 独立批次：见 1.21.4/1.21.8 变体处的说明（共享源被原版占用，不能替它收尾）。
+        com.opendreamcore.client.CompatRender.WorldBatch worldBatch =
+                com.opendreamcore.client.CompatRender.beginWorldBatch();
+        MultiBufferSource source = worldBatch.source() != null
+                ? (MultiBufferSource) worldBatch.source()
+                : buffers;
         try {
-            buffers.getClass().getMethod("flush").invoke(buffers);
-        } catch (Exception e) {
-            try {
-                buffers.getClass().getMethod("endBatch").invoke(buffers);
-            } catch (Exception e2) {
-            }
+            ir.renderStatic(stack, ItemDisplayContext.FIXED, 0xF000F0, 0, pose, source, mc.level, 0);
+        } finally {
+            worldBatch.close();
         }
     }
 
-    /** 反射解析物品：1.21.2+ BuiltInRegistries.ITEM.get 返回 Optional<Reference>，编译期类型漂移绕开。 */
+    /** 取物品：直调注册表（getValue 找不到返回 null），不再按名反射。 */
     private static ItemStack resolveItem(String id) {
-        try {
-            Class<?> regClass = Class.forName("net.minecraft.core.registries.BuiltInRegistries");
-            Object reg = regClass.getField("ITEM").get(null);
-            Object rl = net.minecraft.resources.ResourceLocation.tryParse(id);
-            Object item = reg.getClass().getMethod("get", Object.class).invoke(reg, rl);
-            if (item instanceof java.util.Optional<?> opt) {
-                item = opt.map(o -> {
-                    try {
-                        return o.getClass().getMethod("value").invoke(o);
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }).orElse(null);
-            }
-            if (item == null) {
-                return ItemStack.EMPTY;
-            }
-            Class<?> isClass = Class.forName("net.minecraft.world.item.ItemStack");
-            return (ItemStack) isClass.getConstructor(Class.forName("net.minecraft.world.item.Item"))
-                    .newInstance(item);
-        } catch (Throwable t) {
+        net.minecraft.resources.ResourceLocation rl = net.minecraft.resources.ResourceLocation.tryParse(id);
+        if (rl == null) {
             return ItemStack.EMPTY;
         }
+        net.minecraft.world.item.Item item =
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(rl);
+        return item == null ? ItemStack.EMPTY : new ItemStack(item);
     }
+
+    @Override
+    public java.util.List<Object> loreLines(Object stack) {
+        net.minecraft.world.item.component.ItemLore lore =
+                ((net.minecraft.world.item.ItemStack) stack).getComponents()
+                        .get(net.minecraft.core.component.DataComponents.LORE);
+        return lore == null ? java.util.List.of() : new java.util.ArrayList<Object>(lore.lines());
+    }
+
+    @Override
+    public java.util.List<Object> tooltipLines(Object stack, Object level, Object player, Object flag) {
+        return new java.util.ArrayList<Object>(((net.minecraft.world.item.ItemStack) stack).getTooltipLines(
+                net.minecraft.world.item.Item.TooltipContext.of((net.minecraft.world.level.Level) level),
+                (net.minecraft.world.entity.player.Player) player,
+                (net.minecraft.world.item.TooltipFlag) flag));
+    }
+
+    @Override
+    public int packFormat() {
+        return net.minecraft.SharedConstants.getCurrentVersion()
+                .getPackVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+    }
+
 }

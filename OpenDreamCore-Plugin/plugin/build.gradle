@@ -98,6 +98,9 @@ tasks.register('collectOutput') {
 }
 
 tasks.named('processResources') {
+    // 版本号必须进 up-to-date 检查键：否则只改版本时任务直接跳过，
+    // jar 里留着陈旧的 plugin.yml（握手版本对比永远对不上）
+    inputs.property('version', project.version.toString())
     filesMatching('plugin.yml') {
         expand 'version': project.version
     }

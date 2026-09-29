@@ -237,11 +237,11 @@ public final class HoloCanvas {
         com.opendreamcore.client.CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alphaMul);
         var builder = com.opendreamcore.client.CompatRender.begin(
                 com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX);
-        builder.addVertex(matrix, (float) p[0], (float) p2[1], 0).setUv(0, 0);
-        builder.addVertex(matrix, (float) p2[0], (float) p2[1], 0).setUv(1, 0);
-        builder.addVertex(matrix, (float) p2[0], (float) p[1], 0).setUv(1, 1);
-        builder.addVertex(matrix, (float) p[0], (float) p[1], 0).setUv(0, 1);
+                com.opendreamcore.client.CompatRender.worldTextureFormat());
+        com.opendreamcore.client.CompatRender.texturedVertex(builder, matrix, (float) p[0], (float) p2[1], 0, 0, alphaMul);
+        com.opendreamcore.client.CompatRender.texturedVertex(builder, matrix, (float) p2[0], (float) p2[1], 1, 0, alphaMul);
+        com.opendreamcore.client.CompatRender.texturedVertex(builder, matrix, (float) p2[0], (float) p[1], 1, 1, alphaMul);
+        com.opendreamcore.client.CompatRender.texturedVertex(builder, matrix, (float) p[0], (float) p[1], 0, 1, alphaMul);
         WorldHologram.drawSafe(builder);
         com.opendreamcore.client.CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
     }

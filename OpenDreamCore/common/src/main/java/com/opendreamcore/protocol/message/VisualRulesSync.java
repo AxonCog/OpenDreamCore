@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * 视觉规则同步（S→C）。
  *
- * 服务端把九类视觉系统（ItemIcon/ItemEffect/HeadTag/FontConfig/ArmorLayer/
- * KeyConfig/Sounds/WorldTexture/SlotConfig）的规则 YAML 原文打包下发——
+ * 服务端把十类视觉系统（ItemIcon/ItemEffect/HeadTag/Blood/FontConfig/
+ * ArmorLayer/KeyConfig/Sounds/WorldTexture/SlotConfig）的规则 YAML 原文打包下发——
  * 与 PageSync 传页面源文同一个思路：服务端只管"谁生效"，客户端自行解析渲染。
  * 贴图/音效等资产本体不走这条消息（资源云负责），所以这里传的都是小文本。
  */

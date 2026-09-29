@@ -16,11 +16,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * 物品特效（1.16.5）：renderGuiItem 画完图标叠特效层，发光=半透明扩散色块。
+ *
+ * 注入串写 srg 名：这代没有运行时反混淆，注解里的名字不会被重映射。
  */
 @Mixin(ItemRenderer.class)
 public abstract class MixinItemEffect {
 
-    @Inject(method = "renderGuiItem(Lnet/minecraft/item/ItemStack;II)V",
+    @Inject(method = "func_175042_a(Lnet/minecraft/item/ItemStack;II)V",
             at = @At("RETURN"))
     private void opendreamcore$itemEffect(ItemStack stack, int x, int y, CallbackInfo ci) {
         if (stack == null || stack.isEmpty()) {

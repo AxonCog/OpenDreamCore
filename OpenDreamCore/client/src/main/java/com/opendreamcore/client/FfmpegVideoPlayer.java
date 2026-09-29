@@ -383,15 +383,21 @@ public final class FfmpegVideoPlayer {
 
     /** BufferedImage → NativeImage（ARGB → RGBA 逐像素拷贝）。 */
     private static NativeImage toNativeImage(BufferedImage source) {
-        int w = source.getWidth();
-        int h = source.getHeight();
-        NativeImage out = new NativeImage(w, h, false);
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                CompatRender.nativeSetPixel(out, x, y, source.getRGB(x, y));
+        // 走编译期直调的 PNG 路径（跨映射可靠）；逐像素反射仅作双保险
+        // （Fabric 生产环境方法名是 intermediary，反射必失 → 帧全透明）
+        try {
+            return com.opendreamcore.client.resources.LooseResourceLoader.toPngNative(source);
+        } catch (Throwable t) {
+            int w = source.getWidth();
+            int h = source.getHeight();
+            NativeImage out = new NativeImage(w, h, false);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    CompatRender.nativeSetPixel(out, x, y, source.getRGB(x, y));
+                }
             }
+            return out;
         }
-        return out;
     }
 
     /** 视频原始宽（未取到帧前 0）。 */

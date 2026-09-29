@@ -12,7 +12,8 @@
     "MixinArmorLayer",
     "MixinNameTag",
     "MixinSubtitleOverlay",
-    "MixinStringRenderOutput"
+    "MixinByteBufferBuilder",
+    "FontSetMixin"
   ],
   "injectors": {
     "defaultRequire": 1

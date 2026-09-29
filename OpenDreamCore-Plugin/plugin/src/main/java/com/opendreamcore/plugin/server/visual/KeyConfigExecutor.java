@@ -30,7 +30,7 @@ public final class KeyConfigExecutor {
         public final String failMessage;   // null = 不提示
         public final List<String> commands;
         public final String script;        // null = 无脚本
-        public final String ruleRun;       // run: 键（九系统通用脚本声明，null = 无）
+        public final String ruleRun;       // run: 键（十系统通用脚本声明，null = 无）
         public final String eventName;     // event: 键（触发时发布的事件名，null = 无）
 
         ComboRule(String id, Map<String, Object> ir) {
@@ -166,7 +166,7 @@ public final class KeyConfigExecutor {
                 log("脚本执行失败 " + rule.id + ": " + ex);
             }
         }
-        // run:（九系统通用脚本键，与 script 同语义——KeyConfig 形态二叫 script，
+        // run:（十系统通用脚本键，与 script 同语义——KeyConfig 形态二叫 script，
         // 规则里写 run 也认）；event:（规则触发时发布到 EventBus 的事件名）
         String ruleRun = com.opendreamcore.adapter.AdapterChain.rewriteScript(rule.ruleRun);
         if (ruleRun != null && !ruleRun.trim().isEmpty()) {

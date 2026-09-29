@@ -41,6 +41,11 @@ public final class LocalPackPreload {
         gameDirSupplier = gameDir;
     }
 
+    /** 收包方用（RemotePackReceiver）：本地材质包区根目录，未初始化时 null。 */
+    public static Path packRoot() {
+        return root();
+    }
+
     private static Path root() {
         Supplier<Path> s = gameDirSupplier;
         if (s == null) {

@@ -1,0 +1,92 @@
+package com.opendreamcore.client.render;
+
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
+import com.mojang.blaze3d.shaders.UniformType;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import com.opendreamcore.mixin.MixinRenderPipelinesAccessor;
+import net.minecraft.resources.ResourceLocation;
+
+/**
+ * 自建的世界语义渲染管线（1.21.8）。
+ *
+ * <p>从 1.21.6 起，「这块世界几何算哪一类内容」不再由绘制前临时设的 GL 状态决定，而由绘制时用的
+ * 渲染管线声明。光影模组以管线为分类单位重绘世界，所以只要面板还走立即模式加裸着色器，它在光影眼里
+ * 就没有类别，只能按默认处理——落进半透明阶段就会把深度缓冲写乱，表现成物品、生物部分透明。
+ *
+ * <p>这条路自己声明了一条管线，四个语义逐项写死、不依赖任何原版上下文：
+ * <ul>
+ *   <li><b>不写深度</b>（{@code withDepthWrite(false)}）：billboard 不该在深度缓冲留痕，
+ *       否则会把之后的水体、粒子、实体挡成半透明——这正是要修的症状本身。</li>
+ *   <li><b>双面可见</b>（{@code withCull(false)}）：面板背对相机时不能整片消失。</li>
+ *   <li><b>透明混合</b>（{@code withBlend(TRANSLUCENT)}）：渐变底与半透明图标要正确叠加。</li>
+ *   <li><b>不写叠加层</b>：这里没有用 {@code useOverlay()}，面板因而不会吃到受伤/药水的叠加染色
+ *       （面板是信息层，不是实体）。</li>
+ * </ul>
+ *
+ * <p>深度测试保留且用 LEQUAL，这是最容易搞错的一处：整条管线如果连深度测试一起关掉（原版 GUI 系
+ * 管线就是这么做的），面板会穿墙显示；我们要的是「照常被测深度挡住，但不留下自己的深度」。
+ *
+ * <p>着色器复用原版 core 里已有的 position_tex_color：它做的就是「贴图 × 顶点色」，正好等于
+ * 面板需要的效果，不必自带着色器（少一份着色器就少一处要跟着版本维护的东西）。顶点格式用
+ * position_tex_color 而非 position_tex，是为了把透明度放到顶点上——顶点色是随几何走的，
+ * 不像全局着色器染色那样需要额外复位，异常中断也不会泄漏到后续几何上。
+ *
+ * <p>两个 uniform 块是这个着色器的输入契约（{@code DynamicTransforms} 与 {@code Projection}，
+ * 由渲染系统按帧上传），必须如实声明，否则着色器拿不到矩阵画不到屏幕上。
+ */
+public final class OdcWorldRenderPipelines {
+
+    /** 世界贴图面板：位置 + UV + 顶点色。 */
+    /** 世界贴图面板：位置 + UV + 顶点色（照常测深度）。 */
+    public static final RenderPipeline WORLD_TEXTURED = buildWorldTextured(false);
+
+    /**
+     * 同一管线的穿透变体：把深度测试整条关掉。
+     *
+     * <p>用于 {@code depthMode: always} 与 transparent 模式的第二遍。这条路原先刻意不走渲染类型，
+     * 理由是「渲染管线的构建器只能设写不写深度，不提供深度测试函数」——实测不成立：1.21.8 / 1.21.11
+     * 的 {@code DepthTestFunction.NO_DEPTH_TEST}、26.1.2 的 {@code CompareOp.ALWAYS_PASS} 都在，
+     * 本类本来就一直在调 {@code withDepthTestFunction}。改由管线表达之后穿透趟才真的生效：那些版本的
+     * {@code disableDepthTest()} 已经是空操作（窗口期 1.21.6 起状态 API 撤走），继续走老路等于没做。
+     */
+    public static final RenderPipeline WORLD_TEXTURED_NO_DEPTH = buildWorldTextured(true);
+
+    private OdcWorldRenderPipelines() {
+    }
+
+    private static RenderPipeline buildWorldTextured(boolean noDepth) {
+        return RenderPipeline.builder()
+                .withLocation(ResourceLocation.fromNamespaceAndPath("opendreamcore",
+                        noDepth ? "world_textured_no_depth" : "world_textured"))
+                .withVertexShader("core/position_tex_color")
+                .withFragmentShader("core/position_tex_color")
+                .withSampler("Sampler0")
+                // 着色器声明的两个 uniform 块，顺序与声明一致
+                .withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
+                .withUniform("Projection", UniformType.UNIFORM_BUFFER)
+                .withBlend(BlendFunction.TRANSLUCENT)
+                .withCull(false)
+                // 常规趟：LEQUAL——面板照常被方块挡住，只是不写深度。
+                // 穿透趟：整趟不参与深度测试（NO_DEPTH_TEST），面板重新穿墙可见。
+                .withDepthTestFunction(noDepth
+                        ? DepthTestFunction.NO_DEPTH_TEST
+                        : DepthTestFunction.LEQUAL_DEPTH_TEST)
+                .withDepthWrite(false)
+                .withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
+                .build();
+    }
+
+    /**
+     * 登记自建管线（由 {@code RenderPipelines} 静态初始化末尾的注入调用）。
+     *
+     * <p>登记不是可选项：原版那张静态管线表同时充当「启动时编译哪些着色器」的清单，不登记就等于
+     * 声明了一条没人给它编译程序的管线。
+     */
+    public static void registerAll() {
+        MixinRenderPipelinesAccessor.opendreamcore$register(WORLD_TEXTURED);
+        MixinRenderPipelinesAccessor.opendreamcore$register(WORLD_TEXTURED_NO_DEPTH);
+    }
+}

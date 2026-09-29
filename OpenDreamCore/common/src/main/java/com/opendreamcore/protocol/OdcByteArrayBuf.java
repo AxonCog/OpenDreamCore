@@ -12,6 +12,14 @@ import java.nio.charset.StandardCharsets;
  */
 public final class OdcByteArrayBuf implements OdcByteBuf {
 
+    /**
+     * 单字符串上限。老值 65536 卡死了 PackAPI 字节下发：48KB 分片
+     * base64 后恰好 65536 字符，加上报头就是 65576，客户端解码必炸。
+     * 现代服插件消息线是 1MB，这里跟线对齐；恶意长度分配的保护仍在
+     * （varint 报多长也最多分配 1MB）。
+     */
+    public static final int MAX_STRING_LEN = 1024 * 1024;
+
     private final ByteArrayOutputStream out;
     private ByteArrayInputStream in;
 
@@ -137,7 +145,7 @@ public final class OdcByteArrayBuf implements OdcByteBuf {
     @Override
     public String readString() {
         int len = readVarInt();
-        if (len < 0 || len > 65536) {
+        if (len < 0 || len > MAX_STRING_LEN) {
             throw new IllegalStateException("字符串长度非法: " + len);
         }
         byte[] data = readBytes(len);

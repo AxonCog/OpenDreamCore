@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -139,8 +140,18 @@ public final class FabricEvents {
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register(
                 (message, overlay) -> ClientController.get().addChatMessage(LegacyText.toLegacy(message)));
 
-        // 世界全息 + 名牌：1.21.9+ Fabric API 的 WorldRenderEvents 已移除，
-        // 改由 mixin/MixinWorldRender 注入 GameRenderer.renderLevel HEAD。
+        // 世界全息 + 名牌：挂 WorldRenderEvents.END_MAIN（世界渲染最末）。
+        // 1.21.9+ 这组事件搬到了 rendering.v1.world 包（不是被删掉），END_MAIN 就是最末时点，
+        // 比原来用 mixin 注入 GameRenderer.renderLevel HEAD 靠谱得多：HEAD 在世界渲染最前面，
+        // 那时原版还没开始攒本帧几何，我们的批次插进去会被后续阶段覆盖/错序，开光影时
+        // （Iris 按渲染类型重绘世界）几何会落错 gbuffer 阶段，表现为物品、生物部分透明。
+        // 这代 context 没有 camera()/tickDelta()，故按与 26.x 相同的取法从 Minecraft 实例上取。
+        WorldRenderEvents.END_MAIN.register(context -> {
+            var camera = Minecraft.getInstance().gameRenderer.getMainCamera();
+            float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
+            ClientController.get().renderWorld(camera, partialTick);
+            ClientController.get().renderNameTags(camera, partialTick);
+        });
 
         // 容器替换：原版容器打开后，命中本地 match 就换掉
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {

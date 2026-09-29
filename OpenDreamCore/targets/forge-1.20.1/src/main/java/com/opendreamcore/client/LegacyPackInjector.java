@@ -40,6 +40,11 @@ public final class LegacyPackInjector implements ResourcePackInjector {
                     Component.literal("OpenDreamCore 材质包"), true, supplier,
                     PackType.CLIENT_RESOURCES, Pack.Position.TOP, PackSource.BUILT_IN);
 
+            if (pack == null) {
+                // null 包绝不能进仓库：reload() 遍历时 streamSelfAndChildren() NPE
+                throw new IllegalStateException("包元数据读取失败（缺 pack.mcmeta 或文件不可读）");
+            }
+
             // 生产环境是 SRG 名，且泛型签名里的类名也可能被重映射，靠字符串匹配不可靠。
             // sources 是全类唯一的 Set 字段（available 是 Map、selected 是 List），按类型扫最稳。
             java.lang.reflect.Field sourcesField = null;

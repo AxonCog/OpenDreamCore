@@ -13,7 +13,7 @@ import org.bukkit.entity.Player;
  *   SoundAPI.停止(玩家, "背景音乐")          —— 掐掉循环中的那个
  *
  * 和 Sound.播放(内置音效) 的分工：Sound 走服务端原生 playSound（只有注册表里
- * 的元老跟原版行为）；SoundAPI 走视觉规则库（散装音频、循环控制、跟着九系统
+ * 的元老跟原版行为）；SoundAPI 走视觉规则库（散装音频、循环控制、跟着十系统
  * 一起热重载）。规则里没这键？那就不理你，丢一条 debug 完事。
  *
  * 通道复用 custom_packet：视觉系统是 ODC 自家能力，为一句单向指令开新协议

@@ -5,7 +5,6 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "MixinGui",
-    "MixinFontDraw",
     "FontSetMixin",
     "MixinSubtitleOverlay",
     "MixinItemIcon",
@@ -13,7 +12,9 @@
     "MixinNameTag",
     "MixinArmorLayer",
     "MixinCursor",
-    "MixinTooltip"
+    "MixinTooltip",
+    "MixinRenderPipelinesAccessor",
+    "MixinCompositeStateAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

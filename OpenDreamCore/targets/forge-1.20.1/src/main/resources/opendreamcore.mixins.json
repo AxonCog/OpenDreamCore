@@ -12,7 +12,7 @@
     "MixinNameTag",
     "MixinItemEffect",
     "MixinItemIcon",
-    "MixinStringRenderOutput"
+    "FontSetMixin"
   ],
   "injectors": {
     "defaultRequire": 1

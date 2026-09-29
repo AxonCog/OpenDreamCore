@@ -5,10 +5,12 @@ on:
     branches: [main, master]
   pull_request:
 
-# 仓库构建依赖本机缓存的 Minecraft 反编译产物与固定 JDK 路径（见 build_matrix.ps1），
-# 通用 Runner 上无法复现 "16 target 全构建"；CI 承担的是结构门禁：
-# sync_check.ps1 全绿才允许合并（契约面齐 + mixin 注册一致）。
-# 全版本编译矩阵由维护者在开发机跑 build_matrix.ps1 把关。
+# 结构门禁：sync_check.ps1 全绿才允许合并（逐 target 断言「契约实现」齐不齐 + mixin 注册一致）。
+# 编译矩阵在 .github/workflows/release.yml —— 12 个现代目标 + 插件都能在通用 Runner 上编：
+# 每个目标用自带的 ./gradlew，并用 -Dorg.gradle.java.home="$JAVA_HOME" 压过
+# gradle.properties 里写死的开发机 JDK 路径（已本机实测该 -D 覆盖确实生效）。
+# 4 个 Legacy 目标（forge-1.6.4/1.7.10/1.12.2/1.16.5）仍只在开发机编：它们的
+# OpenDreamCore-Legacy/libs 与 tools（mcp/srg/SpecialSource/本地 forge 产物）不入库。
 jobs:
   gate:
     name: 结构门禁（sync_check）
@@ -19,4 +21,4 @@ jobs:
       - name: 结构门禁 sync_check
         shell: pwsh
         run: |
-          pwsh tools/sync_check.ps1
+          pwsh .github/scripts/sync_check.ps1

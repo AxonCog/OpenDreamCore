@@ -52,6 +52,9 @@ public final class LooseResourceLoader {
     /** gif 帧率覆盖：纹理名 → fps（0=遵循 gif 自带帧间隔）。 */
     private static final Map<String, Double> GIF_FPS = new ConcurrentHashMap<>();
 
+    /** 已把规则 fps 挂到播放器上的键（每个播放器只挂一次）。 */
+    private static final java.util.Set<String> FPS_APPLIED = ConcurrentHashMap.newKeySet();
+
     /** 待渲染线程注册队列：解码任何线程安全（NativeImage.read/ImageIO 不碰 GL），
      *  但 TextureManager.register 只在渲染线程合法——启动资源重载跑在 Worker 线程，
      *  直接在非渲染线程 register 会抛 "RenderSystem called from wrong thread"，
@@ -66,6 +69,50 @@ public final class LooseResourceLoader {
     /** 扫描根：gameDir/resourcepacks/OpenDreamCore（与 DreamCore 形态一致）。 */
     public static Path scanRoot(Path gameDir) {
         return gameDir.resolve("resourcepacks").resolve("OpenDreamCore");
+    }
+
+    /**
+     * 全部候选扫描根（按优先级去重）。
+     *
+     * <p>为什么不是一个根：形态不止一种，而扫不到时旧实现直接 return 0（一行日志都没有），
+     * 表现就是「明明放了 zb.gif，日志说扫描 0 个，字符替换贴图一片空白」——完全没线索。
+     * 这里把已知形态都列出来逐个试：
+     * <ol>
+     *   <li>{@code <游戏目录>/resourcepacks/OpenDreamCore}（标准、面向玩家的形态）</li>
+     *   <li>传进来的是模组数据目录 {@code <游戏目录>/OpenDreamCore} 时，回退到它的同级 resourcepacks</li>
+     *   <li>{@code Minecraft.getInstance().gameDirectory} 下的标准形态（传入目录不对时兜底）</li>
+     * </ol>
+     * 都不存在时由 {@link #loadAll} 打警告并列出试过的路径。
+     */
+    public static java.util.List<Path> scanRoots(Path gameDir) {
+        java.util.List<Path> roots = new java.util.ArrayList<>();
+        if (gameDir != null) {
+            addRoot(roots, gameDir.resolve("resourcepacks").resolve("OpenDreamCore"));
+            // 传的是模组数据目录（.../OpenDreamCore）时，它同级才是真的 resourcepacks
+            Path name = gameDir.getFileName();
+            Path parent = gameDir.getParent();
+            if (name != null && "OpenDreamCore".equalsIgnoreCase(name.toString()) && parent != null) {
+                addRoot(roots, parent.resolve("resourcepacks").resolve("OpenDreamCore"));
+            }
+        }
+        try {
+            Path mc = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath();
+            addRoot(roots, mc.resolve("resourcepacks").resolve("OpenDreamCore"));
+        } catch (Throwable ignored) {
+            // 拿不到 MC 目录（极早期/无客户端环境）：只用前面几个
+        }
+        return roots;
+    }
+
+    private static void addRoot(java.util.List<Path> roots, Path root) {
+        try {
+            Path abs = root.toAbsolutePath().normalize();
+            if (!roots.contains(abs)) {
+                roots.add(abs);
+            }
+        } catch (Throwable ignored) {
+            // 归一化失败：这个根直接不要
+        }
     }
 
     /** 清空注册表（Ctrl+R / reload 时旧贴图先清再重扫，防脏残留）。 */
@@ -85,11 +132,28 @@ public final class LooseResourceLoader {
         String want = fileName.replace('\\', '/');
         // 远程 url：gif 走 GifPlayer 远程解码、静态图走 RemoteImageStore（未就绪返回 null，下载完成自动出现）
         if (want.startsWith("https://") || want.startsWith("http://")) {
+            if (URL_LOOKUP_LOG.add(want)) {
+                LOGGER.info("[ODC-font] 替换贴图 url 请求: {} gif={}", want,
+                        want.toLowerCase(java.util.Locale.ROOT).endsWith(".gif"));
+            }
             if (want.toLowerCase(java.util.Locale.ROOT).endsWith(".gif")) {
                 GifPlayer remoteGif = GifPlayer.of(want);
-                return remoteGif == null ? null : remoteGif.currentTexture();
+                ResourceLocation rl = remoteGif == null ? null : remoteGif.currentTexture();
+                if (rl == null) {
+                    // 下载成功但内容不是动画 gif（imgs.ovh 之类常把图转成 PNG/JPEG）
+                    // → 静态图兜底，让 RemoteImageStore 按常规图注册显示
+                    rl = com.opendreamcore.client.RemoteImageStore.get(want);
+                }
+                if (URL_LOOKUP_LOG.add(want + "#r")) {
+                    LOGGER.info("[ODC-font] url gif 结果: {} -> {}", want, rl);
+                }
+                return rl;
             }
-            return com.opendreamcore.client.RemoteImageStore.get(want);
+            ResourceLocation rl = com.opendreamcore.client.RemoteImageStore.get(want);
+            if (URL_LOOKUP_LOG.add(want + "#r")) {
+                LOGGER.info("[ODC-font] url 图片结果: {} -> {}", want, rl);
+            }
+            return rl;
         }
         // gif 动画优先：播放器按时间切帧，每次拿当前帧
         ResourceLocation anim = animated(want);
@@ -126,14 +190,25 @@ public final class LooseResourceLoader {
 
     /** 渲染线程客户端 tick 全局驱动：推进所有 gif 播放器帧上传（与每帧查询解耦，渲染路径零 upload）。 */
     public static void tickAll() {
-        if (GIFS.isEmpty()) {
-            return;
-        }
         for (GifPlayer p : GIFS.values()) {
             try {
                 p.tick();
             } catch (Throwable ignored) {
                 // 单播放器异常不拖垮其他 gif/客户端 tick
+            }
+        }
+        // 远程 url gif 的播放器只存在于 GifPlayer.CACHE（不会进 GIFS），必须一并推进，
+        // 否则 URL gif 字形永远停在第一帧；顺手把规则里的 fps 补挂到这些播放器上
+        // （本地路径那路已在 flushPending 里挂过）。
+        for (Map.Entry<String, GifPlayer> e : GifPlayer.cachedPlayers().entrySet()) {
+            try {
+                Double fps = GIF_FPS.get(e.getKey());
+                if (fps != null && FPS_APPLIED.add(e.getKey())) {
+                    e.getValue().setUniformFps(fps);
+                }
+                e.getValue().tick();
+            } catch (Throwable ignored) {
+                // 同上
             }
         }
     }
@@ -146,6 +221,9 @@ public final class LooseResourceLoader {
      *  frameW/frameH=单帧像素（png 就是整图尺寸）。 */
     public record SheetInfo(ResourceLocation rl, int frame, int frames, int frameW, int frameH) {
     }
+
+        /** 已打诊断日志的 URL 引用（lookup 远程替换贴图时每 URL 首次提示）。 */
+    private static final java.util.Set<String> URL_LOOKUP_LOG = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 替换字形贴图取图信息：gif 返回帧表纹理+当前帧（自绘路径切 uv 出动画），png 走静态整图。 */
     public static SheetInfo sheetOf(String fileName) {
@@ -233,6 +311,44 @@ public final class LooseResourceLoader {
         return null;
     }
 
+        /** 1x1 白色纹理（世界名牌背景等纯色 quad 用）；懒注册（渲染线程）。 */
+    private static volatile ResourceLocation whiteRl;
+
+    public static ResourceLocation whiteTexture() {
+        if (whiteRl == null) {
+            synchronized (LooseResourceLoader.class) {
+                if (whiteRl == null) {
+                    try {
+                        var img = whitePixelImage();
+                        ResourceLocation rl = com.opendreamcore.client.CompatRender.rl("opendreamcore", "loose/_white");
+                        Object tex = com.opendreamcore.client.CompatRender.newDynamicTexture(img);
+                        if (tex != null) {
+                            Minecraft.getInstance().getTextureManager().register(rl,
+                                    (net.minecraft.client.renderer.texture.AbstractTexture) tex);
+                            whiteRl = rl;
+                            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理注册成功: " + rl); }
+                        } else {
+                            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理 newDynamicTexture 返回 null（反射构造失败）"); }
+                        }
+                    } catch (Throwable t) {
+                        if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理注册失败: " + t); }
+                    }
+                }
+            }
+        }
+        return whiteRl;
+    }
+
+    /** 1×1 不透明白色 NativeImage：走 PNG 直调路径（跨映射可靠，见 toPngNative 注释）。
+     *  以前是「反射 setPixelRGBA / setColor 双名探测」——在 Fabric 生产环境（方法名是
+     *  intermediary 的 method_xxxx）两个名字都不存在，写进去的像素全是 0，
+     *  于是纯色 quad（名牌背景等）整片透明。 */
+    private static NativeImage whitePixelImage() throws IOException {
+        BufferedImage bi = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        bi.setRGB(0, 0, 0xFFFFFFFF);
+        return toPngNative(bi);
+    }
+
     /** 字形层按文件名拿播放器（null=非 gif/未注册）。远程 gif 也认（未就绪返回 null）。 */
     public static GifPlayer gifPlayerOf(String fileName) {
         if (fileName == null) {
@@ -290,20 +406,30 @@ public final class LooseResourceLoader {
      * 返回成功注册数。
      */
     public static int loadAll(Path gameDir) {
-        Path root = scanRoot(gameDir);
-        if (!Files.isDirectory(root)) {
-            return 0;
-        }
+        java.util.List<Path> roots = scanRoots(gameDir);
         int n = 0;
-        try (Stream<Path> walk = Files.walk(root)) {
-            for (Path p : (Iterable<Path>) walk.filter(Files::isRegularFile)::iterator) {
-                String key = root.relativize(p).toString().replace('\\', '/');
-                if (register(key, p)) {
-                    n++;
-                }
+        for (Path root : roots) {
+            if (!Files.isDirectory(root)) {
+                continue;   // 多根里允许缺，最后由下面的警告统一报告
             }
-        } catch (Exception e) {
-            LOGGER.warn("散装资源扫描失败: {}", e.toString());
+            int k = 0;
+            try (Stream<Path> walk = Files.walk(root)) {
+                for (Path p : (Iterable<Path>) walk.filter(Files::isRegularFile)::iterator) {
+                    String key = root.relativize(p).toString().replace('\\', '/');
+                    if (register(key, p)) {
+                        k++;
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warn("散装资源扫描失败 {}: {}", root, e.toString());
+            }
+            LOGGER.info("散装资源根扫描完成 {} → 注册 {} 个", root, k);
+            n += k;
+        }
+        if (n == 0) {
+            // 静默返回 0 是历史上最难查的一类问题：把试过的路径直接写进日志
+            LOGGER.warn("本地散装资源扫描到 0 个。已尝试的根：{}。字符替换/图标贴图请放在"
+                    + " <游戏目录>/resourcepacks/OpenDreamCore/ 下（可多级子目录，键名=相对路径）", roots);
         }
         LOGGER.info("本地散装资源已扫描 {} 个（纹理由渲染线程统一注册）", n);
         return n;
@@ -399,6 +525,10 @@ public final class LooseResourceLoader {
         }
         if (n > 0) {
             LOGGER.info("本机散装资源渲染线程注册完成：{} 个", n);
+            // 本地纹理（包区/资源云/散装目录）批量就绪：失效字形判定缓存，
+            // 引用这些纹理的替换字符下一帧自动接管（否则 usable 首次判定在纹理就绪前，
+            // 永远走原版字形——历史静默坑）。
+            com.opendreamcore.client.visual.ReplaceFontProvider.invalidateTextures();
         }
         return n;
     }
@@ -419,13 +549,34 @@ public final class LooseResourceLoader {
         }
     }
 
-    /** BufferedImage → PNG 字节 → NativeImage（透明通道保留）。 */
-    private static NativeImage toPngNative(BufferedImage bi) throws IOException {
+    /** BufferedImage → PNG 字节 → NativeImage（透明通道保留）。
+     *
+     *  <p><b>这是所有「运行时生成纹理」（GIF 帧 / 视频帧 / TTF 字形图集）的唯一正确通道。</b>
+     *  原因：{@code NativeImage.read} 是编译期直接调用，构建时由 loom 按本目标的映射表改写方法名，
+     *  因此在 Fabric 生产（intermediary）、NeoForge 生产、开发环境下一律成立。
+     *  反之按 Mojmap 名反射 {@code setPixelRGBA/setPixelABGR/setPixel} 只在开发环境与 NeoForge
+     *  生产可用；Fabric 生产必失——实测单次会话 30 246 条
+     *  「{@code 无 setPixelRGBA/setPixelABGR/setPixel：像素未写入，贴图将全透明}」，
+     *  表现为高版本的字符替换贴图与 GIF 整张不显示（本方法即为该问题的修复）。
+     *  PNG 往返天然保留 alpha 与通道序，也顺带根除了逐像素写入时期的 ABGR/RGBA 字节序坑。 */
+    public static NativeImage toPngNative(BufferedImage bi) throws IOException {
         ByteArrayOutputStream png = new ByteArrayOutputStream();
         if (!ImageIO.write(bi, "png", png)) {
             throw new IOException("图片转 png 失败");
         }
         return NativeImage.read(new ByteArrayInputStream(png.toByteArray()));
+    }
+
+    /** BufferedImage → NativeImage；失败返回 null（调用方按 null 处理，绝不把异常抛进渲染帧）。 */
+    public static NativeImage toNativeOrNull(BufferedImage bi) {
+        try {
+            return toPngNative(bi);
+        } catch (Throwable t) {
+            if (Boolean.getBoolean("odc.debug")) {
+                System.out.println("[ODC-diag] 图片转 NativeImage 失败: " + t);
+            }
+            return null;
+        }
     }
 
     /** gif 首帧 → NativeImage：ImageIO 抽帧转 PNG 字节（透明通道保留），解码不了抛 IOException。 */

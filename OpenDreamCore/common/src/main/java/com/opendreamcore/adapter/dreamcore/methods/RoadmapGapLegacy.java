@@ -55,18 +55,18 @@ public final class RoadmapGapLegacy {
         LegacyMethods.register("取实体Z", a -> E("获取Z","pointed"));
         LegacyMethods.register("取实体pitch", a -> E("获取俯仰","pointed"));
         LegacyMethods.register("取实体yaw", a -> E("获取视角","pointed"));
-        LegacyMethods.register("取实体名", a -> E("获取名字","pointed"));
+        LegacyMethods.register("取实体名", a -> headOr("name", E("获取名字","pointed")));
         LegacyMethods.register("取实体坐标x", a -> E("获取X","pointed"));
         LegacyMethods.register("取实体坐标y", a -> E("获取Y","pointed"));
         LegacyMethods.register("取实体坐标z", a -> E("获取Z","pointed"));
-        LegacyMethods.register("取实体最大血量", a -> E("获取最大血量","pointed"));
-        LegacyMethods.register("取实体血量", a -> E("获取血量","pointed"));
-        LegacyMethods.register("取实体血量比例", a -> ratio(a));
+        LegacyMethods.register("取实体最大血量", a -> headOr("maxHealth", E("获取最大血量","pointed")));
+        LegacyMethods.register("取实体血量", a -> headOr("health", E("获取血量","pointed")));
+        LegacyMethods.register("取实体血量比例", a -> headOr("ratio", ratio(a)));
         LegacyMethods.register("取实体距离", a -> 0.0);
         LegacyMethods.register("取实体速度X", a -> 0.0);
         LegacyMethods.register("取实体速度Y", a -> 0.0);
         LegacyMethods.register("取实体速度Z", a -> 0.0);
-        LegacyMethods.register("取实体高度", a -> 1.8);
+        LegacyMethods.register("取实体高度", a -> headOr("height", 1.8));
         LegacyMethods.register("取容器所有物品", a -> slotItem(a));
         LegacyMethods.register("取容器物品", a -> slotItem(a));
         LegacyMethods.register("取屏幕世界坐标", SCARGS("获取世界元素位置"));
@@ -375,6 +375,12 @@ public final class RoadmapGapLegacy {
             SC("设置元素", id, "y", ny.doubleValue() + dy);
         }
         return null;
+    }
+
+    /** 头顶语境优先（线C②）：渲染名牌时读当前实体字段，否则回退 fallback（指向实体/常量）。 */
+    private static Object headOr(String field, Object fallback) {
+        Object v = EntityLegacy.headField(field);
+        return v != null ? v : fallback;
     }
 
     private static Object ratio(Object[] a) {

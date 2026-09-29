@@ -14,11 +14,8 @@ import net.minecraft.world.item.ArmorItem;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
-import java.util.Map;
-import java.util.function.Function;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(HumanoidArmorLayer.class)
 public abstract class MixinArmorLayer {
@@ -26,10 +23,11 @@ public abstract class MixinArmorLayer {
     private static final ThreadLocal<String> ODC_TYPE = new ThreadLocal<>();
     private static final ThreadLocal<String> ODC_SLOT = new ThreadLocal<>();
 
+    /** 记下本次护甲渲染的实体类型与槽位，供后续贴图查询使用。 */
     @Inject(method = "renderArmorPiece(Lcom/mojang/blaze3d/vertex/PoseStack;"
             + "Lnet/minecraft/client/renderer/MultiBufferSource;"
             + "Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/entity/EquipmentSlot;"
-            + "ILnet/minecraft/client/model/HumanoidModel;)V", at = @At(value = "HEAD", remap = false))
+            + "ILnet/minecraft/client/model/HumanoidModel;)V", at = @At("HEAD"))
     private void opendreamcore$ctx(PoseStack pose, MultiBufferSource buffer, LivingEntity entity,
                                   EquipmentSlot slot, int light, HumanoidModel<?> model, CallbackInfo ci) {
         String type = null;
@@ -40,25 +38,29 @@ public abstract class MixinArmorLayer {
         ODC_SLOT.set(slotName(slot));
     }
 
-    @Redirect(remap = false, method = "renderModel(Lcom/mojang/blaze3d/vertex/PoseStack;"
-            + "Lnet/minecraft/client/renderer/MultiBufferSource;I"
-            + "Lnet/minecraft/world/item/ArmorItem;Lnet/minecraft/client/model/HumanoidModel;"
-            + "ZFFFLjava/lang/String;)V",
-            at = @At(value = "INVOKE",
-                    target = "Ljava/util/Map;computeIfAbsent(Ljava/lang/String;Ljava/util/function/Function;)Ljava/lang/Object;", remap = false))
-    private Object opendreamcore$swap(Map<String, ResourceLocation> cache, String key,
-                                     Function<String, ResourceLocation> fn) {
-        String tex = null;
+    /**
+     * 护甲贴图定位返回前换成自定义贴图。
+     * 这里挂在返回值上而不是替换内部的缓存查询调用：只要目标方法签名不变就能注入成功，
+     * 不受方法体里调用指令写法变化影响；没有对应自定义贴图时原值原样返回。
+     */
+    @Inject(method = "getArmorLocation(Lnet/minecraft/world/item/ArmorItem;ZLjava/lang/String;)"
+            + "Lnet/minecraft/resources/ResourceLocation;",
+            at = @At("RETURN"), cancellable = true)
+    private void opendreamcore$swap(ArmorItem item, boolean inner, String suffix,
+                                    CallbackInfoReturnable<ResourceLocation> cir) {
         String type = ODC_TYPE.get();
         String slot = ODC_SLOT.get();
-        if (type != null && slot != null) {
-            tex = VisualArmorLayer.textureFor(type, slot);
+        if (type == null || slot == null) {
+            return;
         }
+        String tex = VisualArmorLayer.textureFor(type, slot);
         if (tex == null) {
-            return cache.computeIfAbsent(key, fn);
+            return;
         }
         ResourceLocation ours = LooseResourceLoader.lookup(tex);
-        return ours != null ? ours : cache.computeIfAbsent(key, fn);
+        if (ours != null) {
+            cir.setReturnValue(ours);
+        }
     }
 
     private static String slotName(EquipmentSlot slot) {

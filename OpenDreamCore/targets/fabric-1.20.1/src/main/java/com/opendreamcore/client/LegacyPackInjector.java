@@ -40,6 +40,11 @@ public final class LegacyPackInjector implements ResourcePackInjector {
                     Component.literal("OpenDreamCore 材质包"), true, supplier,
                     PackType.CLIENT_RESOURCES, Pack.Position.TOP, PackSource.BUILT_IN);
 
+            if (pack == null) {
+                // null 包绝不能进仓库：reload() 遍历时 streamSelfAndChildren() NPE
+                throw new IllegalStateException("包元数据读取失败（缺 pack.mcmeta 或文件不可读）");
+            }
+
             // vanilla 的 sources 构造时就固定了，只能反射塞 finder。
             // 别按 "sources" 查字段——线上环境是混淆名/intermediary 名，必炸；
             // 全类唯一的 Set 字段就是它（available 是 Map、selected 是 List），按类型扫最稳。

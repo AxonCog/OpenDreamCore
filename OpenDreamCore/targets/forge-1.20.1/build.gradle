@@ -53,6 +53,7 @@ sourceSets {
     main {
         java.srcDir "$buildDir/generated/common-main"
         java.srcDir "$buildDir/generated/client-main"
+        java.srcDir "$buildDir/generated/glyph-1.20-1.21.4"
         resources.srcDir '../../common/src/main/resources'
     }
 }
@@ -65,7 +66,13 @@ tasks.register('prepareClientSources', Sync) {
     from('../../client/src/main/java')
     into "$buildDir/generated/client-main"
 }
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources' }
+// glyph-1.20-1.21.4/ 是 1.20.1/1.21.1/1.21.4 三代共用的字形层实现（这三代的字形构造同形）。
+tasks.register('prepareGlyph120To1214', Sync) {
+    from('../../gensrc/glyph-1.20-1.21.4/src/main/java')
+    into "$buildDir/generated/glyph-1.20-1.21.4"
+}
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214' }
+tasks.named('prepareGlyph120To1214') { outputs.upToDateWhen { false } }
 
 // 中文源码/注释：javac 显式 UTF-8
 tasks.withType(JavaCompile).configureEach {
@@ -145,11 +152,17 @@ tasks.register('collectOutput') {
         file('build/libs').listFiles()?.each { f ->
             if (f.name.endsWith('.jar') && f.name.contains('-shadow') && f.name.contains("-${mod_version}-")) {
                 def destName = f.name.replace('-shadow', '')
+                // 客户端目录先落一份再改名：改名后才是正式名，旧名必须清掉
                 copy { from f; into out }
-                file(out.parentFile.path + "/all").mkdirs(); copy { from f; into file(out.parentFile.path + "/all") }
                 def dest = new File(out, destName)
                 dest.delete()
                 new File(out, f.name).renameTo(dest)
+                // 统一产物目录要的是改名后的正式名。这里必须复制改名结果，不能复制
+                // -shadow 原件——紧随其后的陈旧清理按「正式名」规则判定，复制 -shadow
+                // 名会被当成陈旧残留删掉，导致该目标永远进不了 output/all。
+                def allDir = file(out.parentFile.path + "/all")
+                allDir.mkdirs()
+                copy { from dest; into allDir }
                 println "collected ${dest.name} -> ${out.absolutePath}"
             }
         }

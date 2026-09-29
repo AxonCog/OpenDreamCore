@@ -27,6 +27,9 @@ public final class RemoteImageStore {
     private static final Map<String, int[]> SIZES = new ConcurrentHashMap<>();
     /** 加载中的 URL（避免重复下载）。 */
     private static final Set<String> LOADING = ConcurrentHashMap.newKeySet();
+    /** 已打诊断日志的 URL（每 URL 首次提示，不刷屏）。 */
+    private static final java.util.Set<String> URL_LOG = ConcurrentHashMap.newKeySet();
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("OpenDreamCore");
 
     private RemoteImageStore() {
     }
@@ -42,6 +45,10 @@ public final class RemoteImageStore {
             return null;
         }
         ResourceLocation ready = TEXTURES.get(url);
+        if (URL_LOG.add(url)) {
+            LOGGER.info("[ODC-font] url 图片加载请求: {} 安全={} 已就绪={} 加载中={}",
+                    url, RemoteMedia.isSafeUrl(url), ready != null, LOADING.contains(url));
+        }
         if (ready != null) {
             return ready;
         }
@@ -55,41 +62,89 @@ public final class RemoteImageStore {
             return null; // 已在加载中
         }
         RemoteMedia.get(url, cacheDir()).thenAccept(path -> {
-            Minecraft.getInstance().execute(() -> loadTexture(url, path));
+            // 后台线程解码（NativeImage → ImageIO → JavaCV/ffmpeg），不阻塞渲染线程
+            NativeImage image = decodeImage(url, path);
+            if (image == null) {
+                LOADING.remove(url);
+                return;
+            }
+            Minecraft.getInstance().execute(() -> registerRemoteImage(url, image));
         }).exceptionally(t -> {
             LOADING.remove(url);
-            // 下载失败别哑巴：聊天栏说一声（去重，同一 URL 只提醒一次）
+            // 下载失败别哑巴：聊天栏说一声 + 日志留痕（去重，同一 URL 只提醒一次）+ 10秒后自动重试
+            LOGGER.warn("[ODC-font] url 图片下载失败: {} 原因={}", url, ClientController.shortReason(t));
             Minecraft.getInstance().execute(() -> ClientController.chatWarnOnce(
                     "remote-img:" + url,
                     "§e[OpenDreamCore] §f远程图片加载失败: " + url
                             + "（" + ClientController.shortReason(t) + "）"));
+            com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
             return null;
         });
         return null;
     }
 
-    /** 远程图片尺寸（注册时记录，供替换字形 uv 归一化）；未就绪/未知返回 null。 */
-    public static com.opendreamcore.client.resources.LooseResourceLoader.Size sizeOf(String url) {
-        int[] s = SIZES.get(url);
-        return s == null ? null : new com.opendreamcore.client.resources.LooseResourceLoader.Size(s[0], s[1]);
+    /** 后台三级解码：NativeImage（png/jpg）→ ImageIO（gif/bmp 等）→ JavaCV/ffmpeg（webp 等）。失败返回 null。 */
+    private static NativeImage decodeImage(String url, Path file) {
+        try {
+            return NativeImage.read(Files.newInputStream(file));
+        } catch (Throwable t1) {
+        }
+        try {
+            java.awt.image.BufferedImage bi = javax.imageio.ImageIO.read(file.toFile());
+            if (bi != null) {
+                return toPngNative(bi);
+            }
+        } catch (Throwable t2) {
+        }
+        try {
+            java.awt.image.BufferedImage bi = com.opendreamcore.client.JavaCvImage.decode(file);
+            if (bi != null) {
+                return toPngNative(bi);
+            }
+        } catch (Throwable t3) {
+        }
+        try {
+            LOGGER.warn("[ODC-font] url 图片解码失败: {}（缓存 {} 字节）", url, Files.size(file));
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
-    /** 渲染线程：缓存文件 → NativeImage → 动态纹理。 */
-    private static void loadTexture(String url, Path file) {
-        try (NativeImage image = NativeImage.read(Files.newInputStream(file))) {
+    private static NativeImage toPngNative(java.awt.image.BufferedImage bi) {
+        try {
+            java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+            if (javax.imageio.ImageIO.write(bi, "png", png)) {
+                return NativeImage.read(new java.io.ByteArrayInputStream(png.toByteArray()));
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** 渲染线程：NativeImage → 动态纹理注册（图片已解码完成，注册必须渲染线程）。 */
+    private static void registerRemoteImage(String url, NativeImage image) {
+        try {
             DynamicTexture texture = CompatRender.newDynamicTexture(image);
             ResourceLocation id = CompatRender.rl("opendreamcore",
                     "remote/" + Integer.toHexString(url.hashCode()));
             Minecraft.getInstance().getTextureManager().register(id, texture);
             TEXTURES.put(url, id);
             SIZES.put(url, new int[]{image.getWidth(), image.getHeight()});
-            // 远程图就绪：清字形烘焙缓存，让引用该 url 的替换字形下帧重新 bake 显示
-            com.opendreamcore.client.visual.ReplaceFontProvider.clear();
-        } catch (IOException ignored) {
-            // 文件损坏/解码失败：不注册，下次请求会重试
+            LOGGER.info("[ODC-font] url 图片就绪: {} rl={} 尺寸={}x{}",
+                    url, id, image.getWidth(), image.getHeight());
+            // 远程图就绪：只失效判定/烘焙缓存（保留字符表），让引用该 url 的替换字形下帧重新 bake 显示
+            com.opendreamcore.client.visual.ReplaceFontProvider.invalidateTextures();
+        } catch (Throwable t) {
+            LOGGER.warn("[ODC-font] url 图片注册失败: {} 原因={}", url, t.toString());
         } finally {
             LOADING.remove(url);
         }
+    }
+
+    /** 远程图片尺寸（注册时记录，供替换字形 uv 归一化）；未就绪/未知返回 null。 */
+    public static com.opendreamcore.client.resources.LooseResourceLoader.Size sizeOf(String url) {
+        int[] s = SIZES.get(url);
+        return s == null ? null : new com.opendreamcore.client.resources.LooseResourceLoader.Size(s[0], s[1]);
     }
 
     /** 清空全部（重载/断线重连时释放纹理）。 */

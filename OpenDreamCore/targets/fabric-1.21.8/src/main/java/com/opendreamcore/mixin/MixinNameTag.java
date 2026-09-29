@@ -7,8 +7,8 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -22,6 +22,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(EntityRenderer.class)
 public abstract class MixinNameTag {
 
+    @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/Entity;"
+            + "Lnet/minecraft/client/renderer/entity/state/EntityRenderState;F)V",
+            at = @At("HEAD"))
+    private void opendreamcore$captureEntityType(Entity entity, EntityRenderState state,
+                                                 float partialTick, CallbackInfo ci) {
+        VisualNameTags.setCurrentEntity(entity); // state 体系：实体经这里传给 hitFor
+    }
+
     @Inject(method = "renderNameTag(Lnet/minecraft/client/renderer/entity/state/EntityRenderState;"
             + "Lnet/minecraft/network/chat/Component;"
             + "Lcom/mojang/blaze3d/vertex/PoseStack;"
@@ -30,13 +38,16 @@ public abstract class MixinNameTag {
     private void opendreamcore$replaceNameTag(EntityRenderState state, Component displayName,
                                               PoseStack pose, MultiBufferSource buffer,
                                               int light, CallbackInfo ci) {
-        String type = state.entityType == null ? ""
-                : BuiltInRegistries.ENTITY_TYPE.getKey(state.entityType).toString();
-        VisualNameTags.TagStyle style = VisualNameTags.styleFor(type, displayName.getString());
-        if (style == null) {
-            return;
+        Entity current = VisualNameTags.currentEntity();
+        VisualNameTags.Hit hit = current == null ? null : VisualNameTags.hitFor(current);
+        if (hit == null) {
+            return; // 没规则命中，原版名牌照旧
         }
-        drawTag(state, displayName, pose, buffer, light, style);
+        // 名字条一律就地画（HEAD 起就是这条路径）：整页内容只**叠加**在名牌之上。
+        // 以前只在 fullHud=false 时画 —— 整页路径一旦构建/布局/上屏任一步失败
+        // （页面元素没写世界坐标 hologram、布局落在画布外、渲染时机不对…），
+        // 原版名牌已被 cancel、页面又画不出来，名牌就整体消失。实机回归的根因。
+        drawTag(state, displayName, pose, buffer, light, hit.style());
         ci.cancel();
     }
 

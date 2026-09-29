@@ -19,7 +19,7 @@ import org.apache.logging.log4j.Logger;
 public final class OdcLegacy164 {
     public static final String MODID = "opendreamcore";
     public static final String VERSION = "0.1.2";
-    public static final String CHANNEL = "ODC";
+    public static final String CHANNEL = "opendreamcore";
 
     public static final Logger LOGGER = LogManager.getLogger(MODID);
 

@@ -1,127 +1,135 @@
 package com.opendreamcore.mixin;
 
 import com.mojang.blaze3d.font.GlyphInfo;
-import com.mojang.blaze3d.font.SheetGlyphInfo;
+import com.opendreamcore.client.TtfGlyphSource;
 import com.opendreamcore.client.resources.LooseResourceLoader;
 import com.opendreamcore.client.visual.ReplaceFontProvider;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
+import com.opendreamcore.client.visual.VisualFontReplace;
+import com.opendreamcore.glyph.OdcGlyphCache;
+import com.opendreamcore.glyph.OdcGlyphInfo;
+import com.opendreamcore.glyph.OdcTtfGlyphInfo;
 import net.minecraft.client.gui.font.FontSet;
-import net.minecraft.client.gui.font.GlyphRenderTypes;
 import net.minecraft.client.gui.font.glyphs.BakedGlyph;
-import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.resources.ResourceLocation;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.function.Function;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * FontSet 字形层替换：
- * getGlyphInfo（聊天/两段式 prepareText 走这里）命中时返回自定义 GlyphInfo，
- * 其 bake() 产出彩色 BakedGlyph（我们的贴图）；getGlyph（烘培缓存）同样拦截。
- * 原版字体管线全局走替换字形，宽度由 getAdvance 参与排版。
+ * 字形层接管（1.21.8 代）。
+ *
+ * 这代的文本管线在图集之外还有一条直通路径：排版阶段先取字形信息拿步进与样式偏移，
+ * 真正落笔时再取字形对象来构造绘制实例。所以两个入口都要接管，缺一个就会出现
+ * 「宽度对了但字形还是原版」或者「字形换了但排版错位」。
+ *
+ *   - getGlyphInfo：给出我们自己的字形信息（步进、阴影偏移沿用接口默认实现）；
+ *   - getGlyph：给出我们自己的字形对象（贴图绑在自建渲染类型上，不经过原版图集）。
+ *
+ * 两者都不覆写原版绘制：颜色、粗体加厚、斜体错切、阴影与深度全部由原版渲染器按字形
+ * 对象携带的几何与 UV 照常处理，所以样式天然不丢。
+ *
+ * 命中判定只看我们自己的规则源（单字 / 区间 / 正则三类统一由规则表查询给出），
+ * 判定为命中的字符一定走自建字形类；判定不命中一律放行原版。
+ *
+ * 回退约定：贴图尚未解析到 → 不接管（提示一次并等纹理就绪后自愈）；字体没配或字模
+ * 取不到 → 不接管。任何情况下都不会返回空字形，也不会向批处理写不可见顶点。
  */
 @Mixin(FontSet.class)
 public abstract class FontSetMixin {
 
+    /** 全局字体字形信息缓存（键=字体路径#码点；换字体路径自动失效）。 */
+    private static final Map<String, OdcTtfGlyphInfo> TTF_INFO = new HashMap<>();
+    private static final int TTF_INFO_MAX = 4096;
+
     @Inject(method = "getGlyphInfo(IZ)Lcom/mojang/blaze3d/font/GlyphInfo;",
             at = @At("HEAD"), cancellable = true)
     private void odc$replaceGlyphInfo(int codePoint, boolean random, CallbackInfoReturnable<GlyphInfo> cir) {
-        if (!ReplaceFontProvider.usable(codePoint)) {
+        VisualFontReplace.CharGlyph rule = odc$bitmapRule(codePoint);
+        if (rule != null) {
+            cir.setReturnValue(new OdcGlyphInfo(codePoint, rule));
             return;
         }
-        cir.setReturnValue(new OdcGlyphInfo(ReplaceFontProvider.get(codePoint)));
+        OdcTtfGlyphInfo ttf = odc$ttfInfo(codePoint);
+        if (ttf != null) {
+            cir.setReturnValue(ttf);
+        }
     }
 
     @Inject(method = "getGlyph(I)Lnet/minecraft/client/gui/font/glyphs/BakedGlyph;",
             at = @At("HEAD"), cancellable = true)
     private void odc$replaceGlyph(int codePoint, CallbackInfoReturnable<BakedGlyph> cir) {
-        if (!ReplaceFontProvider.usable(codePoint)) {
+        VisualFontReplace.CharGlyph rule = odc$bitmapRule(codePoint);
+        if (rule != null) {
+            BakedGlyph baked = OdcGlyphCache.bitmap(codePoint, rule);
+            if (baked != null) {
+                cir.setReturnValue(baked);
+            }
             return;
         }
-        Object cached = ReplaceFontProvider.cachedBaked(codePoint);
-        if (cached instanceof BakedGlyph bg) {
-            cir.setReturnValue(bg);
-            return;
-        }
-        BakedGlyph baked = bakeGlyph(ReplaceFontProvider.get(codePoint));
-        if (baked != null) {
-            ReplaceFontProvider.cacheBaked(codePoint, baked);
-            cir.setReturnValue(baked);
+        OdcTtfGlyphInfo ttf = odc$ttfInfo(codePoint);
+        if (ttf != null) {
+            BakedGlyph baked = OdcGlyphCache.ttf(codePoint, ttf.glyph());
+            if (baked != null) {
+                cir.setReturnValue(baked);
+            }
         }
     }
 
-    /** 自定义 GlyphInfo：宽度取替换字形宽度，bake 产出自定义 BakedGlyph。 */
-    static final class OdcGlyphInfo implements GlyphInfo {
-        private final ReplaceFontProvider.ReplaceFontGlyph g;
-
-        OdcGlyphInfo(ReplaceFontProvider.ReplaceFontGlyph g) {
-            this.g = g;
+    /**
+     * 查一条贴图规则。未命中返回 null；
+     * 命中但贴图还没就绪时提示一次并返回 null（走原版字形，纹理到位后下一帧自愈）。
+     */
+    private static VisualFontReplace.CharGlyph odc$bitmapRule(int codePoint) {
+        if (codePoint < 0 || codePoint > 0xFFFF) {
+            return null; // 规则表以 BMP 字符为键，辅助平面不参与贴图替换
         }
-
-        @Override
-        public float getAdvance() {
-            return g.width();
-        }
-
-        @Override
-        public BakedGlyph bake(Function<SheetGlyphInfo, BakedGlyph> function) {
-            return bakeGlyph(g);
-        }
-    }
-
-    /** 自定义 BakedGlyph：覆写 renderType 返回我们贴图的 RenderType（DreamCore ReplaceFontGlyphRenderer 同款思路）——
-     *  GlyphVisitor 用 glyph.renderType(mode) 取 buffer，不覆写则用默认字体图集纹理，自定义贴图渲染空白。 */
-    static final class OdcBakedGlyph extends BakedGlyph {
-        private final ResourceLocation rl;
-        private final com.opendreamcore.client.GifPlayer gif;
-
-        OdcBakedGlyph(GlyphRenderTypes types, com.mojang.blaze3d.textures.GpuTextureView view,
-                      float left, float top, float right, float bottom,
-                      float u0, float v0, float u1, float v1, ResourceLocation rl,
-                      String srcFile, com.opendreamcore.client.GifPlayer gif) {
-            // 1.21.8 构造顺序：uv 在前 (u0,u1,v0,v1)、几何在后 (left,right,up,down)
-            super(types, view, u0, u1, v0, v1, left, right, top, bottom);
-            this.rl = rl;
-            this.gif = gif;
-        }
-
-        @Override
-        public net.minecraft.client.renderer.RenderType renderType(Font.DisplayMode mode) {
-            return net.minecraft.client.renderer.RenderType.text(rl);
-        }
-
-        @Override
-        public net.minecraft.client.renderer.RenderType renderType(Font.DisplayMode mode, boolean shadow) {
-            return net.minecraft.client.renderer.RenderType.text(rl);
-        }
-    }
-
-    private static BakedGlyph bakeGlyph(ReplaceFontProvider.ReplaceFontGlyph g) {
         try {
-            // gif 字形 bake 帧表纹理（全帧拼一张，运行期只切 uv）；其它图走静态 lookup
-            com.opendreamcore.client.GifPlayer gif = LooseResourceLoader.gifPlayerOf(g.texture());
-            ResourceLocation rl = gif != null ? gif.sheetTexture() : null;
-            if (rl == null) {
-                rl = LooseResourceLoader.lookup(g.texture());
-            }
-            if (rl == null) {
-                return null; // 贴图未解析到：回退原版字形，不吞字
-            }
-            AbstractTexture tex = Minecraft.getInstance().getTextureManager().getTexture(rl);
-            if (tex == null || tex.getTextureView() == null) {
+            if (!VisualFontReplace.hasAny()) {
                 return null;
             }
-            GlyphRenderTypes types = GlyphRenderTypes.createForColorTexture(rl);
-            // 字形垂直位置：prepareText 的 y = 行顶，基线 ≈ y+7；图 8px 覆盖基线附近（-1..height-1）
-            float top = -1.0F;
-            float bottom = g.height() - 1.0F;
-            return new OdcBakedGlyph(types, tex.getTextureView(),
-                    0.0F, top, g.width(), bottom,
-                    0.0F, 0.0F, 1.0F, 1.0F, rl, g.texture(), gif);
+            VisualFontReplace.CharGlyph rule = VisualFontReplace.glyphFor((char) codePoint);
+            if (rule == null) {
+                return null;
+            }
+            if (LooseResourceLoader.sheetOf(rule.texture()) == null) {
+                ReplaceFontProvider.notePending(codePoint, rule.texture());
+                return null;
+            }
+            return rule;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 全局字体字形信息入口；未配置或字模取不到时返回 null（原版字体兜底）。 */
+    private static OdcTtfGlyphInfo odc$ttfInfo(int codePoint) {
+        try {
+            String path = VisualFontReplace.defaultTtf();
+            if (path == null || path.isEmpty()) {
+                return null;
+            }
+            String key = path + "#" + codePoint;
+            synchronized (TTF_INFO) {
+                OdcTtfGlyphInfo cached = TTF_INFO.get(key);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+            TtfGlyphSource.Glyph glyph = TtfGlyphSource.get(codePoint);
+            if (glyph == null) {
+                return null;
+            }
+            OdcTtfGlyphInfo info = new OdcTtfGlyphInfo(codePoint, glyph);
+            synchronized (TTF_INFO) {
+                if (TTF_INFO.size() >= TTF_INFO_MAX) {
+                    TTF_INFO.clear(); // 防御性上限：重建缓存代价是毫秒级
+                }
+                TTF_INFO.put(key, info);
+            }
+            return info;
         } catch (Throwable t) {
             return null;
         }

@@ -66,4 +66,27 @@ public final class ItemModelRenderBridgeImpl implements ItemModelRenderBridge {
             return null;
         }
     }
+
+    @Override
+    public java.util.List<Object> loreLines(Object stack) {
+        net.minecraft.world.item.component.ItemLore lore =
+                ((net.minecraft.world.item.ItemStack) stack).getComponents()
+                        .get(net.minecraft.core.component.DataComponents.LORE);
+        return lore == null ? java.util.List.of() : new java.util.ArrayList<Object>(lore.lines());
+    }
+
+    @Override
+    public java.util.List<Object> tooltipLines(Object stack, Object level, Object player, Object flag) {
+        return new java.util.ArrayList<Object>(((net.minecraft.world.item.ItemStack) stack).getTooltipLines(
+                net.minecraft.world.item.Item.TooltipContext.of((net.minecraft.world.level.Level) level),
+                (net.minecraft.world.entity.player.Player) player,
+                (net.minecraft.world.item.TooltipFlag) flag));
+    }
+
+    @Override
+    public int packFormat() {
+        return net.minecraft.SharedConstants.getCurrentVersion()
+                .packVersion(net.minecraft.server.packs.PackType.CLIENT_RESOURCES).major();
+    }
+
 }

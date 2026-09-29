@@ -27,7 +27,8 @@ class DreamCoreSystemsTest {
     @Test
     void fileNameRouting() {
         assertEquals("KeyConfig", DreamCoreSystems.systemFor("KeyConfig.yml"));
-        assertEquals("HeadTag", DreamCoreSystems.systemFor("Blood.yml"));
+        assertEquals("Blood", DreamCoreSystems.systemFor("Blood.yml"), "龙核血条重路由到 Blood 独立系统");
+        assertEquals("HeadTag", DreamCoreSystems.systemFor("HeadTag.yml"), "龙核头顶标签文件直进 HeadTag");
         assertEquals("SlotConfig", DreamCoreSystems.systemFor("slotconfig.YML"));
         assertEquals("", DreamCoreSystems.systemFor("ItemTip.yml"), "ItemTip 是界面页，走 GUI 解析器");
         assertEquals("", DreamCoreSystems.systemFor("ItemModel.yml"), "模型替换规划外");
@@ -110,7 +111,7 @@ class DreamCoreSystemsTest {
     }
 
     @Test
-    void bloodBecomesHeadTagPage() throws Exception {
+    void bloodBecomesBloodPage() throws Exception {
         Map<String, Map<String, Object>> rules = DreamCoreSystems.blood(load("Blood.yml"));
         Map<String, Object> baka = rules.get("baka");
         assertEquals("*", baka.get("entity"), "龙核血条对全体生物，通配");
@@ -125,6 +126,53 @@ class DreamCoreSystemsTest {
         Map<?, ?> txt = (Map<?, ?>) baka.get("血字");
         assertEquals("text", txt.get("type"));
         assertEquals("卧槽无情", ((Map<?, ?>) txt.get("text")).get("content"));
+    }
+
+    @Test
+    void headTagFormatImportsNameComponents() {
+        // 龙核头顶标签格式（目标规划词汇）：match/contains/distance/offsetY 匹配头
+        // + 名字_texture/名字_label 组件块。样本是规划规格的忠实实例（非服务器快照）。
+        String yaml = "僵尸王:\n"
+                + "  match: zombie\n"
+                + "  contains: 王\n"
+                + "  distance: 24\n"
+                + "  offsetY: 5\n"
+                + "  名字_texture:\n"
+                + "    path: \"name/king.png\"\n"
+                + "    width: 100\n"
+                + "    height: 20\n"
+                + "  名字_label:\n"
+                + "    content: \"%name% %per%\"\n"
+                + "    x: 0\n"
+                + "    y: 1\n"
+                + "    scale: 0.5\n";
+        Map<String, Object> raw = YamlParser.lenient().parse(yaml);
+        Map<String, Map<String, Object>> rules = DreamCoreSystems.headTag(raw);
+        Map<String, Object> king = rules.get("僵尸王");
+        assertNotNull(king, "带名字件的规则产出 HeadTag 规则");
+        assertEquals("zombie", king.get("entity"), "match → entity");
+        assertEquals("王", king.get("contains"), "contains 直通");
+        assertEquals(24.0, ((Number) king.get("distance")).doubleValue(), 1e-9, "distance 直通");
+        assertEquals(0.5, ((Number) king.get("y")).doubleValue(), 1e-9, "offsetY 5 → y 0.5（/10 同款折算）");
+        Map<?, ?> tex = (Map<?, ?>) king.get("名字贴图");
+        assertEquals("image", tex.get("type"));
+        assertEquals("name/king.png", ((Map<?, ?>) tex.get("image")).get("src"));
+        assertEquals(2.0, ((Number) ((Map<?, ?>) tex.get("hologram")).get("width")).doubleValue(), 1e-9,
+                "100px → 2 格（50px=1格）");
+        Map<?, ?> label = (Map<?, ?>) king.get("名字文本");
+        assertEquals("text", label.get("type"));
+        assertEquals("entity.name entity.health_ratio", ((Map<?, ?>) label.get("text")).get("content"),
+                "%name%/%per% → 实体上下文变量");
+    }
+
+    @Test
+    void headTagDropsRulesWithoutNameComponents() {
+        // 只有匹配头没有名字件的规则不产出（空页面无意义）；血条件归 blood() 翻译器
+        String yaml = "纯匹配头:\n"
+                + "  match: zombie\n"
+                + "  distance: 16\n";
+        Map<String, Object> raw = YamlParser.lenient().parse(yaml);
+        assertTrue(DreamCoreSystems.headTag(raw).isEmpty(), "无名字件不产出 HeadTag 规则");
     }
 
     @Test

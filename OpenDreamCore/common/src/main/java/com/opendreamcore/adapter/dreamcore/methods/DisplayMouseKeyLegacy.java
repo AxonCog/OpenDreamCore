@@ -83,9 +83,9 @@ public final class DisplayMouseKeyLegacy {
         LegacyMethods.register("get_key_name", a -> ky("getKeyName", arg(a, 0)));
         LegacyMethods.register("get_control_key_name", a -> ky("getKeyName", arg(a, 0)));
         LegacyMethods.register("get_control_key_extra", a -> "");
-        LegacyMethods.register("get_current_pressed_key", a -> "");
-        LegacyMethods.register("simulate_key_press", a -> null);
-        LegacyMethods.register("execute_key_command", a -> null);
+        LegacyMethods.register("get_current_pressed_key", a -> ky("get_current_pressed_key"));
+        LegacyMethods.register("simulate_key_press", a -> ky("simulatePress", arg(a, 0)));
+        LegacyMethods.register("execute_key_command", a -> ky("simulatePress", arg(a, 0)));
         LegacyMethods.register("set_control_key", a -> null);
     }
 

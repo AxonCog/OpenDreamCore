@@ -33,6 +33,9 @@ sourceSets {
     main {
         java.srcDir "$buildDir/generated/common-main"
         java.srcDir "$buildDir/generated/client-main"
+        java.srcDir "$buildDir/generated/glyph-1.21.5+"
+        java.srcDir "$buildDir/generated/worldrender-1.21.5+"
+        java.srcDir "$buildDir/generated/worldrender-pipe-1.21.11"
         resources.srcDir '../../common/src/main/resources'
     }
 }
@@ -46,6 +49,23 @@ tasks.register('prepareCommonSources', Sync) {
 tasks.register('prepareClientSources', Sync) {
     from('../../client/src/main/java')
     into "$buildDir/generated/client-main"
+}
+
+// glyph-1.21.5+/ 是 1.21.11/26.1.2 两代共用的字形层实现（这两代的字形对象接口同形）。
+tasks.register('prepareGlyph1215Plus', Sync) {
+    from('../../gensrc/glyph-1.21.5+/src/main/java')
+    into "$buildDir/generated/glyph-1.21.5+"
+}
+// worldrender-1.21.5+/ 是 1.21.11/26.1.2 两代共用的世界语义渲染类型与管线实现
+// （这两代的渲染类型 API 同形）。
+tasks.register('prepareWorldRender1215Plus', Sync) {
+    from('../../gensrc/worldrender-1.21.5+/src/main/java')
+    into "$buildDir/generated/worldrender-1.21.5+"
+}
+
+tasks.register('prepareWorldRenderPipe12111', Sync) {
+    from('../../gensrc/worldrender-pipe-1.21.11/src/main/java')
+    into "$buildDir/generated/worldrender-pipe-1.21.11"
 }
 tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
 tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
@@ -171,7 +191,7 @@ tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
 // ② Window.getWindow()(GLFW 句柄) 改名 handle()
 // ③ Screen.hasShiftDown/hasControlDown 移除 → CompatInput 反射垫片（FQN 避免补 import）
 tasks.register('remapDrift') {
-    dependsOn 'prepareCommonSources', 'prepareClientSources'
+    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph1215Plus', 'prepareWorldRender1215Plus', 'prepareWorldRenderPipe12111'
     doLast {
         // 1.21.9+ mojmap 输入系统重构：Screen 输入方法改为事件记录对象。
         // 仅改写 Screen 子类的覆写（OdcScreen/WorldEdit*Screen）；EditorPanels 是自有类保持原签名；
@@ -179,7 +199,7 @@ tasks.register('remapDrift') {
         def BS_NL = System.lineSeparator()
         def INPUT_FILES = ['OdcScreen.java', 'WorldEditAlignScreen.java', 'WorldEditFindScreen.java',
                            'WorldEditPropQuickScreen.java', 'WorldEditPropScreen.java', 'WorldEditRenameScreen.java']
-        [file("$buildDir/generated/common-main"), file("$buildDir/generated/client-main")].each { dir ->
+        [file("$buildDir/generated/common-main"), file("$buildDir/generated/client-main"), file("$buildDir/generated/glyph-1.21.5+")].each { dir ->
             if (!dir.exists()) return
             dir.eachFileRecurse { f ->
                 if (!f.name.endsWith('.java') || f.name == 'CompatInput.java' || f.name == 'CompatPlayer.java') return
@@ -242,4 +262,6 @@ tasks.register('remapDrift') {
 }
 tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
 tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
+tasks.named('prepareGlyph1215Plus') { outputs.upToDateWhen { false } }
+tasks.named('prepareWorldRender1215Plus') { outputs.upToDateWhen { false } }
 tasks.named('compileJava').configure { dependsOn 'remapDrift' }

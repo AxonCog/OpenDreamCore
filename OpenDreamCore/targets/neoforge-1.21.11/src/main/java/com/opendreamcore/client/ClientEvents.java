@@ -23,13 +23,38 @@ import java.nio.file.Path;
 @EventBusSubscriber(modid = OpenDreamCore.MODID, value = Dist.CLIENT)
 public final class ClientEvents {
 
-
     private ClientEvents() {
+    }
+
+    /**
+     * 登记自建世界渲染管线。
+     *
+     * <p>必须走这个事件，不能自己直接登记：自建管线要进原版的静态管线表，而那张表同时是「启动时
+     * 编译哪些着色器」的清单；这张表在原版类初始化时就填好了，晚于它的登记没有意义。这个事件正是
+     * 原版为模组留的登记时机，落在静态初始化与着色器编译之前。
+     *
+     * <p>管线只有登记进去，光影模组才能在重绘世界时把它当作一个可归类的类别——这才是修「物品、
+     * 生物部分透明」的关键：面板不再是绕开类别体系的立即模式几何。
+     */
+    @SubscribeEvent
+    public static void onRegisterRenderPipelines(
+            net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent event) {
+        event.registerPipeline(
+                com.opendreamcore.client.render.OdcWorldRenderPipelines.WORLD_TEXTURED);
+        // 穿透趟用的变体（关深度测试）：不登记的话它没有编译好的着色器程序，
+        // depthMode=always / transparent 第二遍会画不出来。
+        event.registerPipeline(
+                com.opendreamcore.client.render.OdcWorldRenderPipelines.WORLD_TEXTURED_NO_DEPTH);
     }
 
     @SubscribeEvent
     public static void onClientSetup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.opendreamcore.script.CommonMethods.registerAll();
+        // 世界语义渲染类型：世界面板/名牌挂上光影认得的可归类渲染类型，否则会被
+        // 错误归类进半透明阶段、把深度缓冲写乱（物品与生物部分透明）。
+        com.opendreamcore.client.render.WorldRenderTypes.register(
+                new com.opendreamcore.client.render.OdcWorldRenderTypeProvider());
+        com.opendreamcore.client.render.WorldRenderTypes.setEnabled(true);
         // 实体渲染桥（entity/model 组件 GUI 渲染）
         com.opendreamcore.client.entity.EntityViews.register(
                 new com.opendreamcore.client.entity.EntityRenderBridgeImpl());

@@ -2,7 +2,6 @@ package com.opendreamcore.client;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.imageio.ImageIO;
@@ -33,6 +32,9 @@ public final class GifPlayer {
     }
 
     private static final Map<String, GifPlayer> CACHE = new ConcurrentHashMap<>();
+
+    private static final org.slf4j.Logger LOGGER =
+            org.slf4j.LoggerFactory.getLogger("OpenDreamCore");
 
     private final List<Frame> frames = new ArrayList<>();
     private final List<Integer> starts = new ArrayList<>();
@@ -73,12 +75,16 @@ public final class GifPlayer {
     }
 
     /** 首帧整图纹理（UI/业务走静态整图：字形层动画走帧表 sheet，二者互不干扰）。 */
-    private DynamicTexture staticTex;
+    private Object staticTex; // 跨版本：DynamicTexture 构造签名 1.21.8 起变动（新增标签参），统一走 CompatRender 反射构造
 
     private boolean sheetReady;
 
     /** 帧表纹理 RL（全帧横向拼一张：字形按 activeIndex 切 uv，永不 upload 永不换纹理对象）。 */
     private ResourceLocation sheetRl;
+
+    /** 纹理构建失败的去重告警（按 RL 记，避免每帧刷屏）。 */
+    private static final java.util.Set<String> SHEET_WARNED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 纹理 RL（opendreamcore:gif/<hash>），供 LooseResourceLoader 反查播放器。 */
     public ResourceLocation textureLocation() {
@@ -112,11 +118,30 @@ public final class GifPlayer {
         }
         try {
             if (staticTex == null) {
-                staticTex = CompatRender.newDynamicTexture(toNative(frames.get(0).image()));
-                Minecraft.getInstance().getTextureManager().register(textureId, staticTex);
+                // DynamicTexture 构造签名 1.21.8 起变动（新增标签参），统一走 CompatRender 反射构造；
+                // 反射失败时返回未注册 id——替换字形不显示，但不炸渲染
+                BufferedImage first = frames.get(0).image();
+                Object tex = CompatRender.newDynamicTexture(toNative(first));
+                if (tex == null) {
+                    // 以前这里静默返回未注册的 RL：usable() 只看「RL 非空」⇒ 判定为就绪、字形接管，
+                    // 但纹理从未注册 ⇒ 画出空白且零日志。现在吱一声（每 gif 一次）。
+                    if (SHEET_WARNED.add(textureId.toString())) {
+                        LOGGER.warn("[ODC-font] 动态纹理构造失败（DynamicTexture 构造器不匹配），"
+                                + "替换字形将不显示空白: {}", textureId);
+                    }
+                    return textureId;
+                }
+                staticTex = tex;
+                Minecraft.getInstance().getTextureManager().register(textureId,
+                        (net.minecraft.client.renderer.texture.AbstractTexture) tex);
+                if (Boolean.getBoolean("odc.debug")) {
+                    System.out.println("[ODC-diag] gif 纹理已注册: " + textureId
+                            + " 帧=" + first.getWidth() + "x" + first.getHeight()
+                            + " 帧数=" + frames.size());
+                }
             }
-        } catch (Throwable ignored) {
-            // 注册失败（非渲染线程等）静默，渲染线程重试
+        } catch (Throwable t) {
+            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] gif 纹理注册失败: " + t + " " + textureId); }
         }
         return textureId;
     }
@@ -147,7 +172,13 @@ public final class GifPlayer {
                     CompatRender.newDynamicTexture(toNative(sheet)));
             sheetReady = true;
             return sheetRl;
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // 帧表建失败不静默：否则返回的 sheetRl 没注册过 ⇒ 字形空白且零日志
+            if (SHEET_WARNED.add(String.valueOf(sheetRl))) {
+                LOGGER.warn("[ODC-font] gif 帧表纹理注册失败（{} 帧，{}x{}）: {}",
+                        frames.size(), frames.get(0).image().getWidth(),
+                        frames.get(0).image().getHeight(), t.toString());
+            }
             return sheetRl != null ? sheetRl : null;
         }
     }
@@ -166,6 +197,25 @@ public final class GifPlayer {
             }
         }
         activeIndex = index;
+    }
+
+    /** 全部已缓存播放器（远程 url 与本地路径两路都在 CACHE 里）：客户端 tick 统一推进用。 */
+    public static Map<String, GifPlayer> cachedPlayers() {
+        return CACHE;
+    }
+
+    /** 推进 CACHE 里全部播放器，返回推进数量（单个异常吞掉，不拖垮客户端 tick）。 */
+    public static int tickAllCached() {
+        int n = 0;
+        for (GifPlayer p : CACHE.values()) {
+            try {
+                p.tick();
+                n++;
+            } catch (Throwable ignored) {
+                // 单个播放器异常不影响其他 gif
+            }
+        }
+        return n;
     }
 
     /**
@@ -207,11 +257,15 @@ public final class GifPlayer {
     /** 远程 GIF：下载完成后在渲染线程解码注册（未就绪返回 null，页面先占位）。 */
     private static GifPlayer ofRemote(String url) {
         if (!com.opendreamcore.remote.RemoteMedia.isSafeUrl(url)) {
+            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 拒绝（非安全 url）: " + url); }
             return null; // SSRF 防护拒绝
         }
         GifPlayer cached = CACHE.get(url);
         if (cached != null) {
             return cached;
+        }
+        if (REQ_LOGGED.add(url)) {
+            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 下载请求(仅首帧打): " + url); }
         }
         com.opendreamcore.remote.RemoteMedia.get(url, RemoteImageStore.cacheDir()).thenAccept(path -> {
             Minecraft.getInstance().execute(() -> {
@@ -221,16 +275,41 @@ public final class GifPlayer {
                     if (!frames.isEmpty()) {
                         GifPlayer player = new GifPlayer(frames, frames.stream().mapToInt(Frame::delayMs).sum());
                         CACHE.put(url, player);
-                        // 远程 gif 就绪：清字形烘焙缓存，引用该 url 的替换字形下帧重新 bake 显示
-                        com.opendreamcore.client.visual.ReplaceFontProvider.clear();
+                        if (Boolean.getBoolean("odc.debug")) {
+                            System.out.println("[ODC-font] url gif 解码成功 帧数=" + frames.size()
+                                    + " url=" + url);
+                        }
+                        // 远程 gif 就绪：只失效判定/烘焙缓存（保留字符表），引用该 url 的替换字形下帧重新 bake 显示
+                        com.opendreamcore.client.visual.ReplaceFontProvider.invalidateTextures();
+                        REQ_LOGGED.remove(url);
+                    } else {
+                        if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 解码为空帧 url=" + url); }
+                        REQ_LOGGED.remove(url);
                     }
-                } catch (Exception ignored) {
-                    // 解码失败：保持占位，下次请求可重试
+                } catch (Exception e) {
+                    if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 解码失败: " + e + " url=" + url); }
+                    ClientController.chatWarnOnce("gif-decode:" + url,
+                            "§e[OpenDreamCore] §fGIF 解码失败，10秒后自动重试: " + url);
+                    com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
+                    REQ_LOGGED.remove(url);
                 }
             });
-        }).exceptionally(t -> null);
+        }).exceptionally(t -> {
+            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 下载失败: " + t + " url=" + url); }
+            // 失败别哑巴：图床抖一下就把字符替换摁死一整个会话，玩家一头雾水。
+            // 聊天栏吱一声 + 10 秒后自动重试（上限 3 次，见 RemotePrefetch）
+            ClientController.chatWarnOnce("gif-dl:" + url,
+                    "§e[OpenDreamCore] §fGIF 下载失败，10秒后自动重试: " + url
+                            + "（" + ClientController.shortReason(t) + "）");
+            com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
+            REQ_LOGGED.remove(url);
+            return null;
+        });
         return null;
     }
+
+    /** 远程下载请求日志去重（同 url 只打一次首帧，避免每帧刷屏）。 */
+    private static final java.util.Set<String> REQ_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 内存字节流解析（散装扫描/资源云统一入口）：按 key 缓存，失败/非 gif 返回 null。 */
     public static GifPlayer ofBytes(String key, byte[] data) {
@@ -345,15 +424,25 @@ public final class GifPlayer {
         return fallback;
     }
 
-    /** BufferedImage → NativeImage（逐像素拷贝，GIF 帧通常不大）。 */
+    /** BufferedImage → NativeImage。
+     *
+     *  <p>走 PNG 字节 + {@code NativeImage.read} 的编译期直调路径（见
+     *  {@code LooseResourceLoader.toPngNative} 的注释）。以前是逐像素反射
+     *  {@code setPixelRGBA/setPixelABGR/setPixel}：在 Fabric 生产环境（方法名是 intermediary）
+     *  三个名字全不存在，于是一帧像素都没写进去 → GIF 整张透明（「高版本 GIF 不显示」的根因）。
+     *  逐像素反射仅作双保险保留。 */
     private static NativeImage toNative(BufferedImage img) {
-        NativeImage out = new NativeImage(img.getWidth(), img.getHeight(), true);
-        for (int x = 0; x < img.getWidth(); x++) {
-            for (int y = 0; y < img.getHeight(); y++) {
-                CompatRender.nativeSetPixel(out, x, y, img.getRGB(x, y));
+        try {
+            return com.opendreamcore.client.resources.LooseResourceLoader.toPngNative(img);
+        } catch (Throwable t) {
+            NativeImage out = new NativeImage(img.getWidth(), img.getHeight(), true);
+            for (int x = 0; x < img.getWidth(); x++) {
+                for (int y = 0; y < img.getHeight(); y++) {
+                    CompatRender.nativeSetPixel(out, x, y, img.getRGB(x, y));
+                }
             }
+            return out;
         }
-        return out;
     }
 
     /** 读帧延迟（毫秒），缺省 100ms。 */

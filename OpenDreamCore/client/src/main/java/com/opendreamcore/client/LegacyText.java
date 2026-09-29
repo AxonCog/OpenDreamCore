@@ -21,7 +21,25 @@ public final class LegacyText {
     }
 
     private static void append(StringBuilder sb, Component component) {
-        Style style = component.getStyle();
+        appendStyle(sb, component.getStyle());
+        if (component.getSiblings().isEmpty()) {
+            // 叶子：getString() 就是自身文本
+            sb.append(component.getString());
+        } else {
+            // 有子组件：getString() 会递归包含全部子文本，先抠掉子文本才是自身内容
+            // （旧实现直接 append getString() 再递归子组件 → 每个子组件文本都重复一次）
+            String self = component.getString();
+            for (Component child : component.getSiblings()) {
+                self = self.replace(child.getString(), "");
+            }
+            sb.append(self);
+        }
+        for (Component child : component.getSiblings()) {
+            append(sb, child);
+        }
+    }
+
+    private static void appendStyle(StringBuilder sb, Style style) {
         TextColor color = style.getColor();
         if (color != null) {
             sb.append("&#").append(String.format("%06X", color.getValue()));
@@ -40,10 +58,6 @@ public final class LegacyText {
         }
         if (style.isObfuscated()) {
             sb.append("§k");
-        }
-        sb.append(component.getString());
-        for (Component child : component.getSiblings()) {
-            append(sb, child);
         }
     }
 }

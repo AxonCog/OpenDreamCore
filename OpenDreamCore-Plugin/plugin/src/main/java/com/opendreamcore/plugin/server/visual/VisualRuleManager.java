@@ -12,15 +12,15 @@ import java.util.Map;
 /**
  * 服务端视觉规则管理器。
  *
- * 启动/reload 时对九个系统做双形态装载（根文件 + 同名文件夹，缺失自动生成
+ * 启动/reload 时对十个系统做双形态装载（根文件 + 同名文件夹，缺失自动生成
  * 默认示例），把全部规则原文打包成 VisualRulesSync 在玩家 ready 时下发——
  * 匹配与渲染在客户端，服务端只负责"谁生效"的权威分发。
  */
 public final class VisualRuleManager {
 
-    /** 九系统的固定清单：system 名 → 数据目录相对名（同名）。 */
+    /** 十系统的固定清单：system 名 → 数据目录相对名（同名）。 */
     public static final List<String> SYSTEMS = java.util.Arrays.asList(
-            "ItemIcon", "ItemEffect", "HeadTag", "FontConfig", "ArmorLayer",
+            "ItemIcon", "ItemEffect", "HeadTag", "Blood", "FontConfig", "ArmorLayer",
             "KeyConfig", "Sounds", "WorldTexture", "SlotConfig");
 
     private final Path dataRoot;
@@ -95,7 +95,7 @@ public final class VisualRuleManager {
 
     /**
      * 并入龙核原生配置（plugins/DragonCore/ 顶层的 KeyConfig.yml、Blood.yml
-n     * 那一批）。id 统一挂 dc/ 前缀：跟服主自己写的规则天然不撞车，日志里
+     * 那一批）。id 统一挂 dc/ 前缀：跟服主自己写的规则天然不撞车，日志里
      * 也一眼认出出处。同名按键组合龙核后到、后到嬴，跟龙核自己的装载
      * 顺序一致。翻译失败只记一条日志，不拖垮其它文件。
      */
@@ -135,7 +135,7 @@ n     * 那一批）。id 统一挂 dc/ 前缀：跟服主自己写的规则天�
         }
         if (merged > 0) {
             java.util.logging.Logger.getLogger("OpenDreamCore")
-                    .info("已从龙核配置并入 " + merged + " 条九系统规则（id 带 dc/ 前缀）");
+                    .info("已从龙核配置并入 " + merged + " 条十系统规则（id 带 dc/ 前缀）");
         }
         return merged;
     }

@@ -107,7 +107,9 @@ public final class ClientEvents {
 
     /** 世界全息渲染（实体渲染后一帧）。 */
     public static void onRenderLevel(net.neoforged.neoforge.client.event.RenderLevelStageEvent event) {
-        if (event.getStage() == net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
+        // AFTER_LEVEL（世界渲染最末阶段）：面板是世界上的叠加元素，放实体中段会在原版
+        // 还在攒实体/粒子批次时插进去，开光影时几何落错 gbuffer 阶段。
+        if (event.getStage() == net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage.AFTER_LEVEL) {
             ClientController.get().renderWorld(event.getCamera(), event.getPartialTick().getGameTimeDeltaPartialTick(false));
             ClientController.get().renderNameTags(event.getCamera(), event.getPartialTick().getGameTimeDeltaPartialTick(false));
         }

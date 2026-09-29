@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * 双形态加载器测试：根文件 + 同名文件夹共存、同 id 文件夹覆盖根文件、
- * 默认示例自动生成、坏文件 warn 跳过不炸、九系统模板全部可解析。
+ * 默认示例自动生成、坏文件 warn 跳过不炸、十系统模板全部可解析。
  */
 class VisualRulesTest {
 

@@ -4,15 +4,109 @@
 // common-legacy / common-legacy-jdk8-pure / client-legacy 只是被各 target 用
 // srcDirs 直接吃进去的源目录，不是 Gradle 子项目。根工程只做编排与门禁。
 //
-// 各 target 的 Gradle 版本不一样（1.16.5 是 7.6，1.12.2 是 4.10.3），
-// 所以跑子构建一律优先用 target 自带的 gradlew.bat，根 wrapper 只在没有自带时兜底。
+// 各 target 的 Gradle 版本不一样（1.16.5 是 7.6，1.12.2 也是 7.6），
+// 1.7.10（Gradle 2.14）/ 1.6.4（Gradle 2.14）走老 ForgeGradle，
+// 跑子构建一律优先用 target 自带的 gradlew.bat，根 wrapper 只在没有自带时兜底。
 //
 // 1.7.10（Gradle 2.14）/ 1.6.4（Gradle 1.x）走老 ForgeGradle，进不了 7.6 的评估，
 // 也不在 settings.gradle 里，只能各自进目录手工构建。
 
+// collectOutput：把四个远古 target 的产物汇入 output/legacy 并同步一份到 output/all。
+// 为什么四个都要根这边收：它们的 collectLegacyOutput 只在各自 build 时执行，而 1.7.10/1.6.4
+// 的 Gradle 太老，进不了根构建评估，只能各自进目录手工跑——一旦漏跑某个，发布目录就会
+// 永远停在上一次的结果上（这个得跟现代端 forge-1.20.1 同一类漏发）。这里读 build/libs
+// 而不读其它目录，就是为了让「collect 到的东西」与「真正的产物」只有一个来源。
+//
+// 另外：产物里内嵌的共享层（common-j8）可能比共享源码旧。那是构建顺序的坑，不是发布坑，
+// 所以在 verifySharedLayer 里提前拦（查内嵌类而非时间戳，躲开 gradle 的取整问题）。
+tasks.register('verifySharedLayer') {
+    group = 'verification'
+    description = 'Asserts every legacy jar actually carries the classes the shared layer defines.'
+    // 不在这里写 mustRunAfter：此刻 activeTargets 还没定义（它是本文件靠后的局部变量），
+    // 配置期引用会报 unknown property。顺序约束放在定义 activeTargets 之后的同名 configure 里。
+    doLast {
+        // 共享层里必须随包下发的类：少任何一个都意味着这个 target 拼进去的是旧共享层。
+        // 挑的是只有共享层才会产出的类（visual/FontRules 就是 1.12.2 真漏过的那个）。
+        def required = ['com/opendreamcore/visual/FontRules.class',
+                        'com/opendreamcore/visual/VisualRules.class']
+        def modVersion = providers.gradleProperty('mod_version').orNull
+        if (!modVersion) {
+            throw new GradleException('mod_version 未定义，无法核对内嵌共享层')
+        }
+        def problems = []
+        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+            def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
+            def jar = file("targets/forge-${v}/build/libs/${name}")
+            if (!jar.exists()) {
+                problems << "${name}: 产物不存在"
+                return
+            }
+            def names = new java.util.HashSet<String>()
+            // entries() 是惰性视图，必须在包还开着的时候读完；出了 withCloseable 再遍历就是 zip file closed
+            new java.util.zip.ZipFile(jar).withCloseable { zf ->
+                def en = zf.entries()
+                while (en.hasMoreElements()) { names << en.nextElement().name }
+            }
+            required.each { r ->
+                if (!names.contains(r)) { problems << "${name}: 缺内嵌类 ${r} → 共享层是旧的" }
+            }
+        }
+        if (problems) {
+            problems.each { println "  ${it}" }
+            throw new GradleException("verifySharedLayer: ${problems.size} 处共享层缺失，先烘 :common-j8:jar 再重建相关 target")
+        }
+        println 'verifySharedLayer: 四版内嵌共享层类齐备（FontRules/VisualRules）'
+    }
+}
+tasks.register('collectOutput') {
+    group = 'build'
+    description = 'Copies the current-version legacy jars into ../output/legacy and ../output/all.'
+    doLast {
+        def modVersion = providers.gradleProperty('mod_version').orNull
+        if (!modVersion) {
+            throw new GradleException('mod_version 未定义，无法确定要收集的 legacy 产物版本')
+        }
+        def legacyOut = file('../output/legacy')
+        def allOut = file('../output/all')
+        legacyOut.mkdirs()
+        allOut.mkdirs()
+        def missing = []
+        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+            def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
+            def src = file("targets/forge-${v}/build/libs/${name}")
+            if (!src.exists()) { missing << name; return }
+            copy { from src; into legacyOut }
+            copy { from src; into allOut }
+            println "collected ${name}"
+        }
+        // legacy 前缀的陈旧残留（非当前版本）清掉，避免发布时拿错
+        [legacyOut, allOut].each { d ->
+            d.listFiles()?.findAll { f ->
+                f.name.startsWith('OpenDreamCore-Legacy-') && f.name.endsWith('.jar')
+                        && !f.name.contains("-${modVersion}.jar")
+            }?.each { it.delete() }
+        }
+        if (missing) {
+            // 硬门禁：四个远古产物缺任何一个就失败。以前这里只 println 提醒，
+            // 提醒没人盯，结果 1.6.4/1.7.10 长期停在旧产物上，外面看就像它们没编。
+            // 发布面不允许“少一个但构建通过”。
+            missing.each { println "  MISSING ${it}" }
+            throw new GradleException("collectOutput: 四个远古产物缺 ${missing.size} 个，发布面不完整")
+        } else {
+            println "collectOutput: 4/4 legacy 产物已汇入 output/legacy 与 output/all"
+        }
+    }
+}
+
 // 共享树的 JDK8 门禁现在在 common-j8 模块里：主树源码 release 8 + Jabel 脱糖，
 // verifyBytecodeLevel 验每个 class 都是 major 52。以前那棵手工抄的
 // common-legacy-jdk8-pure 连同 verifyJ8 任务一起退役了——源头只有一份，漂移无处发生。
+//
+// 注意：这里不要再写 tasks.named('build') 去配 finalizedBy。root 工程没有 java 插件，
+// 'build' 是本文件自己在下面注册的，在那个点还不存在——tasks.named 会在配置期直接抛
+// "Task with name 'build' not found"，于是根构建连 common-j8 都烘不出来，
+// 依赖它的 1.6.4/1.7.10（build_with_java8.bat 第一步就是烘 common-j8）从此再也建不出，
+// 产物永远停在上一次的时间点上。finalizedBy 要挂在下面注册它的那块里。
 
 def targetBuilds = [
         'forge-1.16.5': 'targets/forge-1.16.5',
@@ -34,15 +128,33 @@ activeTargets.each { targetName, dir ->
     tasks.register(taskNameFor(targetName), Exec) {
         group = 'build'
         description = "Builds ${targetName} in its independent Gradle project."
+        // 关键：这两个 target 是独立工程，会把 common-j8 的成品 jar 整包拼进自己包里。
+        // 必须先把共享层烘出来，否则拼进去的是上一次的结果——编译能过、行为却是旧的。
+        // 1.12.2 真栽过这个：它的 jar 比共享层还早建，连 visual/FontRules 都没进去。
+        dependsOn ':common-j8:jar'
         workingDir rootDir
         commandLine 'cmd', '/c', gradlewFor(dir), '-p', dir.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
     }
 }
 
+// 顺序约束：本任务读的是 build/libs 里的 jar，必须晚于产物的构建任务，
+// 否则跑早了读到的是上一轮的包，门禁形同虚设。写在这里是因为上面注册它时
+// activeTargets 还不存在（配置期按文件顺序求值）。
+tasks.named('verifySharedLayer').configure {
+    mustRunAfter activeTargets.keySet().collect { taskNameFor(it) }
+}
+
 tasks.register('build') {
     group = 'build'
-    description = 'Builds all active legacy targets.'
+    description = 'Builds all active legacy targets, then collects their jars into output/.'
+    // 顺序要紧：先烘共享层，再编 target（它们把共享层整包拼进自己包里），
+    // 然后才能验「内嵌共享层是不是新的」——verifySharedLayer 同级 dependsOn 的话
+    // Gradle 不保证先后，可能抢在产物建好之前验，验的是上一轮的包，白验。
+    // 所以把它改成 target 任务的下游，最后才收产物。
+    dependsOn ':common-j8:jar'
     dependsOn activeTargets.keySet().collect { taskNameFor(it) }
+    finalizedBy tasks.named('verifySharedLayer')
+    finalizedBy tasks.named('collectOutput')
 }
 
 tasks.register('listTargets') {
@@ -52,8 +164,8 @@ tasks.register('listTargets') {
         targetBuilds.each { name, dir ->
             println "${name}: ${dir} [${activeTargets.containsKey(name) ? 'ACTIVE' : 'placeholder'}]"
         }
-        println 'forge-1.7.10: targets/forge-1.7.10 [external: Gradle 2.14 + JDK 1.8.0_181，进目录跑 build_legacy.bat]'
-        println 'forge-1.6.4:  targets/forge-1.6.4  [external: Gradle 1.x，进目录跑 run_compile.bat]'
+        println 'forge-1.7.10: targets/forge-1.7.10 [external: Gradle 2.14 + JDK 1.8.0_181，进目录跑 build_with_java8.bat]'
+        println 'forge-1.6.4:  targets/forge-1.6.4  [external: Gradle 2.14 + JDK 1.8.0_181，进目录跑 build_with_java8.bat]'
     }
 }
 

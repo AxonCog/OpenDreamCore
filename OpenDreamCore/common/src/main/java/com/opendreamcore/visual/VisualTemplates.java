@@ -1,7 +1,7 @@
 package com.opendreamcore.visual;
 
 /**
- * 九系统的默认示例模板。
+ * 十系统的默认示例模板。
  *
  * 每个系统首次使用时自动落盘一份——注释写全取值范围，
  * 用户照着改就能跑，不用翻文档。键名与解析器严格同步。
@@ -50,12 +50,16 @@ public final class VisualTemplates {
 
     public static final String HEAD_TAG = """
             # 实体头顶标签：一张锚定实体的完整 HUD 页面
+            # 存放：visual/HeadTag/ 文件夹下一文件一规则（文件名=规则 id）；
+            # 旧版单文件 visual/HeadTag.yml 依旧可用（整文件一条规则）
             # 全部页面能力可用：Functions / 变量 / bind / 任意组件
+            # 实时变量：name / health / health_max / health_ratio(0~1) / entity_height
 
             entity: zombie              # 实体类型（逗号分隔多个）
-            name: 僵尸王                # 可选：名称包含叠加过滤
+            contains: 僵尸              # 可选：名称包含过滤（旧键 name 等效）
             distance: 64                # 可见距离（格）
-            y: 1.5                      # 头顶锚点偏移
+            offsetX: 0                  # 可选：横向偏移（格，billboard 左右）
+            offsetY: 0                  # 可选：纵向偏移（格；旧键 y 等效）
 
             Functions:
               tick: |-
@@ -73,33 +77,61 @@ public final class VisualTemplates {
               type: rect
               x: -0.88
               y: 0.11
-              width: "2 * entity.health_ratio"   # entity.* 实时上下文
+              width: "2 * health_ratio"      # 随血量实时伸缩（0~1）
               height: 0.28
               color: "#FF55FF55"
             """;
 
+    public static final String BLOOD = """
+            # 纯血条（Blood）：锚定实体头顶的血量条（独立系统，与 HeadTag 共用头顶渲染管线）
+            # 存放：visual/Blood/ 文件夹下一文件一规则（文件名=规则 id）；
+            # 旧版单文件 visual/Blood.yml 依旧可用（整文件一条规则）
+            # 实时变量：name / health / health_max / health_ratio(0~1) / entity_height
+            # 同一实体 HeadTag 与 Blood 同时命中时 HeadTag 优先（避免两层叠加）
+
+            entity: "*"                # 实体类型（逗号分隔多个；* 或缺省 = 全部生物）
+            contains:                  # 可选：名称包含过滤（旧键 name 等效；留空=不过滤）
+            distance: 32               # 可见距离（格）
+            offsetX: 0                 # 可选：横向偏移（格，billboard 左右）
+            offsetY: 0                 # 可选：纵向偏移（格；旧键 y 等效）
+
+            血条底:
+              type: rect
+              x: -1
+              y: 0
+              width: 2
+              height: 0.5
+              color: "#AA000000"
+
+            血条前景:
+              type: rect
+              x: -0.88
+              y: 0.11
+              width: "2 * health_ratio"    # 动态宽度：随血量比例实时伸缩（0~1）
+              height: 0.28
+              color: "#FF55FF55"
+
+            血条数值:
+              type: text
+              x: 0
+              y: 0.55
+              text:
+                content: "{health}/{health_max}"   # 可选：整段删除即隐藏数值
+            """;
+
     public static final String FONT_CONFIG = """
             # 字体映射：键名即字符；区间与正则用于批量替换
+            #
+            # 这份文件同时是「本地自定义」的载体：解析规则时它最后合并，键名与服务端下发的一致
+            # 就会覆盖服务端那条。所以默认不放开任何规则——示例一旦生效就会盖掉服务器上真正
+            # 在用的贴图（示例里的 fonts/1.png 通常并不存在），表现为聊天里反复提示「字形贴图
+            # 未就绪」，替换整个失效。要用示例自己去掉注释。
 
-            肝:                         # 单字符精确替换
-              texture: fonts/1.png
-              height: 8
-              ascent: 8
-              # fps: 12                # 可选：gif 贴图的播放帧率（不写就用 gif 自带帧间隔）
-
-            数字组:                     # 区间批量：0-9 逐字符替换，贴图横向等分
-              range: 0-9
-              texture: fonts/digits.png
-              height: 12
-              ascent: 10
-
-            金色汉字:                   # 正则选字：每个命中的字符都生成替换
-              match: "[金银铜]"
-              texture: fonts/metal.png
-              height: 8
-
-            全局字体:                   # TTF 模式
-              ttf: fonts/font.ttf
+            # 肝:                       # 生僻字示例：单字符精确替换
+            #   texture: fonts/1.png
+            #   height: 8
+            #   ascent: 8
+            #   # fps: 12              # 可选：gif 贴图的播放帧率（不写就用 gif 自带帧间隔）
             """;
 
     public static final String ARMOR_LAYER = """
@@ -183,6 +215,7 @@ public final class VisualTemplates {
         m.put("ItemIcon", ITEM_ICON);
         m.put("ItemEffect", ITEM_EFFECT);
         m.put("HeadTag", HEAD_TAG);
+        m.put("Blood", BLOOD);
         m.put("FontConfig", FONT_CONFIG);
         m.put("ArmorLayer", ARMOR_LAYER);
         m.put("KeyConfig", KEY_CONFIG);

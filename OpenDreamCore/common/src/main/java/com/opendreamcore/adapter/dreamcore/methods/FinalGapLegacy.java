@@ -22,7 +22,7 @@ public final class FinalGapLegacy {
             try {
                 java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
                         .setContents(new java.awt.datatransfer.StringSelection(str(a, 0)), null);
-            } catch (Exception ignored) { }
+            } catch (Exception ignored) { /* 剪贴板不可用时静默：功能降级 */ }
             return null;
         });
         LegacyMethods.register("get_container_item_id", a -> LegacyMethods.slotItem(a, 0));

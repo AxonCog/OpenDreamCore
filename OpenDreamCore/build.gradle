@@ -25,7 +25,12 @@ activeTargets.each { targetName, tb ->
         group = 'build'
         description = "Builds ${targetName} in its independent Gradle project."
         workingDir rootDir
-        commandLine 'cmd', '/c', "${rootDir.absolutePath}\\gradlew.bat", '-p', tb.directory.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
+        // target 自带 wrapper 优先（新版本 target 的 loom/shadow 要求更高 Gradle，
+        // 根 wrapper 8.8 带不动 fabric-1.21.8+/26.1.2），无则回退根 wrapper
+        def ownWrapper = file("${rootDir}/${tb.directory}/gradlew.bat")
+        def gradlewPath = (ownWrapper.exists() ? ownWrapper.absolutePath
+                : "${rootDir.absolutePath}\\gradlew.bat").toString()
+        commandLine 'cmd', '/c', gradlewPath, '-p', tb.directory.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
     }
 }
 
@@ -56,6 +61,67 @@ tasks.register('listTargets') {
             println "${name}: ${tb.directory} [${status}]"
         }
     }
+}
+
+// listTargetsPlain：只打活跃 target 名，一行一个，不给脚本解析留活口。
+// 存在的理由：构建脚本里一旦手写 target 清单，清单就会与这里漂移——真实发生过：
+// 某个版本已经在 targetBuilds 里、也能编，但几个脚本各自的写死列表里没有它，
+// 于是它长期不参与构建，从外面看就像“这个版本根本不存在”。让脚本读这里，
+// 清单就只有一个源头，新增 target 会自动被所有脚本带上。
+tasks.register('listTargetsPlain') {
+    group = 'help'
+    description = 'Prints active target names, one per line (machine-readable).'
+    doLast {
+        activeTargets.keySet().sort().each { println it }
+    }
+}
+
+// collectAll：把三端收集目录（client / legacy / server）的当前版本产物汇入 output/all。
+// 为什么必须存在：各 target 的 collectOutput 只写到 output/client，插件写 output/server，
+// 而 output/all 是真正发布给外部的面。这一层以前只有 dev/collect-all.sh 在做，
+// 而那个脚本没挂在任何构建任务上——于是“构建成功”与“发布面更新”是两件互不相干的事，
+// 忘了跑脚本，output/all 就永远停在上一批，外面看到的还是旧包。
+// 现在收进 Gradle：collectAll 成为流水线里的一环，build（全量时）后自动跑。
+tasks.register('collectAll') {
+    group = 'build'
+    description = 'Aggregates current-version jars from output/client, output/legacy and output/server into output/all.'
+    doLast {
+        def modVersion = providers.gradleProperty('mod_version').orNull
+        if (!modVersion) {
+            throw new GradleException('mod_version 未定义，无法确定要汇总的产物版本')
+        }
+        def allDir = file('../output/all')
+        allDir.mkdirs()
+        def copied = 0
+        ['client', 'legacy', 'server'].each { part ->
+            def srcDir = file("../output/${part}")
+            if (!srcDir.exists()) { return }
+            srcDir.listFiles()?.findAll { f ->
+                f.name.endsWith(".jar") && f.name.contains("-${modVersion}.jar")
+            }?.each { f ->
+                copy { from f; into allDir }
+                copied++
+            }
+        }
+        // 发布面只允许当前版本：陈留会让外面拿到旧包
+        allDir.listFiles()?.findAll { f ->
+            f.name.endsWith('.jar') && !f.name.contains("-${modVersion}.jar")
+        }?.each { stale ->
+            stale.delete()
+            println "removed stale ${stale.name}"
+        }
+        println "collectAll: 汇总 ${copied} 个 → ${allDir.absolutePath}"
+    }
+}
+
+// buildFull：全量构建流水线 —— 编全部现代 target + 插件，然后自动汇总到 output/all。
+// 与 build 的分工：build 是单 target（-Ptarget=…）；要发布一律用 buildFull。
+tasks.register('buildFull') {
+    group = 'build'
+    description = 'Builds every active target plus the plugin, then aggregates into output/all.'
+    dependsOn activeTargets.values().collect { tasks.named(it.task) }
+    dependsOn tasks.named('buildPlugin')
+    finalizedBy tasks.named('collectAll')
 }
 
 // verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总（提交前门禁）
@@ -106,11 +172,22 @@ tasks.register('collectOutput') {
     description = 'Copy the plugin fat jar into ../output/server.'
     doLast {
         outputDir.mkdirs()
+        def modVersion = providers.gradleProperty('mod_version').orElse('').get()
+        if (!modVersion) {
+            throw new GradleException('mod_version 未在 gradle.properties 中定义，无法确定要收集的插件 fat jar 版本')
+        }
+        def expectedJar = "OpenDreamCore-Plugin-${modVersion}.jar"
+        // A5 修复：只收集当前版本的插件 fat jar，不再把历史版本一并搬进 output/server
         file('../OpenDreamCore-Plugin/plugin/build/libs').listFiles()?.each { f ->
-            if (f.name.startsWith('OpenDreamCore-Plugin-') && f.name.endsWith('.jar') && !f.name.startsWith('plugin-')) {
+            if (f.name == expectedJar) {
                 copy { from f; into outputDir }
                 println "collected ${f.name} -> ${outputDir.absolutePath}"
             }
+        }
+        // 清理 output/server 里已有的陈旧版本 jar，避免陈旧产物长期混入收集目录
+        outputDir.listFiles()?.findAll { it.name ==~ /OpenDreamCore-Plugin-.*\.jar/ && it.name != expectedJar }?.each { stale ->
+            stale.delete()
+            println "removed stale ${stale.name} from ${outputDir.absolutePath}"
         }
         println "output -> ${outputDir.absolutePath}: ${outputDir.listFiles()?.findAll { it.name.endsWith('.jar') }?.collect { it.name }}"
     }
@@ -124,3 +201,66 @@ tasks.register('buildPlugin', Exec) {
     commandLine 'cmd', '/c', "${rootDir.absolutePath}\\..\\OpenDreamCore-Plugin\\gradlew.bat", 'build', '--offline', '-x', 'test', '--console', 'plain', '--no-daemon'
 }
 tasks.named('buildPlugin').configure { finalizedBy tasks.named('collectOutput') }
+
+// verifyArtifacts：收集目录完整性门禁。
+// output/all 是发布面，少一个 jar 就意味着某个版本漏发。这类漏发在本项目里真实发生过：
+// 某个目标把产物复制进收集目录时保留了分类器后缀（-shadow），而紧接的陈旧清理按正式名
+// 判定，把它当残留删掉——于是该目标一次又一次构建成功，收集目录里却永远是旧文件，
+// 从外面看“这个版本根本没编译”。所以这里按当前版本号推出应到的全部产物名逐项核对，
+// 缺任何一个直接让构建失败，把“漏发”从一件靠人记得的事变成机器每次都会拦的事。
+tasks.register('verifyArtifacts') {
+    group = 'verification'
+    description = 'Asserts every expected jar for the current version is present and not stale in ../output/all.'
+    // 门禁必须在汇总之后跑：汇总把三端产物搬进发布面，门禁再核发布面对不对。
+    dependsOn tasks.named('collectAll')
+    mustRunAfter tasks.named('collectAll')
+    doLast {
+        def modVersion = providers.gradleProperty('mod_version').orNull
+        if (!modVersion) {
+            throw new GradleException('mod_version 未定义，无法推导应到产物清单')
+        }
+        // 每项都带上「这个名字的 jar 本该从哪个 build/libs 收上来」。门禁不只查在不在，
+        // 还查 all 里那一份是不是比来源还旧：只查在不在挡得住漏发，挡不住「构建明明成功、
+        // all 里却还躺着上一批」这种更隐蔽的漏。来源缺失时跳过新鲜度比对（对方的
+        // build/libs 可能已被单独清理），仅保留在不在的判定。
+        def entries = []
+        targetBuilds.keySet().findAll { it != 'forge-1.6.4' }.each { t ->
+            def parts = t.split('-')
+            def name = "OpenDreamCore-${parts[0]}-${parts[1]}-${modVersion}.jar".toString()
+            entries << [name: name, src: file("targets/${t}/build/libs/${name}")]
+        }
+        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+            def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
+            entries << [name: name, src: file("../OpenDreamCore-Legacy/targets/forge-${v}/build/libs/${name}")]
+        }
+        def pluginName = "OpenDreamCore-Plugin-${modVersion}.jar".toString()
+        entries << [name: pluginName, src: file("../OpenDreamCore-Plugin/plugin/build/libs/${pluginName}")]
+
+        def allDir = file('../output/all')
+        // 必须显式 toString："a-${v}" 是 GString，Set<String>.contains(GString) 恒为 false
+        // （equals 要求同类），会让门禁把所有已就位产物都误报成缺失。
+        def present = (allDir.listFiles() ?: new File[0])*.name as Set
+        def missing = entries.findAll { !present.contains(it.name) }
+
+        // 新鲜度：all 里那份不得早于来源的 mtime，早于即说明收集步骤没把新产物覆盖过来
+        def stale = []
+        if (!missing) {
+            entries.each { e ->
+                def shipped = new File(allDir, e.name)
+                if (e.src.exists() && shipped.exists() && shipped.lastModified() < e.src.lastModified()) {
+                    stale << e.name
+                }
+            }
+        }
+
+        println "verifyArtifacts: ${entries.size() - missing.size()}/${entries.size()} 就位（${allDir.absolutePath}）"
+        if (missing) {
+            missing.each { println "  MISSING ${it.name}" }
+            throw new GradleException("收集目录缺 ${missing.size} 个产物: ${missing.collect { it.name }.join(', ')}")
+        }
+        if (stale) {
+            stale.each { println "  STALE ${it}" }
+            throw new GradleException("收集目录有 ${stale.size} 个比为来源更旧（说明收集未覆盖）: ${stale.join(', ')}")
+        }
+    }
+}

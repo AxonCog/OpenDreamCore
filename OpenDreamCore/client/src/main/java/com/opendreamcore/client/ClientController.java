@@ -147,7 +147,7 @@ public final class ClientController {
                     }
                 }
             }
-        } catch (Throwable ignored) { }
+        } catch (Throwable ignored) { /* 平台 API 探测失败：换下一方案 */ }
         // 方案2：Forge/NeoForge ModList
         for (String mlClass : new String[]{"net.minecraftforge.fml.ModList", "net.neoforged.fml.ModList"}) {
             try {
@@ -170,13 +170,13 @@ public final class ClientController {
                         return String.valueOf(ver);
                     }
                 }
-            } catch (Throwable ignored) { }
+            } catch (Throwable ignored) { /* 候选平台 API 缺失：换下一候选 */ }
         }
         // 方案3：从 jar manifest 读 Implementation-Version
         try {
             String ver = ClientController.class.getPackage().getImplementationVersion();
             if (ver != null && !ver.isBlank()) return ver;
-        } catch (Throwable ignored) { }
+        } catch (Throwable ignored) { /* manifest 无版本信息：降级 unknown */ }
         return "unknown";
     }
 
@@ -287,9 +287,10 @@ public final class ClientController {
         }
     }
 
-    /** 世界内名牌渲染（RenderLevelStageEvent AFTER_ENTITIES 调用）。 */
+    /** 世界内名牌渲染（各平台世界渲染收尾阶段调用：fabric 侧 WorldRenderEvents 末段，forge/neoforge 侧 AFTER_LEVEL）。 */
     public void renderNameTags(net.minecraft.client.Camera camera, float partialTick) {
         WorldHologram.renderNameTags(worldUi.nameTags(), camera);
+        HeadTagRenderer.renderFrame(camera, partialTick); // HeadTag 整页名牌：实体 hook 登记、这里统一画
     }
 
     public ChatStore chatStore() {
@@ -369,6 +370,13 @@ public final class ClientController {
 
     /** 每 tick 检查绑定（边沿触发，一次按压只上报一次）。全局热键常驻；页面绑定仅页面打开时。 */
     public void tickBindings() {
+        // gif 帧驱动（每客户端 tick）：LooseResourceLoader.tickAll() 以前全仓无人调用，
+        // 导致所有 gif 字形恒停在第一帧（用户报「url 的 gif 不是动态」）。纯 CPU 推进。
+        try {
+            com.opendreamcore.client.resources.LooseResourceLoader.tickAll();
+        } catch (Throwable ignored) {
+            // 帧推进失败不拖垮其他 tick 逻辑
+        }
         tickScriptTasks();
         tickAnimateValues();
         tickHudClicks();
@@ -2094,6 +2102,11 @@ private boolean reloadKeyPrev;
             com.opendreamcore.packs.PackInstaller.installFromPayload(payload);
             return;
         }
+        // D3 保留通道：odc/packdata → 服务端字节分片下发的材质包（远程玩家也能拿服务端本地文件包）
+        if ("odc/packdata".equals(channel)) {
+            com.opendreamcore.packs.PackInstaller.receivePackData(payload);
+            return;
+        }
         // 视觉音效系统保留通道：SoundAPI.播放/停止 的下行指令
         // （通道常量在 Protocol，两端共用；视觉系统是 ODC 协议自身能力，走保留通道不走脚本订阅）
         if (com.opendreamcore.protocol.Protocol.CUSTOM_SOUND.equals(channel)) {
@@ -2150,7 +2163,7 @@ private boolean reloadKeyPrev;
     }
 
     /**
-     * run:/event: 语法增量（九系统通用，规则里可选声明）。
+     * run:/event: 语法增量（十系统通用，规则里可选声明）。
      *
      * 规则里写：
      *   run: "Chat.发送消息(\"规则已加载\")"   # 规则入库时执行的 DreamLang 脚本
@@ -2688,7 +2701,7 @@ private boolean reloadKeyPrev;
                 undo.push(elementEditsSnapshot(pid));
                 if (undo.size() > 64) undo.removeLast();
                 redo.clear();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) { /* 撤销栈操作失败：保持现状 */ }
         }
         @Override public String editSnapshot() {
             return elementEditsSnapshot(hudPage.id() == null ? "hud" : hudPage.id());
@@ -3769,6 +3782,11 @@ private boolean reloadKeyPrev;
         }
         // 编辑模式叠加层（聚焦面板）：对齐参考线 / 涟漪 / 幽灵影 / 三手柄（干净预览 I 时隐藏）
         if (!WorldEditor.get().worldEditPreview && worldNodes != null && worldPage != null) {
+            // 编辑叠加层同属世界绘制点：按同一契约成对进出状态守卫。
+            // 这里是一长串编辑器辅助绘制（参考线/溣漪/幽灵影/三手柄），逐个包守卫不现实；
+            // 在接受层包一层即可，出入时按进入前原值真还原，异常也一定走到还原（finally）。
+            RenderGuard editGuard = RenderGuard.enterWorldHolo();
+            try {
             // 镜像翻转 ghost 预览（对齐屏悬停镜像按钮：半透明轮廓显示翻转结果位置；x/y 可同时）
             if (WorldEditor.get().worldEditMode && !worldMirrorPreviewAxes.isEmpty() && WorldEditor.get().worldEditSelected != null) {
                 List<String> members;
@@ -3993,7 +4011,10 @@ private boolean reloadKeyPrev;
                             worldBorderColorOf(findWorldNode(WorldEditor.get().worldEditSelected)));
                 }
             }
-        forceCloseTesselator();
+            } finally {
+                forceCloseTesselator();
+                editGuard.close();
+            }
         }
         WorldEditor.get().tickWorldInteraction(camera);
 
@@ -9844,8 +9865,10 @@ private boolean reloadKeyPrev;
     private static void dumpLayout(String pageId, double bw, double bh,
                                    List<RenderNode> design, List<RenderNode> screen) {
         Viewport vp = Viewport.active();
-        System.out.println("[ODC layout] page=" + pageId + " design=" + (int) bw + "x" + (int) bh
-                + " s=" + vp.scale() + " ox=" + (int) vp.offsetX() + " oy=" + (int) vp.offsetY());
+        if (Boolean.getBoolean("odc.debug")) {
+            System.out.println("[ODC layout] page=" + pageId + " design=" + (int) bw + "x" + (int) bh
+                    + " s=" + vp.scale() + " ox=" + (int) vp.offsetX() + " oy=" + (int) vp.offsetY());
+        }
         dumpLayoutNodes(design, screen, "  ");
     }
 
@@ -9854,8 +9877,10 @@ private boolean reloadKeyPrev;
         for (int i = 0; i < design.size(); i++) {
             RenderNode d = design.get(i);
             RenderNode s = screen != null && i < screen.size() ? screen.get(i) : null;
-            System.out.println(ind + d.id()
-                    + " design=" + fmt(d) + (s == null ? "" : " screen=" + fmt(s)));
+            if (Boolean.getBoolean("odc.debug")) {
+                System.out.println(ind + d.id()
+                        + " design=" + fmt(d) + (s == null ? "" : " screen=" + fmt(s)));
+            }
             dumpLayoutNodes(d.children(), s == null ? null : s.children(), ind + "  ");
         }
     }
@@ -10226,7 +10251,7 @@ private boolean reloadKeyPrev;
 
     /**
      * 收到服务端视觉规则同步：
-     * 九系统的规则 YAML 原文入库到客户端仓库，各渲染钩子按需读取。
+     * 十系统的规则 YAML 原文入库到客户端仓库，各渲染钩子按需读取。
      * 解析失败的单条 warn 跳过——坏规则不影响其他系统。
      */
     public void handleVisualRules(com.opendreamcore.protocol.message.VisualRulesSync sync) {
@@ -10246,7 +10271,7 @@ private boolean reloadKeyPrev;
             LOGGER.info("视觉规则已应用：{} 个系统 / {} 条",
                     sync.toBundles().size(), sync.entries().size());
             // run:/event: 语法增量：规则入库时触发脚本与事件总线
-            // （九系统通用，规则里可选声明；客户端用客户端方法/总线执行）
+            // （十系统通用，规则里可选声明；客户端用客户端方法/总线执行）
             applyRuleScripts(bundles);
             // WorldTexture / HeadTag 规则 → 世界面板实例化（本地规则加载同用，见 applyVisualWorldPages）
             applyVisualWorldPages(bundles);
@@ -10256,7 +10281,9 @@ private boolean reloadKeyPrev;
     }
 
     /**
-     * WorldTexture / HeadTag 规则 → 世界面板实例化（复用 openWorld 既有管线）。
+     * WorldTexture 规则 → 世界面板实例化（复用 openWorld 既有管线）。
+     * HeadTag 不走这里：它逐实体渲染（MixinNameTag + HeadTagRenderer），
+     * 单实例悬空面板既锚不住实体也吃不到逐实体变量。
      * 重载先清旧的：规则集变化时旧面板可能已不匹配新规则，不清理会残留幽灵面板。
      * handleVisualRules（服务端下发）与 reloadAll（本地规则）共用这一处。
      */
@@ -10264,7 +10291,7 @@ private boolean reloadKeyPrev;
         if (bundles == null) {
             return;
         }
-        for (var sys : List.of("WorldTexture", "HeadTag")) {
+        for (var sys : List.of("WorldTexture")) {
             // 收集本系统的全部页面 id（重载前逐个关闭，只关系统自己的，不误伤手动开的面板）
             var ruleIds = bundles.getOrDefault(sys, Map.of()).keySet();
             for (String rid : ruleIds) {
@@ -10387,14 +10414,27 @@ private boolean reloadKeyPrev;
             java.nio.file.Files.createDirectories(dir);
             var templates = com.opendreamcore.visual.VisualTemplates.all();
             for (String sys : templates.keySet()) {
+                if ("HeadTag".equals(sys) || "Blood".equals(sys)) {
+                    // 头顶两系统（HeadTag/Blood）默认文件夹脚手架：visual/<系统名>/ 一文件一规则
+                    //（文件名=规则 id）；旧版单文件 visual/<系统名>.yml 兼容读取（规则 id _local）。
+                    Map<String, String> sysBundle = loadFolderSystemRules(dir, sys, templates.get(sys));
+                    if (!sysBundle.isEmpty()) {
+                        bundles.put(sys, sysBundle);
+                    }
+                    continue;
+                }
                 Path f = dir.resolve(sys + ".yml");
                 if (!java.nio.file.Files.isRegularFile(f)) {
-                    // 缺省生成模板示例（与插件 ensureDefault 同一套），用户没写就不生效
+                    // 缺省生成模板示例（与插件 ensureDefault 同一套）。
+                    // 模板即默认规则：只有 FontConfig 默认生效（生僻字展示），
+                    // 其它系统模板只是示例——没写规则就不加载，避免空规则干扰。
                     try {
                         com.opendreamcore.visual.VisualRules.ensureDefault(dir, sys, templates.get(sys));
                     } catch (Exception ignored) {
                     }
-                    continue;
+                    if (!"FontConfig".equals(sys)) {
+                        continue;
+                    }
                 }
                 String text = java.nio.file.Files.readString(f);
                 if (text == null || text.isBlank()) {
@@ -10413,6 +10453,57 @@ private boolean reloadKeyPrev;
             LOGGER.warn("本地视觉规则加载失败: {}", e.toString());
         }
         return bundles;
+    }
+
+    /**
+     * 头顶系统（HeadTag/Blood）本地规则装载：文件夹形态优先
+     *（visual/<系统名>/ 一文件一规则，文件名 = 规则 id，与插件侧
+     * VisualRules.load 同语义），旧版单文件 visual/<系统名>.yml 兼容读取
+     *（规则 id _local）。两形态都缺失时落一份 <系统名>/示例.yml 默认模板，
+     * 当次即加载，改完 /codc reload 生效。
+     */
+    private Map<String, String> loadFolderSystemRules(Path dir, String system, String template) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        try {
+            Path folder = dir.resolve(system);
+            Path legacy = dir.resolve(system + ".yml");
+            if (!java.nio.file.Files.isDirectory(folder)
+                    && !java.nio.file.Files.isRegularFile(legacy)) {
+                java.nio.file.Files.createDirectories(folder);
+                // 复用 VisualRules.ensureDefault：在文件夹内写 示例.yml
+                com.opendreamcore.visual.VisualRules.ensureDefault(folder, "示例", template);
+            }
+            if (java.nio.file.Files.isRegularFile(legacy)) {
+                String text = java.nio.file.Files.readString(legacy);
+                if (text != null && !text.isBlank()) {
+                    out.put("_local", text);
+                }
+            }
+            if (java.nio.file.Files.isDirectory(folder)) {
+                try (var stream = java.nio.file.Files.walk(folder)) {
+                    var files = stream.filter(java.nio.file.Files::isRegularFile)
+                            .filter(p -> {
+                                String n = p.getFileName().toString()
+                                        .toLowerCase(java.util.Locale.ROOT);
+                                return n.endsWith(".yml") || n.endsWith(".yaml");
+                            })
+                            .sorted()
+                            .toList();
+                    for (Path p : files) {
+                        String id = folder.relativize(p).toString().replace('\\', '/')
+                                .replaceAll("\\.(ya?ml)$", "");
+                        String text = java.nio.file.Files.readString(p);
+                        if (text == null || text.isBlank()) {
+                            continue;
+                        }
+                        out.put(id, text);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("{} 本地规则加载失败: {}", system, e.toString());
+        }
+        return out;
     }
 
     /**
@@ -10602,6 +10693,8 @@ private boolean reloadKeyPrev;
             serverPages.put(pid, page);
             LOGGER.info("收到服务端页面 {}（{}，解析出 {} 元素）", pid,
                     sync.encrypted() ? "加密" : "明文", page.elements() == null ? -1 : page.elements().size());
+            // 远程 url 资源预取：页面一下发就后台下载纹理（gif/图片），渲染时直接命中
+            com.opendreamcore.client.remote.RemotePrefetch.scanAndPrefetch(page.elements());
             // 自动挂载：display:hud → openHud；display:world → openWorld。
             // 同 id 已挂载时跳过，避免与服务端 PAGE_CONTROL OPEN 重复触发两遍脚本/提示
             if (page.displayMode() == com.opendreamcore.page.DisplayMode.HUD) {
@@ -10821,7 +10914,7 @@ private boolean reloadKeyPrev;
         if (protoOk) {
             // 协议一致但 mod 版本不同（黄色提醒，不断开）——一行说清，不展开两行
             mc.player.displayClientMessage(Component.literal(
-                    "§e[OpenDreamCore] §e客户端 v" + CLIENT_VERSION + " ↔ 服务端 v" + ack.modVersion()
+                    "§e[OpenDreamCore] §e客户端 v" + clientVersion() + " ↔ 服务端 v" + ack.modVersion()
                             + " §7(协议一致，建议两端统一版本)"), false);
             return;
         }

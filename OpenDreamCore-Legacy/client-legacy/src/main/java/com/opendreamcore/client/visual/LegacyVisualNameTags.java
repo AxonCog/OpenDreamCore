@@ -68,7 +68,15 @@ public final class LegacyVisualNameTags {
                 if (ir == null) {
                     continue;
                 }
-                String name = ir.get("name") == null ? null : String.valueOf(ir.get("name"));
+                // 名称包含：name 优先、contains/包含 兼底（跟现代端 firstOf 同序）
+                Object nameRaw = ir.get("name");
+                if (nameRaw == null) {
+                    nameRaw = ir.get("contains");
+                }
+                if (nameRaw == null) {
+                    nameRaw = ir.get("包含");
+                }
+                String name = nameRaw == null ? null : String.valueOf(nameRaw);
                 out.add(new Entry(MatchSpec.parse(ir), name, parseStyle(ir)));
             } catch (Exception ignored) {
                 // 单文件坏了跳过

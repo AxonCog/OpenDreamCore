@@ -17,12 +17,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 头顶名牌（1.16.5）：EntityRenderer.renderNameTag 出点拦下，命中规则就
  * billboard 自绘文字顶掉原版（颜色生效；背景简化版不做，见 SYNC-MATRIX）。
- * 1.16.5 这个 target 编译类路径是 mojmap 名（mc.font / camera.rotation()）。
+ *
+ * 两类名字要分清：Java 代码里引用的类/方法写源码名（编译期是 mojmap，重混淆会改字节码引用）；
+ * 而 @Inject 里那个字符串重混淆不管，运行时又没有任何东西把它翻成 srg——所以它必须直接写 srg 名。
  */
 @Mixin(EntityRenderer.class)
 public abstract class MixinNameTag {
 
-    @Inject(method = "renderNameTag(Lnet/minecraft/entity/Entity;"
+    @Inject(method = "func_225629_a_(Lnet/minecraft/entity/Entity;"
             + "Lnet/minecraft/util/text/ITextComponent;"
             + "Lcom/mojang/blaze3d/matrix/MatrixStack;"
             + "Lnet/minecraft/client/renderer/IRenderTypeBuffer;I)V",

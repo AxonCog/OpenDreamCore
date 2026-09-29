@@ -24,12 +24,17 @@ public final class CompatBuffer implements AutoCloseable {
     private static final java.util.Set<CompatBuffer> LIVE = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** 扫排查日志节流。 */
     private static volatile long lastSweepLog = 0L;
+    /** discard 诊断日志节流。 */
+    private static volatile long lastDiscardLog;
     /** 是否已在注册表：防止重复登记。 */
     private boolean registered;
     /** draw 成功后置 true：帧末清扫时不再动它（已绘制、bb 状态正常）。 */
     private volatile boolean failedAfterDraw;
     /** begin() 时的业务调用者签名，用于定位创建但不绘的泄漏源。 */
     private final String creator;
+
+    /** 世界语义渲染类型（世界绘制专用；null = 走原有上传/立即模式路径）。 */
+    private Object worldRenderType;
 
     CompatBuffer(Object mode, Object format) {
         this.mode = mode;
@@ -52,7 +57,7 @@ public final class CompatBuffer implements AutoCloseable {
                 // 跳过登记/惰性创建链，找到真正发起的业务方法
                 return n + "." + e.getMethodName() + "(" + e.getLineNumber() + ")";
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { /* 栈回溯失败不影响功能，降级为 unknown */ }
         return "unknown";
     }
 
@@ -93,39 +98,87 @@ public final class CompatBuffer implements AutoCloseable {
                     bb = built;
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { /* 独立分配失败：走下方 Tesselator 兜底路径 */ }
         if (bb == null) {
-            // 兜底：老路径走 Tesselator（仅当独立分配失败时）
-            var t = com.mojang.blaze3d.vertex.Tesselator.getInstance();
-            if (CompatRender.modernBegin()) {
+            // 旧世代（1.20.1）没有独立的 ByteBufferBuilder，上面那条路必然落空。
+            // 这代必须自建 BufferBuilder(int)——它自己向 MemoryTracker 申请缓冲，等价于
+            // 原版 Tesselator 的内部做法。绝不能退到 Tesselator 单例：那是原版 GUI 正在用的
+            // 同一个 builder，我们 begin 之后原版下一帧 begin 就撞 "Already building!"
+            // （1.20.1 实机崩溃报告 2026-09-27 08:00:56，栈顶 BufferBuilder.m_166779_）。
+            if (!CompatRender.modernBegin()) {
+                try {
+                    Object built = tryCreateOwnBufferBuilder(4096);
+                    if (built != null) {
+                        Method bm = CompatRender.resolveMethod(built.getClass(), "begin",
+                                mode.getClass(), format.getClass());
+                        if (bm != null) {
+                            bm.invoke(built, mode, format);
+                            bb = built;
+                        }
+                    }
+                } catch (Throwable ignored) { /* 自建失败：dead 标记兜底 */ }
+            } else {
+                // ≥1.20.2 的 Tesselator.begin 每次都新分配一个 BufferBuilder（非共享单例），
+                // 因此这里保留兜底不会污染原版；仅在独立分配意外失败时才会走到。
+                var t = com.mojang.blaze3d.vertex.Tesselator.getInstance();
                 Method m = CompatRender.resolveMethod(t.getClass(), "begin",
                         mode.getClass(), format.getClass());
                 if (m != null) {
                     try {
                         bb = m.invoke(t, mode, format);
-                    } catch (Exception ignored) {
-                    }
-                }
-            } else {
-                Method gb = CompatRender.resolveMethod(t.getClass(), "getBuilder");
-                if (gb != null) {
-                    try {
-                        bb = gb.invoke(t);
-                        Method bm = CompatRender.resolveMethod(bb.getClass(), "begin",
-                                mode.getClass(), format.getClass());
-                        if (bm != null) {
-                            bm.invoke(bb, mode, format);
-                        } else {
-                            bb = null;
-                        }
-                    } catch (Exception ignored) {
-                        bb = null;
-                    }
+                    } catch (Exception ignored) { /* 反射调用失败：dead 标记兜底 */ }
                 }
             }
         }
         if (bb == null) {
             dead = true;
+        }
+    }
+
+    /**
+     * 供世界渲染自建独立批次源用：新建一个自有 ByteBufferBuilder（拿不到返回 null）。
+     * 与 tryCreateByteBufferBuilder(int) 同一条路，只是把入口开放出来。
+     */
+    static Object newByteBufferBuilder(int capacity) {
+        try {
+            return tryCreateByteBufferBuilder(capacity);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 释放一个自有 ByteBufferBuilder。
+     *
+     * <p><b>为什么优先用 AutoCloseable.close() 而不是反射找 discard()：</b>
+     * ByteBufferBuilder 的 0 参方法有 build / clear / discard / close 四个，而 Fabric 生产环境
+     * 方法名是 intermediary，按名必失后「按形状兜底」就是在四个里抽签：
+     * 抽中 clear() → resultCount>0 时逐帧刷 "Clearing BufferBuilder with unused batches"；
+     * 抽中 build() → 凭空建出一个没人关的 Result（同样是泄漏，resultCount 只增不减）。
+     * 而 close() 是 java.lang.AutoCloseable 的接口方法——名字无关、映射无关，且原版实现里
+     * close() → discardResults() 会把 resultCount 归零、不报警。所以原则是：
+     * 接口优先，名字精确次之，<b>绝不做形状兜底</b>。
+     *
+     * <p>（1.20.1 无 ByteBufferBuilder，本方法只会在 null 上被调用 → 直接返回。）
+     */
+    static void releaseBuffer(Object byteBuf) {
+        if (byteBuf == null) {
+            return;
+        }
+        // 首选：接口方法，名字无关。close() 会释放其中全部 Result。
+        if (byteBuf instanceof AutoCloseable auto) {
+            try {
+                auto.close();
+                return;
+            } catch (Throwable ignored) {
+                // 落到下面的名字精确兜底
+            }
+        }
+        // 次选：名字精确（dev / NeoForge mojmap 能命中 discard）。
+        try {
+            byteBuf.getClass().getMethod("discard").invoke(byteBuf);
+        } catch (Throwable ignored) {
+            // 名字也拿不到（Fabric 生产）→ 置 null 交 GC，不冒险乱调
         }
     }
 
@@ -151,13 +204,69 @@ public final class CompatBuffer implements AutoCloseable {
                         return ctor.newInstance(capacity, 1L << 28);
                     if (ps.length == 1 && ps[0] == long.class) return ctor.newInstance((long) capacity);
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { /* 候选类不存在/构造失败：换下一候选或返回 null */ }
         }
         return null;
     }
 
+    /**
+     * 旧世代（1.20.1）专用：自建 BufferBuilder。这代 BufferBuilder 只有一个 int 容量构造，
+     * 缓冲由它自己向 MemoryTracker 申请，没有独立的 ByteBufferBuilder 对象。
+     * 严格按「单 int 参数构造」匹配，不接受其它形状——构造选错会在顶点写入时炸在很远的地方。
+     */
+    private static Object tryCreateOwnBufferBuilder(int capacity) {
+        for (String cn : new String[]{
+                "com.mojang.blaze3d.vertex.BufferBuilder",
+                CompatRender.mapClassName("com.mojang.blaze3d.vertex.BufferBuilder")}) {
+            try {
+                Class<?> c = Class.forName(cn, false, CompatBuffer.class.getClassLoader());
+                for (java.lang.reflect.Constructor<?> ctor : c.getConstructors()) {
+                    Class<?>[] ps = ctor.getParameterTypes();
+                    if (ps.length == 1 && ps[0] == int.class) {
+                        return ctor.newInstance(capacity);
+                    }
+                }
+            } catch (Throwable ignored) { /* 候选名不存在/无单 int 构造：换下一候选 */ }
+        }
+        return null;
+    }
+
+    /**
+     * 找「结束并交付批次」的方法：名字优先，失败则按返回类型认。
+     * 不能只按参数形状兜底：1.20.1 生产环境方法名是 SRG（end → m_231168_/m_231175_），
+     * 按名字查必失，而零参方法里还有 isBuilding() 这类探针，形状匹配会把它们当 end 选中，
+     * 结果是批次从未真正结束、builder 永远停在 building 态——这正是 "Already building!" 的成因。
+     * 所以兜底必须认「返回值是批次容器」，与名字无关。
+     */
+    private static Method resolveBuildMethod(Class<?> owner) {
+        for (String n : new String[]{"buildOrThrow", "build", "end"}) {
+            Method m = CompatRender.resolveMethod(owner, n);
+            if (m != null && isBatchContainer(m.getReturnType())) {
+                return m;
+            }
+        }
+        for (Method m : owner.getMethods()) {
+            if (m.getDeclaringClass() != Object.class
+                    && m.getParameterCount() == 0
+                    && isBatchContainer(m.getReturnType())) {
+                return m;
+            }
+        }
+        // 最后退回纯名字（老行为）：未知世代宁可试一次，也不要在已可用的版本上退化。
+        return CompatRender.resolveMethod(owner, "buildOrThrow");
+    }
+
+    /** 批次容器类型判定：1.20.1=RenderedBuffer；1.21.x=MeshData；部分快照=BuiltBuffer。 */
+    private static boolean isBatchContainer(Class<?> rt) {
+        if (rt == null || rt == void.class || rt.isPrimitive()) {
+            return false;
+        }
+        String n = rt.getSimpleName();
+        return n.contains("RenderedBuffer") || n.contains("MeshData") || n.contains("BuiltBuffer");
+    }
+
     private static Object tryCreateBufferBuilder(Object byteBuf, Object mode, Object format) {
-        // 同上：名走 mapClassName；构造按 (byteBuf类型, mode类型, format类型) 精确形态匹配，
+        // 名走 mapClassName；构造按 (byteBuf类型, mode类型, format类型) 精确形态匹配，
         // 防将来多一个 3 参构造（如 (int,long,int)）时被盲试猜中抛 ClassCastException。
         try {
             Class<?> byteBufClass = byteBuf.getClass();
@@ -172,12 +281,12 @@ public final class CompatBuffer implements AutoCloseable {
                         var ps = ctor.getParameterTypes();
                         if (ps.length == 3 && ps[0].isAssignableFrom(byteBufClass)
                                 && ps[1].isAssignableFrom(modeClass) && ps[2].isAssignableFrom(formatClass)) {
-                            try { return ctor.newInstance(byteBuf, mode, format); } catch (Throwable ignored) {}
+                            try { return ctor.newInstance(byteBuf, mode, format); } catch (Throwable ignored) { /* 形态不符：继续试下一构造 */ }
                         }
                     }
-                } catch (ClassNotFoundException ignored) {}
+                } catch (ClassNotFoundException ignored) { /* 候选类名不存在：换下一候选 */ }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { /* 全候选失败：返回 null 由调用方兜底 */ }
         return null;
     }
 
@@ -188,8 +297,7 @@ public final class CompatBuffer implements AutoCloseable {
             if (m != null) {
                 try {
                     m.invoke(pendingVertex);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) { /* endVertex 失败：后续 build 会校验状态 */ }
             }
             pendingVertex = null;
         }
@@ -214,8 +322,7 @@ public final class CompatBuffer implements AutoCloseable {
             // （原先静默丢顶点 → 空 mesh build 失败 → 共享 Tesselator 残留刷警告）
             org.joml.Vector3f p = m.transformPosition(x, y, z, new org.joml.Vector3f());
             return addVertexRaw(p.x, p.y, p.z);
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) { /* 顶点反射失败：丢弃该顶点，不拖垮帧 */ }
         return this;
     }
 
@@ -234,8 +341,7 @@ public final class CompatBuffer implements AutoCloseable {
                 pendingVertex = m.invoke(bb, x, y, z);
                 legacy = !CompatRender.modernBegin();
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) { /* 顶点反射失败：丢弃该顶点 */ }
         return this;
     }
 
@@ -285,8 +391,7 @@ public final class CompatBuffer implements AutoCloseable {
         if (m != null) {
             try {
                 m.invoke(pendingVertex, args);
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) { /* 属性反射失败：跳过该属性 */ }
         }
     }
 
@@ -301,10 +406,8 @@ public final class CompatBuffer implements AutoCloseable {
             sweepSelf();
             return;
         }
-        flushPending();
-        try {
-            String buildName = CompatRender.modernBegin() ? "buildOrThrow" : "end";
-            Method build = CompatRender.resolveMethod(bb.getClass(), buildName);
+        flushPending();        try {
+            Method build = resolveBuildMethod(bb.getClass());
             Object mesh = null;
             try { mesh = build == null ? null : build.invoke(bb); } catch (Throwable t) {
                 // 任何异常：空缓冲/状态错/版本差异 —— 主动丢弃防 unused batches 泄漏。
@@ -319,6 +422,16 @@ public final class CompatBuffer implements AutoCloseable {
             }
             if (mesh == null) {
                 safeDiscardAndClear();
+                return;
+            }
+            // 世界语义路径优先：这批几何挂着世界渲染类型（不写深度/双面/透明）时，
+            // 交给渲染类型自己把网格送出去。它是光影认得的可归类路径，比裸着色器上传安全得多；
+            // 成功则不再走下面的 BufferUploader 尝试。
+            if (worldRenderType != null
+                    && com.opendreamcore.client.render.WorldRenderTypeDispatch.draw(worldRenderType, mesh)) {
+                try { ((AutoCloseable) mesh).close(); } catch (Throwable ignored) { /* close 失败无补救手段：静默 */ }
+                failedAfterDraw = false;
+                sweepSelf();
                 return;
             }
             // BufferUploader 在 >=1.21.8 可能移位/改名；且 Fabric 生产环境类名也是 intermediary：
@@ -339,7 +452,7 @@ public final class CompatBuffer implements AutoCloseable {
                     // 单参 mesh
                     Method m = CompatRender.resolveMethod(uploader, mn, mesh.getClass());
                     if (m != null) {
-                        try { m.invoke(null, mesh); drawn = true; break; } catch (Exception ignored) {}
+                        try { m.invoke(null, mesh); drawn = true; break; } catch (Exception ignored) { /* 此签名不匹配：换下一个 */ }
                     }
                     // 双参 mesh + PoseStack
                     Class<?> pose = CompatRender.poseStackClass();
@@ -347,7 +460,7 @@ public final class CompatBuffer implements AutoCloseable {
                         m = CompatRender.resolveMethod(uploader, mn, mesh.getClass(), pose);
                         if (m != null) {
                             Object ps = CompatRender.currentPoseStack();
-                            if (ps != null) { try { m.invoke(null, mesh, ps); drawn = true; break; } catch (Exception ignored) {} }
+                            if (ps != null) { try { m.invoke(null, mesh, ps); drawn = true; break; } catch (Exception ignored) { /* PoseStack 形态没画成：试 MatrixStack */ } }
                         }
                     }
                     // 双参 mesh + MatrixStack
@@ -356,13 +469,17 @@ public final class CompatBuffer implements AutoCloseable {
                         m = CompatRender.resolveMethod(uploader, mn, mesh.getClass(), mstack);
                         if (m != null) {
                             Object ms = CompatRender.currentMatrixStack();
-                            if (ms != null) { try { m.invoke(null, mesh, ms); drawn = true; break; } catch (Exception ignored) {} }
+                            if (ms != null) { try { m.invoke(null, mesh, ms); drawn = true; break; } catch (Exception ignored) { /* 最后一种签名：再失败就走 RenderType 兕底 */ } }
                         }
                     }
                 }
                 if (drawn) break;
             }
             if (drawn) {
+                // 关键修复：上传成功后必须释放 mesh（BuiltBuffer.close），
+                // 否则底层 ByteBufferBuilder 的 Result 永远不释放，帧末 clear 时
+                // resultCount>0 → 每帧 "Clearing BufferBuilder with unused batches" 刷屏。
+                try { ((AutoCloseable) mesh).close(); } catch (Throwable ignored) { /* close 失败无补救手段：静默 */ }
                 failedAfterDraw = false;
                 sweepSelf();
                 return;
@@ -370,6 +487,7 @@ public final class CompatBuffer implements AutoCloseable {
             // 绘制口全落空：1.21.9+ 管线重构后 BufferUploader 已删，
             // 改走 RenderType.draw(MeshData)（原版自刷新路径，新管线兼容）
             if (drawViaRenderType(mesh)) {
+                try { ((AutoCloseable) mesh).close(); } catch (Throwable ignored) { /* close 失败无补救手段：静默 */ }
                 failedAfterDraw = false;
                 sweepSelf();
                 return;
@@ -383,8 +501,7 @@ public final class CompatBuffer implements AutoCloseable {
                     Method rel = mesh.getClass().getMethod("release");
                     rel.setAccessible(true);
                     rel.invoke(mesh);
-                } catch (Throwable ignored) {
-                }
+                } catch (Throwable ignored) { /* release 也失败：无法再补救，静默 */ }
             }
             sweepSelf();
         } catch (Throwable ignored) {
@@ -401,28 +518,72 @@ public final class CompatBuffer implements AutoCloseable {
         }
     }
 
+    /**
+     * 排空在途批次：1.21.1 的 BufferBuilder 无 discard()，begin 过但未 build 的 builder
+     * 直接 clear() 会触发 vanilla "Clearing BufferBuilder with unused batches" 警告刷屏。
+     * 先调 build()（空 mesh 不抛；buildOrThrow 会抛所以只作兜底）把在途批次消费掉并释放
+     * 返回的 MeshData，building 状态归位，随后的 clear() 即静默。
+     * 1.20.1 无 build/buildOrThrow（叫 end，且自带 discard）→ 找不到方法直接返回，无害。
+     */
+    private static void drainInFlightBatch(Object b) {
+        Method m = resolveBuildMethod(b.getClass());
+        if (m != null) {
+            try {
+                Object mesh = m.invoke(b);
+                if (mesh instanceof AutoCloseable c) {
+                    try { c.close(); } catch (Throwable ignored) { /* mesh 释放失败：静默 */ }
+                }
+            } catch (Throwable ignored) {
+                // 未在 building 状态 / 空 mesh 版本差异：静默，clear() 会接着收尾
+            }
+        }
+    }
+
     /** 统一丢弃底层缓冲，防 unused batches 泄漏 / 自持缓冲无限增长。 */
     private void safeDiscardAndClear() {
+        long now = System.currentTimeMillis();
+        if (now - lastDiscardLog > 4000L) {
+            lastDiscardLog = now;
+            if (Boolean.getBoolean("odc.debug")) {
+                System.out.println("[ODC-diag] CompatBuffer.safeDiscardAndClear 来源=" + creator
+                        + " 注册表=" + LIVE.size());
+            }
+        }
         Object b = bb;
         Object byteBuf = this.byteBuf;
         if (b != null) {
-            // 新版（≥1.21.9）BufferBuilder 自带 discard；1.21.8 无此方法，靠自有 ByteBufferBuilder 兼平
-            try { Method discard = CompatRender.resolveMethod(b.getClass(), "discard"); if (discard != null) discard.invoke(b); } catch (Throwable ignored) {}
-            try { Method clear = CompatRender.resolveMethod(b.getClass(), "clear"); if (clear != null) clear.invoke(b); } catch (Throwable ignored) {}
+            // 先排空在途批次再 discard/clear：1.21.1 无 discard，builder 仍处 building 状态时
+            // 直接 clear() 会每帧刷 "Clearing BufferBuilder with unused batches"（1.21.1 实证）。
+            drainInFlightBatch(b);
+            // 这里绝不能用 CompatRender.resolveMethod（名字盲形状兜底）：1.21.1 的 BufferBuilder
+            // 0 参公开方法只有 build() / buildOrThrow()（无 discard、无 clear），名字查不到时兜底必然
+            // 抽中这两个，而调用方把返回值丢掉 → 每帧凭空泄漏一个 MeshData、resultCount 只增不减，
+            // 紧接着的 clear() 就必刷 "Clearing BufferBuilder with unused batches"（本警告的真正成因）。
+            // 只有「名字精确命中」时才调（dev / NeoForge mojmap：≥1.21.9 的 BufferBuilder.discard）；
+            // 在途批次由上面的 drainInFlightBatch 按「返回类型是批次容器」类型驱动地排空，不靠名字。
+            try {
+                b.getClass().getMethod("discard").invoke(b);
+            } catch (Throwable ignored) {
+                // 无此方法 / 名字被映射：交给 drainInFlightBatch + 下面的 byteBuf 接口释放收尾
+            }
             bb = null;
         }
-        // 自有 ByteBufferBuilder（独立分配路径才有）：discard 把 resultCount 归零，
-        // 否则 build 计数只增不减，自持缓冲越用越大（Tesselator 兜底路径 byteBuf==null，不碰共享单例）。
+        // 自有 ByteBufferBuilder（独立分配路径才有）：用接口方法释放，绝不按名字/形状猜方法。
+        // （Tesselator 兜底路径 byteBuf==null，不会碰到共享单例。）
         if (byteBuf != null) {
-            try {
-                Method discard = CompatRender.resolveMethod(byteBuf.getClass(), "discard");
-                if (discard != null) {
-                    discard.invoke(byteBuf);
-                }
-            } catch (Throwable ignored) {}
+            // 接口方法 close() 收尾：名字无关、不报警（详见 releaseBuffer 的注释）。
+            releaseBuffer(byteBuf);
             this.byteBuf = null;
         }
         sweepSelf();
+    }
+
+    /**
+     * 把本批次挂上世界语义渲染类型：构建出的网格改走渲染类型自刷新路径（光影可归类），
+     * 不再依赖立即模式裸着色器上传。由 {@link CompatRender#beginWorld} 调用。
+     */
+    void useWorldRenderType(Object renderType) {
+        this.worldRenderType = renderType;
     }
 
     @Override
@@ -499,8 +660,7 @@ public final class CompatBuffer implements AutoCloseable {
             for (String n : new String[]{cn, CompatRender.mapClassName(cn)}) {
                 try {
                     return Class.forName(n, false, CompatBuffer.class.getClassLoader());
-                } catch (ClassNotFoundException ignored) {
-                }
+                } catch (ClassNotFoundException ignored) { /* 候选类不存在：换下一候选 */ }
             }
         }
         return null;

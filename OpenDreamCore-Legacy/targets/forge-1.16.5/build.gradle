@@ -11,13 +11,15 @@ buildscript {
 apply plugin: 'net.minecraftforge.gradle'
 apply plugin: 'java'
 
-version = '0.1.2.1'
+version = '0.1.2.2'
 group = 'com.opendreamcore'
 archivesBaseName = 'OpenDreamCore-Legacy-forge-1.16.5'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        // 固定 JDK 8：本版必须产出 Java 8 字节码，且不能用 --release ——
+        // ForgeGradle 内部的再编译任务也吃这条工具链，JDK 8 的 javac 不认 --release
+        languageVersion = JavaLanguageVersion.of(8)
     }
 }
 
@@ -40,7 +42,8 @@ dependencies {
 
 tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
-    options.release = 8
+    // 这里不能设 options.release：本 target 走 JDK 8 工具链，JDK 8 的 javac 没有 --release
+    // 选项，一旦设上就会让 ForgeGradle 的再编译任务整条失败；Java 8 字节码由 JDK 8 工具链本身保证
 }
 
 minecraft {
@@ -95,3 +98,11 @@ task collectLegacyOutput {
 }
 build.dependsOn collectLegacyOutput
 
+
+// 版本号必须进 up-to-date 检查键并模板展开：否则改版本时描述符陈旧（内嵌 mods.toml 与文件名脱节）
+processResources {
+    inputs.property 'version', project.version.toString()
+    filesMatching('META-INF/mods.toml') {
+        expand 'version': project.version
+    }
+}

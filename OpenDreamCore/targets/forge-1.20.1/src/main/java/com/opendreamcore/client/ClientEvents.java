@@ -55,7 +55,9 @@ public final class ClientEvents {
 
     /** 世界全息渲染（实体渲染后一帧）。1.20.1 的 partialTick 直接是 float。 */
     public static void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
+        // AFTER_LEVEL（世界渲染最末阶段）：面板是世界上的叠加元素，放实体中段会在原版
+        // 还在攒实体/粒子批次时插进去，开光影时几何落错 gbuffer 阶段。
+        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
             // 防崩兜底：世界面板绘制异常只丢当帧，不允许炸掉整个游戏
             try {
                 var controller = ClientController.get();

@@ -11,8 +11,9 @@
     "MixinItemIcon",
     "MixinItemEffect",
     "MixinTooltip",
-    "MixinGuiText",
-    "MixinGuiGraphicsExtractor"
+    "MixinGuiGraphicsExtractor",
+    "FontSetSourceMixin",
+    "WorldRenderTypeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

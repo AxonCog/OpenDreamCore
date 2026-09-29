@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 /**
  * 自定义材质包编排器：spec（本地路径或 https url）→ 下载/定位 → 解压校验（可选密码）
@@ -100,24 +101,244 @@ public final class PackInstaller {
             } catch (Exception e) {
                 r = new Result(false, "准备失败: " + e.toString());
             }
-            final Result fr = r;
-            final Path fex = extracted;
-            net.minecraft.client.Minecraft.getInstance().execute(() -> {
-                if (!fr.ok()) {
-                    chat(fr.message());
-                    return;
-                }
-                var injector = ResourcePackInjector.current();
-                boolean ok = injector != null && injector.inject(fex, p.password(), p.top());
-                if (ok) {
-                    applyReload();
-                }
-                chat(ok ? "§a[OpenDreamCore] 材质包已安装: " + fr.message()
-                        : "§c[OpenDreamCore] 材质包注入失败");
-            });
+            finishInject(r, extracted, p.password(), p.top(), null);
         }, "ODC-PackInstall");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /** 主线程收尾：注入 + 重载 + 聊天反馈；cleanup 非 null 时成功后删除临时包。 */
+    private static void finishInject(Result fr, Path extracted, String password, boolean top, Path cleanup) {
+        net.minecraft.client.Minecraft.getInstance().execute(() -> {
+            if (!fr.ok()) {
+                chat(fr.message());
+                return;
+            }
+            var injector = ResourcePackInjector.current();
+            boolean ok = injector != null && injector.inject(extracted, password, top);
+            if (ok) {
+                applyReload();
+            }
+            chat(ok ? "§a[OpenDreamCore] 材质包已安装: " + fr.message()
+                    : "§c[OpenDreamCore] 材质包注入失败");
+            if (cleanup != null && ok) {
+                try {
+                    Files.deleteIfExists(cleanup);
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
+    // ===== 服务端字节分片下发（odc/packdata，与 PackAPI.DATA_CHANNEL 约定一致）=====
+    //
+    // 服务端把本地 zip 拆成 48KB 片推过来：先 "push|名字|md5|大小|片数|置顶|密码B64" 报头，
+    // 再逐片 "part|md5|序号|b64"。收齐 → 拼接 → MD5 校验 → 落 inbox → 走与本地包完全
+    // 相同的安装路径（解压/密码校验/注入/重载）。服务端对掉线玩家会自行中止，不会吊死收包端。
+
+    /** 同时装配中的包上限（防刷屏占内存）。 */
+    private static final int MAX_ASSEMBLIES = 8;
+
+    private static final class Assembly {
+        final String name;
+        final long size;
+        final int total;
+        final String password;
+        final boolean top;
+        final byte[][] parts;
+        final java.util.concurrent.atomic.AtomicInteger received = new java.util.concurrent.atomic.AtomicInteger();
+
+        Assembly(String name, long size, int total, String password, boolean top) {
+            this.name = name;
+            this.size = size;
+            this.total = total;
+            this.password = password;
+            this.top = top;
+            this.parts = new byte[total][];
+        }
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<String, Assembly> ASSEMBLIES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** odc/packdata 分片流入口（ClientController 拦截后打进来）。 */
+    public static void receivePackData(String payload) {
+        if (payload == null || payload.isEmpty()) {
+            return;
+        }
+        int bar = payload.indexOf('|');
+        String op = bar < 0 ? payload : payload.substring(0, bar);
+        if ("push".equals(op)) {
+            String[] f = payload.split("\\|", 7);
+            if (f.length < 7) {
+                return;
+            }
+            try {
+                String name = sanitizePackName(f[1]);
+                String md5 = f[2];
+                long size = Long.parseLong(f[3]);
+                int total = Integer.parseInt(f[4]);
+                boolean top = "1".equals(f[5]);
+                String pw = "-".equals(f[6]) ? null : new String(
+                        java.util.Base64.getDecoder().decode(f[6]), java.nio.charset.StandardCharsets.UTF_8);
+                if (md5.length() != 32 || size < 0 || total <= 0 || total > 200000) {
+                    return;
+                }
+                if (!ASSEMBLIES.containsKey(md5) && ASSEMBLIES.size() >= MAX_ASSEMBLIES) {
+                    chat("§c[OpenDreamCore] 材质包接收队列已满，忽略 " + name);
+                    return;
+                }
+                ASSEMBLIES.put(md5, new Assembly(name, size, total, pw, top));
+                chat("§7[OpenDreamCore] 正在接收服务端材质包: " + name + "（"
+                        + String.format(Locale.ROOT, "%.1fMB", size / 1024.0 / 1024.0) + "，" + total + " 片）");
+            } catch (RuntimeException ignored) {
+                // 报头坏了就当没看见
+            }
+        } else if ("part".equals(op)) {
+            String[] f = payload.split("\\|", 4);
+            if (f.length < 4) {
+                return;
+            }
+            Assembly a = ASSEMBLIES.get(f[1]);
+            if (a == null) {
+                return;
+            }
+            int seq;
+            byte[] piece;
+            try {
+                seq = Integer.parseInt(f[2]);
+                piece = java.util.Base64.getDecoder().decode(f[3]);
+            } catch (RuntimeException ignored) {
+                return;
+            }
+            if (seq < 0 || seq >= a.total || a.parts[seq] != null) {
+                return; // 越界或重复片
+            }
+            a.parts[seq] = piece;
+            if (a.received.incrementAndGet() >= a.total) {
+                ASSEMBLIES.remove(f[1]); // 先摘牌，失败也不占队列
+                completeAssembly(f[1], a);
+            }
+        }
+    }
+
+    /** 收齐 → 拼接 → MD5 校验 → 落 inbox → 安装（装完删临时包）。 */
+    private static void completeAssembly(String md5, Assembly a) {
+        try {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream((int) Math.max(64, a.size));
+            for (byte[] p : a.parts) {
+                if (p == null) {
+                    chat("§c[OpenDreamCore] 材质包接收不完整: " + a.name);
+                    return;
+                }
+                bos.write(p);
+            }
+            byte[] whole = bos.toByteArray();
+            if (!md5Hex(whole).equalsIgnoreCase(md5) || whole.length != a.size) {
+                chat("§c[OpenDreamCore] 材质包校验失败（md5/大小不符），请让服主重推: " + a.name);
+                return;
+            }
+            Path inbox = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
+                    .resolve("OpenDreamCore").resolve("packs").resolve("inbox");
+            Files.createDirectories(inbox);
+            Path zip = inbox.resolve(a.name);
+            Files.write(zip, whole);
+            forceRefreshManaged(zip);
+            chat("§a[OpenDreamCore] 材质包接收完成: " + a.name + "，开始安装…");
+            installPreparedAsync(zip, a.name, a.password, a.top, true);
+        } catch (Exception e) {
+            chat("§c[OpenDreamCore] 材质包装配失败: " + e);
+        }
+    }
+
+    /**
+     * 安装一个已就绪的本地包（zip/目录/散图都在 preparePack 兜住），后台线程解压、
+     * 主线程注入——与 installFromPayload 共用同一条收尾路径。
+     * cleanup=true 时装完删源文件（字节下发的 inbox 临时包）。
+     */
+    private static void installPreparedAsync(Path pack, String displayName, String password, boolean top, boolean cleanup) {
+        Thread worker = new Thread(() -> {
+            Result r;
+            Path extracted = null;
+            try {
+                if (pack == null || !Files.exists(pack)) {
+                    r = new Result(false, "无法定位包文件: " + displayName);
+                } else {
+                    extracted = preparePack(pack, password);
+                    r = new Result(true, displayName != null ? displayName : pack.getFileName().toString());
+                }
+            } catch (EncryptedZipException e) {
+                r = new Result(false, e.getMessage());
+            } catch (Exception e) {
+                r = new Result(false, "准备失败: " + e.toString());
+            }
+            finishInject(r, extracted, password, top, cleanup ? pack : null);
+        }, "ODC-PackInstall");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** 字节重推同名包时强制重解：托管目录已存在就先删掉，防止 serve 旧解压结果。 */
+    private static void forceRefreshManaged(Path zip) {
+        try {
+            String name = zip.getFileName().toString();
+            String stem = name.toLowerCase(Locale.ROOT).endsWith(".zip")
+                    ? name.substring(0, name.length() - 4) : name;
+            String safe = stem.replaceAll("[^\\w\\u4e00-\\u9fa5.-]", "_");
+            if (safe.isBlank()) {
+                return;
+            }
+            Path managed = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
+                    .resolve("resourcepacks").resolve("OpenDreamCore").resolve(safe)
+                    .toAbsolutePath().normalize();
+            if (Files.isDirectory(managed) && !managed.equals(zip.toAbsolutePath().normalize())) {
+                deleteRecursively(managed);
+            }
+        } catch (Exception ignored) {
+            // 删不掉就沿用旧解压结果，下次重推再试
+        }
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        try (var walk = Files.walk(root)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                }
+            });
+        }
+    }
+
+    /** 包名安全化：接 basename、非法字符换下划线（中文保留）、补 .zip——与服务端 PackAPI.safeName 同款。 */
+    private static String sanitizePackName(String raw) {
+        String name = raw.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        name = name.replaceAll("[^\\w\\u4e00-\\u9fa5.-]", "_").trim();
+        if (name.isEmpty()) {
+            name = "pack.zip";
+        }
+        if (!name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            name = name + ".zip";
+        }
+        return name;
+    }
+
+    private static String md5Hex(byte[] data) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("MD5").digest(data);
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static void chat(String text) {
@@ -254,6 +475,33 @@ public final class PackInstaller {
         }
         ensureMcmeta(dest);
         return dest;
+    }
+
+    /**
+     * 目录包 → 真 zip（注入专用后端）。
+     * 1.21.11+ 的 FilePackResources 是严格 zip 语义：拿它包目录会在 ZipFile 打开时报
+     * "拒绝访问"（FileNotFound），元数据读空 → readMetaAndCreate 返回 null →
+     * null 包进仓库后 reload() 遍历 streamSelfAndChildren() 直接 NPE（1.21.11 实锤）。
+     * 目录型 supplier 各版本签名漂移，zip 是全版本通用正确形态——注入器统一先打真 zip 再注入。
+     * 落在非扫描区 gameDir/OpenDreamCore/packs/injected/，不会被 vanilla 当独立包重复发现。
+     */
+    public static Path zipForInjection(Path dir) throws IOException {
+        Path out = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("OpenDreamCore").resolve("packs").resolve("injected");
+        Files.createDirectories(out);
+        Path zip = out.resolve(dir.getFileName().toString() + ".zip");
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zip))) {
+            List<Path> files;
+            try (var walk = Files.walk(dir)) {
+                files = walk.filter(Files::isRegularFile).sorted().toList();
+            }
+            for (Path p : files) {
+                zos.putNextEntry(new ZipEntry(dir.relativize(p).toString().replace('\\', '/')));
+                Files.copy(p, zos);
+                zos.closeEntry();
+            }
+        }
+        return zip;
     }
 
     /** 单文件图：只认 png（游戏就吃这格式），别的扩展名不费事。 */

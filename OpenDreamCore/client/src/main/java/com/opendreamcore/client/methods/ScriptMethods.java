@@ -116,7 +116,7 @@ public final class ScriptMethods {
                 var tex = net.minecraft.client.Minecraft.getInstance().getTextureManager().getTexture(rl);
                 if (tex == null) return false;
                 Minecraft.getInstance().execute(() -> {
-                    try { Minecraft.getInstance().mouseHandler.setIgnoreFirstMove(); } catch (Exception ignored) {}
+                    try { Minecraft.getInstance().mouseHandler.setIgnoreFirstMove(); } catch (Exception ignored) { /* 反射失败：忽略本次鼠标跳动 */ }
                 });
                 return true;
             } catch (Exception e) { return false; }

@@ -116,12 +116,41 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
     private static final int PANEL_H = 204;
     private static final int PANEL_ROW_H = 14;
 
+    /** 最近一个存活的 OdcScreen（弱引用）：页面关闭后脚本桥（模拟按下/按键指令）仍需会话上下文。 */
+    private static volatile java.lang.ref.WeakReference<OdcScreen> lastActive;
+
     public OdcScreen(Page page, List<RenderNode> nodes, UiSession session) {
         super(Component.literal(page.title() == null ? "OpenDreamCore" : page.title()));
         this.page = page;
         this.nodes = new ArrayList<>(nodes);
         this.session = session;
+        lastActive = new java.lang.ref.WeakReference<>(this);
         LegacyClientHost.notePageOpened(); // 旧版 取界面存活时间 计时基准
+    }
+
+    /** 取最近活跃 OdcScreen 的会话（可能已关闭，仅作脚本桥兕底；无则 null）。 */
+    public static UiSession lastActiveSession() {
+        var ref = lastActive;
+        OdcScreen s = ref != null ? ref.get() : null;
+        return s != null ? s.session : null;
+    }
+
+    /** 脚本桥读取（Key.当前按下键）：keyPress 分发期间写入的旧版键名上下文。 */
+    public static String currentLegacyPressedKey() {
+        return LegacyClientHost.pressedKeyValue();
+    }
+
+    /**
+     * 模拟按键（脚本 Key.模拟按下 / 旧版 按键指令 桥）：
+     * 与 keyPressed 入口同路径——写键名上下文 → keyPress 生命周期 → KeyConfig 检测。
+     */
+    public void simulateKeyPress(int keyCode) {
+        if (page.functions() != null && page.functions().containsKey("keyPress")) {
+            LegacyClientHost.setPressedKey(LegacyClientHost.keyName(keyCode, 0));
+            ClientController.get().runLifecycle(page, "keyPress");
+            LegacyClientHost.setPressedKey("");
+        }
+        visualKeyHit(keyCode);
     }
 
     public Page page() {

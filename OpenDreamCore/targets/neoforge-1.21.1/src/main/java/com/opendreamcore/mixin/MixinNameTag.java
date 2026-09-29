@@ -7,7 +7,6 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.EntityRenderer;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -31,13 +30,15 @@ public abstract class MixinNameTag {
     private void opendreamcore$replaceNameTag(Entity entity, Component displayName,
                                               PoseStack pose, MultiBufferSource buffer,
                                               int light, float partialTick, CallbackInfo ci) {
-        String type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
-        VisualNameTags.TagStyle style = VisualNameTags.styleFor(type,
-                entity.getName().getString());
-        if (style == null) {
-            return;
+        VisualNameTags.Hit hit = VisualNameTags.hitFor(entity);
+        if (hit == null) {
+            return; // 没规则命中，原版名牌照旧
         }
-        drawTag(entity, displayName, pose, buffer, light, style);
+        // 名字条一律就地画（HEAD 起就是这条路径）：整页内容只**叠加**在名牌之上。
+        // 以前只在 fullHud=false 时画 —— 整页路径一旦构建/布局/上屏任一步失败
+        // （页面元素没写世界坐标 hologram、布局落在画布外、渲染时机不对…），
+        // 原版名牌已被 cancel、页面又画不出来，名牌就整体消失。实机回归的根因。
+        drawTag(entity, displayName, pose, buffer, light, hit.style());
         ci.cancel();
     }
 
@@ -58,8 +59,13 @@ public abstract class MixinNameTag {
         int fw = tw + pad * 2;
         int fh = font.lineHeight + pad * 2;
         var matrix = pose.last().pose();
-        // 背景条：半透明色块
-        var quad = buffer.getBuffer(RenderType.gui());
+        // 背景条：半透明色块。
+        // 用世界语义的文本背景类型（textBackgroundSeeThrough），不能用 RenderType.gui()。
+        // gui() 是 GUI 语义：不写深度、不带雾、按 GUI 裁剪与光照规则处理；在实体渲染阶段
+        // 用它画世界几何，开光影时（Iris/Oculus 按渲染类型把几何分派进各自的 gbuffer 程序）
+        // 会被归进 GUI 类而非世界类，名牌背景就会错位、穿透或整体消失。两者顶点格式都是
+        // POSITION_COLOR，所以下面 addVertex/setColor 写法不用改，只换类型。
+        var quad = buffer.getBuffer(RenderType.textBackgroundSeeThrough());
         int bg = style.bgColor();
         float a = ((bg >>> 24) & 0xFF) / 255.0F;
         float r = ((bg >>> 16) & 0xFF) / 255.0F;

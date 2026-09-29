@@ -223,11 +223,18 @@ public final class ClientHooks1165 {
         com.opendreamcore.client.spi.FolderPackInjector.Host.register(new FolderPackInjector1165());
         com.opendreamcore.client.LocalPackPreload.init(
                 () -> net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
+        com.opendreamcore.client.RemotePackReceiver.init();
         // 云缓存：gameDir/OpenDreamCore/cache，哈希名落盘、内存解密（现代端 CloudSyncClient 同链路）
         com.opendreamcore.client.CloudCache.setGameDir(
                 () -> net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
+        // 全局字体字形靠共享层逐个光栅，它只看得到 Path，拿不到本代的游戏目录对象，
+        // 所以目录必须由各代自己送进去：不送的话 OpenDreamCore/fonts 与云缓存两级都问不到，
+        // 配置里写了 ttf 也只会登记不生效。跟上面云缓存同一个目录，一次说清。
+        com.opendreamcore.client.visual.LegacyTtfSource.setGameDir(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
         // 物品真身画笔：item_slot/hot_slot 从格底占位升级成本尊图标
         com.opendreamcore.client.spi.ItemPainter.Host.register(new ItemPainter1165());
+        // 世界相位状态守卫：把"按原值还原 GL 状态 + 先收原版待传批次"交给本代实现
+        com.opendreamcore.client.render.LegacyRenderBridge.Host.register(new RenderBridge1165());
 // click/hover 音效：直接走 SoundHandler（自管，不需要 mixin）
         com.opendreamcore.client.spi.LegacySoundBridge.Host.register(
                 (soundId, volume, pitch) -> {

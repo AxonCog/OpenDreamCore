@@ -4,7 +4,7 @@ license = "Apache-2.0"
 
 [[mods]]
 modId = "opendreamcore"
-version = "0.1.2"
+version = "${version}"
 displayName = "OpenDreamCore"
 description = "老版本线：YAML 界面引擎（1.16.5）"
 

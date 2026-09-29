@@ -422,7 +422,18 @@ public final class LegacyVisualSkins {
                 if (ir == null) {
                     continue;
                 }
-                dispatcher.registerVisualPage(headTagToPage(rule.getKey(), ir));
+                dispatcher.registerVisualPage(headTagToPage(rule.getKey(), ir, "ht_"));
+            } catch (Exception ignored) {
+                // 同上
+            }
+        }
+        for (Map.Entry<String, String> rule : rulesOf("Blood").entrySet()) {
+            try {
+                Map<String, Object> ir = new com.opendreamcore.config.YamlParser().parse(rule.getValue());
+                if (ir == null) {
+                    continue;
+                }
+                dispatcher.registerVisualPage(headTagToPage(rule.getKey(), ir, "bd_"));
             } catch (Exception ignored) {
                 // 同上
             }
@@ -458,17 +469,22 @@ public final class LegacyVisualSkins {
         return PageSchema.build("vt_" + id, page);
     }
 
-    /** HeadTag 规则 → 世界模式页面：匹配键存档后剥掉，剩的就是普通页面。 */
-    static Page headTagToPage(String id, Map<String, Object> ir) {
+    /**
+     * HeadTag/Blood 规则 → 世界模式页面：匹配键存档后剥掉，剩的就是普通页面。
+     * 存档键跟现代端同款：entity / contains / name（旧键等效，name 优先）/
+     * distance / offsetX（横向偏移） / offsetY（纵向偏移；旧键 y 一并叠加）。
+     */
+    static Page headTagToPage(String id, Map<String, Object> ir, String idPrefix) {
         Map<String, Object> page = new LinkedHashMap<>(ir);
         java.util.LinkedHashMap<String, Object> match = new java.util.LinkedHashMap<>();
-        for (String k : new String[]{"entity", "name", "distance", "y"}) {
+        for (String k : new String[]{"entity", "name", "contains", "distance",
+                "offsetX", "offsetY", "y"}) {
             if (page.containsKey(k)) {
                 match.put(k, page.remove(k));
             }
         }
         page.put("display", "world");
-        String pageId = "ht_" + id;
+        String pageId = idPrefix + id;
         headTagMatches.put(pageId, match);
         return PageSchema.build(pageId, page);
     }

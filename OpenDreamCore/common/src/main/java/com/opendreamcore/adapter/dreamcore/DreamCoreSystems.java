@@ -9,7 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * DragonCore 原生系统配置 → OpenDreamCore 九系统规则 IR。
+ * DragonCore 原生系统配置 → OpenDreamCore 十系统规则 IR。
  *
  * 服务器上真实跑着的龙核配置就是金标准（样本快照见
  * common/src/test/resources/dragoncore/systems/），翻译约定逐条写在
@@ -23,7 +23,7 @@ public final class DreamCoreSystems {
     private DreamCoreSystems() {
     }
 
-    /** 龙核配置文件名 → 我们的系统名；空串表示不归九系统管（如 ItemTip 是界面页）。 */
+    /** 龙核配置文件名 → 我们的系统名；空串表示不归十系统管（如 ItemTip 是界面页）。 */
     public static String systemFor(String fileName) {
         if (fileName == null) {
             return "";
@@ -38,7 +38,8 @@ public final class DreamCoreSystems {
             case "worldtexture": return "WorldTexture";
             case "armorlayer": return "ArmorLayer";
             case "fontconfig": return "FontConfig";
-            case "blood": return "HeadTag";
+            case "blood": return "Blood";
+            case "headtag": return "HeadTag";
             case "slotconfig": return "SlotConfig";
             default: return "";
         }
@@ -298,13 +299,13 @@ public final class DreamCoreSystems {
     }
 
     //
-    // Blood → HeadTag：血条页翻译
+    // Blood → Blood：血条页翻译
     //
 
     /**
-     * 龙核 Blood 是"全体生物头顶血条+文字"，我们用 HeadTag 页面承载。
-     * 近似点都记在这：
-     *   entity 缺省 "*"（我们 HeadTag 实体绑定按通配实现）；
+     * 龙核 Blood 是"全体生物头顶血条+文字"，重路由后用 Blood 系统页面承载
+     * （与 HeadTag 共享 billboard 渲染管线，独立认领）。近似点都记在这：
+     *   entity 缺省 "*"（我们实体绑定按通配实现）；
      *   龙核的 offsetY 以脚底为基准，我们 y 是头顶偏移，数值直出（服主
      *     大概率要微调，注释里说清楚）；
      *   贴图像素尺寸按 50px=1格 折算成世界单位；
@@ -362,6 +363,61 @@ public final class DreamCoreSystems {
                 }
             }
             out.put(sanitizeId(e.getKey()), ir);
+        }
+        return out;
+    }
+
+    /**
+     * 龙核头顶标签组件块（名字_texture/名字_label）+ 匹配头（match/contains/
+     * distance/offsetY）→ HeadTag 页 IR。blood() 只翻血条件，这里只输名字件：
+     * 同一条龙核规则两半各归各的系统（Blood 血条 + HeadTag 名牌），客户端
+     * 两系统独立认领，名字和血条同时显示——与龙核原生行为一致。
+     * 近似点：offsetY 龙核以脚底为基准，我们是头顶锚点偏移，数值 /10 直出
+     * （与 blood() 同款折算）；match 直通 entity，通配与空段客户端按全体处理。
+     */
+    public static Map<String, Map<String, Object>> headTag(Map<String, Object> raw) {
+        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            if (!(e.getValue() instanceof Map<?, ?> m)) {
+                continue;
+            }
+            Map<String, Object> ir = new LinkedHashMap<>();
+            Object match = m.get("match");
+            if (match != null && !String.valueOf(match).trim().isEmpty()) {
+                ir.put("entity", String.valueOf(match));
+            }
+            Object contains = m.get("contains");
+            if (contains != null && !String.valueOf(contains).trim().isEmpty()) {
+                ir.put("contains", contains);
+            }
+            if (m.get("distance") instanceof Number dist && dist.doubleValue() > 0) {
+                ir.put("distance", dist.doubleValue());
+            }
+            if (m.get("offsetY") instanceof Number offY) {
+                ir.put("y", offY.doubleValue() / 10.0);
+            }
+            if (m.get("名字_texture") instanceof Map<?, ?> tex
+                    && !str2(tex.get("path")).trim().isEmpty()) {
+                ir.put("名字贴图", bloodImage(tex, 1.0 / 50.0, 0.0));
+            }
+            if (m.get("名字_label") instanceof Map<?, ?> lbl) {
+                Object content = lbl.get("content") != null ? lbl.get("content") : lbl.get("text");
+                Map<String, Object> el = new LinkedHashMap<>();
+                el.put("type", "text");
+                Map<String, Object> textSpec = new LinkedHashMap<>();
+                textSpec.put("content", rewriteBloodVars(str2(content)));
+                el.put("text", textSpec);
+                el.put("x", numOr(lbl.get("x"), 0.0));
+                el.put("y", numOr(lbl.get("y"), 0.0));
+                if (lbl.get("scale") != null) {
+                    el.put("scale", lbl.get("scale"));
+                }
+                ir.put("名字文本", el);
+            }
+            // 只有匹配头没有名字件的规则不产出（空页面无意义）
+            if (ir.containsKey("名字贴图") || ir.containsKey("名字文本")) {
+                out.put(sanitizeId(e.getKey()), ir);
+            }
         }
         return out;
     }

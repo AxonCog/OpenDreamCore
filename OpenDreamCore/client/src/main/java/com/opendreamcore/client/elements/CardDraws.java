@@ -39,7 +39,7 @@ public final class CardDraws {
         if (timeout > 0) {
             Object at = node.props().get("_cardShowAt");
             long showAt = 0;
-            try { showAt = Long.parseLong(String.valueOf(at)); } catch (Exception ignored) {}
+            try { showAt = Long.parseLong(String.valueOf(at)); } catch (Exception ignored) { /* 解析失败视为未显示过 */ }
             if (showAt > 0 && System.currentTimeMillis() - showAt >= (long) timeout) {
                 node.props().put("_cardExpired", "true");
                 return;

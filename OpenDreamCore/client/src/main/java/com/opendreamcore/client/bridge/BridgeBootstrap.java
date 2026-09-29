@@ -38,6 +38,11 @@ public final class BridgeBootstrap {
             if (bridges.packInjector() != null) {
                 com.opendreamcore.client.spi.ResourcePackInjector.register(bridges.packInjector());
             }
+            // 全局 GL / 着色器状态桥：注册后 RenderGuard 与 CompatRender 的染色/贴图还原就走编译期直调，
+            // 不再依赖按签名的反射兜底（那在 Fabric 生产环境会在同形方法里抽签）。
+            if (bridges.glStateBridge() != null) {
+                com.opendreamcore.client.spi.GlState.register(bridges.glStateBridge());
+            }
             done = true;
         }
     }

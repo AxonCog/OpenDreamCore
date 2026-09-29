@@ -168,7 +168,7 @@ public final class ElementEditStore {
                     if (!set.isEmpty()) deleted.put(pageId, set);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) { /* 编辑数据解析失败：忽略损坏条目 */ }
     }
 
     /** 进服时加载。 */

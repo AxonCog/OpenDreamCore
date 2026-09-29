@@ -11,7 +11,8 @@
     "MixinArmorLayer",
     "MixinNameTag",
     "MixinItemEffect",
-    "MixinGuiText"
+    "FontSetSourceMixin",
+    "WorldRenderTypeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

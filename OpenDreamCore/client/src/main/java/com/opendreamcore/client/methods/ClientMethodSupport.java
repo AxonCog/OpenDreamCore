@@ -20,6 +20,36 @@ import java.util.List;
 public final class ClientMethodSupport {
     private ClientMethodSupport() {}
 
+    /**
+     * 原版按键按下查询（跨版本兼容）：1.21.11 起 InputConstants.isKeyDown 收 Window
+     * 对象，旧版收 long 句柄；Yarn 侧方法名是 isKeyPressed。按名称+签名双探测。
+     */
+    public static boolean rawKeyDown(long hwnd, int code) {
+        Class<?> ic = com.mojang.blaze3d.platform.InputConstants.class;
+        var window = net.minecraft.client.Minecraft.getInstance().getWindow();
+        for (var m : ic.getMethods()) {
+            if (m.getParameterCount() != 2 || m.getParameterTypes()[1] != int.class) {
+                continue;
+            }
+            String n = m.getName();
+            if (!n.equals("isKeyDown") && !n.equals("isKeyPressed")) {
+                continue;
+            }
+            Class<?> first = m.getParameterTypes()[0];
+            Object arg = first == long.class ? (Object) hwnd
+                    : first.isInstance(window) ? window : null;
+            if (arg == null) {
+                continue;
+            }
+            try {
+                return (Boolean) m.invoke(null, arg, code);
+            } catch (Exception ignored) {
+                // 换下一个候选签名
+            }
+        }
+        return false;
+    }
+
     public static double[] lookDirection() {
         var p = player();
         if (p == null) {
@@ -148,6 +178,29 @@ public final class ClientMethodSupport {
             case "key.keyboard.f5", "key.togglePerspective" -> options.keyTogglePerspective;
             default -> null;
         };
+    }
+
+    /**
+     * 任意键名 → GLFW 键码：接受绑定别名（key.jump）、Minecraft 键名（key.keyboard.w）、
+     * 以及裸键名（W / F1 / RETURN / SPACE）。无法识别返回 -1。
+     */
+    public static int keyCodeOf(String name) {
+        if (name == null || name.isBlank()) {
+            return -1;
+        }
+        switch (name.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "RETURN", "ENTER" -> { return 257; }
+            case "ESCAPE", "ESC" -> { return 256; }
+            case "SPACE" -> { return 32; }
+            case "TAB" -> { return 258; }
+            case "BACKSPACE" -> { return 259; }
+        }
+        int code = com.mojang.blaze3d.platform.InputConstants.getKey(name).getValue();
+        if (code < 0) {
+            code = com.mojang.blaze3d.platform.InputConstants
+                    .getKey("key.keyboard." + name.trim().toLowerCase(java.util.Locale.ROOT)).getValue();
+        }
+        return code < 0 ? -1 : code;
     }
 
     public static void collectElementIds(com.opendreamcore.page.Element el, List<String> out) {

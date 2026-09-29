@@ -25,4 +25,19 @@ public interface ItemModelRenderBridge {
      */
     void drawItemModel(Object g, int cx, int cy, float scale, float yaw, float pitch,
                        String itemId, int alpha);
+    /**
+     * 物品 Lore 行（1.20.5+ 走 DataComponents.LORE，1.20.1 走 NBT display.Lore）。
+     * 拿不到返回空表。共享层不再按 MC 名反射（Fabric 生产必失），改由本桥直调各版本 API。
+     */
+    java.util.List<Object> loreLines(Object stack);
+
+    /**
+     * 物品 tooltip 全量行（名称/lore/附魔/耐久/属性）。
+     * level/player/flag 一律 Object：1.21.5+ 需要 Item.TooltipContext，旧版只要 Player+flag。
+     */
+    java.util.List<Object> tooltipLines(Object stack, Object level, Object player, Object flag);
+
+    /** 当前数据包格式号（SharedConstants.getCurrentVersion().getPackVersion()）。 */
+    int packFormat();
+
 }

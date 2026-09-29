@@ -178,7 +178,7 @@ public final class ExtensionLoader {
 /**
  * 脚本登记的方言适配器（链子上 scripted()=true，reload 清场重载）。
  * 规则键 = 外来文件名（含或不含 .yml 都认；包含匹配看"包含匹配"开关），
- * 值 = {优先级?, 包含匹配?, 九系统名 → (规则id → 规则IR)}。
+ * 值 = {优先级?, 包含匹配?, 十系统名 → (规则id → 规则IR)}。
  */
 final class ScriptedAdapter implements Adapter, AdapterChain.Prioritized {
 

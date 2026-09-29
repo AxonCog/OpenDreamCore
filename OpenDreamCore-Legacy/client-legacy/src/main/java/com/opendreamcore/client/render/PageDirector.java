@@ -126,26 +126,41 @@ public final class PageDirector {
             PINNED.keySet().retainAll(live);
         }
         double yaw = Math.toRadians(yawDeg);
-        for (Page page : pages) {
-            double[] anchor = resolveAnchor(page, playerX, playerY, playerZ, yaw);
-            if (!renderer.beginWorld(camX, camY, camZ, anchor[0], anchor[1], anchor[2])) {
-                continue;
+
+        // 世界相位总闸：整段（面板 + 头顶牌）只在这里动 GL 状态，也只在这里还原。
+        // 这段嵌在原版世界渲染流程里跑，进去前原版大概率已经把深度写关掉了（半透明阶段的铺垫）；
+        // 以前各家 endWorld 退出时把深度写、面剔除、光照都写成固定值，等于把深度写永久打开，
+        // 后续原版半透明几何和深度缓冲对不上，物品/生物就"部分透明"。现在改成先进 guard 读走
+        // 原值、退出按原值写回，而且还原点只有这一个，跟异常路径无关（finally 里）。
+        LegacyRenderBridge bridge = LegacyRenderBridge.Host.current();
+        RenderStateSnapshot snapshot = bridge.state();
+        snapshot.capture();
+        bridge.flushPendingBatch();
+        snapshot.enterHolo();
+        try {
+            for (Page page : pages) {
+                double[] anchor = resolveAnchor(page, playerX, playerY, playerZ, yaw);
+                if (!renderer.beginWorld(camX, camY, camZ, anchor[0], anchor[1], anchor[2])) {
+                    continue;
+                }
+                try {
+                    new WorldPageRenderer(renderer)
+                            .renderWorldSpace(page, WORLD_PPU,
+                                    distanceFade(page, camX, camY, camZ, anchor));
+                } finally {
+                    renderer.endWorld();
+                }
+                // 指针屏开着（真鼠标可用）才登记世界命中；fovDeg 非正时投影自己跳过
+                if (ScreenBridge.isOpen()) {
+                    new WorldPageRenderer(renderer).registerProjectionHits(page,
+                            camX, camY, camZ, anchor[0], anchor[1], anchor[2],
+                            yawDeg, pitchDeg, fovDeg);
+                }
             }
-            try {
-                new WorldPageRenderer(renderer)
-                        .renderWorldSpace(page, WORLD_PPU,
-                                distanceFade(page, camX, camY, camZ, anchor));
-            } finally {
-                renderer.endWorld();
-            }
-            // 指针屏开着（真鼠标可用）才登记世界命中；fovDeg 非正时投影自己跳过
-            if (ScreenBridge.isOpen()) {
-                new WorldPageRenderer(renderer).registerProjectionHits(page,
-                        camX, camY, camZ, anchor[0], anchor[1], anchor[2],
-                        yawDeg, pitchDeg, fovDeg);
-            }
+            renderHeadTagPages(dispatcher, renderer, camX, camY, camZ, yawDeg);
+        } finally {
+            snapshot.restore();
         }
-        renderHeadTagPages(dispatcher, renderer, camX, camY, camZ);
     }
 
     /** 兼容旧签名：不传俯仰/视场角 → 世界面板命中投影自动跳过（老壳行为不变）。 */
@@ -210,12 +225,16 @@ public final class PageDirector {
      * 龙核 Blood.yml 的语义：半径内每只带血条名的生物头顶一条血。
      */
     private static void renderHeadTagPages(MessageDispatcher dispatcher, LegacyRenderer renderer,
-                                           double camX, double camY, double camZ) {
+                                           double camX, double camY, double camZ, double yawDeg) {
         java.util.Set<String> headIds = LegacyVisualSkins.headTagPageIds();
         if (headIds.isEmpty()) {
             return;
         }
         EntitySource source = EntitySource.Host.current();
+        double yawRad = Math.toRadians(yawDeg);
+        // 横向右向（与 resolveAnchor 的前向口径一致：前向 (-sin,cos)，右向 (-cos,-sin)）
+        double rightX = -Math.cos(yawRad);
+        double rightZ = -Math.sin(yawRad);
         for (String headId : headIds) {
             Page page = dispatcher.page(headId);
             if (page == null || !WorldPageRenderer.isWorldPage(page)) {
@@ -228,18 +247,21 @@ public final class PageDirector {
             }
             String entPattern = match.get("entity") == null ? ""
                     : String.valueOf(match.get("entity")).toLowerCase();
-            String namePattern = match.get("name") == null ? ""
-                    : String.valueOf(match.get("name")).toLowerCase();
-            double pageY = Painters.num(match.get("y"), 0.0);
+            // 名称包含：contains 新键，旧键 name 等效（name 优先，跟现代端 firstOf 同序）
+            String namePattern = firstNonEmpty(match.get("name"), match.get("contains"));
+            double pageY = Painters.num(match.get("y"), 0.0)
+                    + Painters.num(match.get("offsetY"), 0.0);
+            double offX = Painters.num(match.get("offsetX"), 0.0);
             java.util.List<EntitySource.Snapshot> crowd =
                     source.nearbyLiving(camX, camY, camZ, maxDist);
             for (EntitySource.Snapshot snap : crowd) {
                 if (!matchesHeadTag(snap, entPattern, namePattern)) {
                     continue;
                 }
-                // 锚点=实体脚底+身高+页级 y 偏移（血条挂在头顶偏上一点）
+                // 锚点=实体脚底+身高+页级纵向偏移；offsetX 沿相机右向横移（格）
                 if (!renderer.beginWorld(camX, camY, camZ,
-                        snap.x, snap.y + snap.height + pageY, snap.z)) {
+                        snap.x + rightX * offX, snap.y + snap.height + pageY,
+                        snap.z + rightZ * offX)) {
                     continue;
                 }
                 try {
@@ -253,8 +275,17 @@ public final class PageDirector {
         }
     }
 
+    /** 名称包含键解析：name 优先、contains 兼底，小写化给包含匹配。 */
+    private static String firstNonEmpty(Object a, Object b) {
+        String sa = a == null ? "" : String.valueOf(a).trim().toLowerCase();
+        if (!sa.isEmpty()) {
+            return sa;
+        }
+        return b == null ? "" : String.valueOf(b).trim().toLowerCase();
+    }
+
     /** 实体筛选：entity 匹配方块 id（villager 与 minecraft:villager 互通），
-     *  name 匹配自定义名；都是空就全过（全生物头顶都画）。 */
+     *  name/contains 匹配自定义名；都是空就全过（全生物头顶都画）。 */
     private static boolean matchesHeadTag(EntitySource.Snapshot snap,
                                           String entPattern, String namePattern) {
         if (!entPattern.isEmpty()) {

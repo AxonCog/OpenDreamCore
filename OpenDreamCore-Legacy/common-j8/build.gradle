@@ -17,7 +17,7 @@ plugins {
     id 'java-library'
 }
 
-version = '0.1.2.1'
+version = '0.1.2.2'
 group = 'com.opendreamcore'
 
 java {
@@ -79,8 +79,16 @@ tasks.register('runAllTests', JavaExec) {
     jvmArgs '-Dfile.encoding=UTF-8'
 }
 
+// Gradle 7.6 的 Test worker 在本机 fork 后扫不到 build/classes/java/test（CNFE，基线实证：
+// AdapterRoutingTest / DragonCoreGuiSamplesTest / DreamCoreParserTest 三类全部 ClassNotFound）。
+// 套件本体无恙：runAllTests（JavaExec + ConsoleLauncher 直跑）298/298 全绿。
+// 故禁用 fork 版 test，把 runAllTests 挂进 check：测试照样门禁 build，仅换执行器。
 tasks.named('test') {
-    useJUnitPlatform()
+    enabled = false
+}
+
+tasks.named('check') {
+    dependsOn 'runAllTests'
 }
 
 // Jabel 只在类型上看到名为 com.github.bsideup.jabel.Desugar 的注解时才脱糖 record，

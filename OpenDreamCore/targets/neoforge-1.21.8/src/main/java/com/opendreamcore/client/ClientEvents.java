@@ -30,6 +30,12 @@ public final class ClientEvents {
     @SubscribeEvent
     public static void onClientSetup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.opendreamcore.script.CommonMethods.registerAll();
+        // 世界语义渲染类型：把世界面板与名牌归入光影模组认得的类别。
+        // 本加载器此前整个世界渲染子系统都未接线，导致同为 1.21.8 的 fabric 侧有自建渲染类型、
+        // 这边仍走立即模式裸着色器，开光影后归类错误、把深度缓冲写乱（物品与生物部分透明）。
+        com.opendreamcore.client.render.WorldRenderTypes.register(
+                new com.opendreamcore.client.render.OdcWorldRenderTypeProvider());
+        com.opendreamcore.client.render.WorldRenderTypes.setEnabled(true);
         // 实体渲染桥（entity/model 组件 GUI 渲染）
         com.opendreamcore.client.entity.EntityViews.register(
                 new com.opendreamcore.client.entity.EntityRenderBridgeImpl());

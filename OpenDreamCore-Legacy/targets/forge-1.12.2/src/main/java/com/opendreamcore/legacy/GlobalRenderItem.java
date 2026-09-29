@@ -35,7 +35,8 @@ public class GlobalRenderItem extends RenderItem {
         if (stack != null && !stack.isEmpty()) {
             id = stack.getItem().getRegistryName() == null
                     ? "" : stack.getItem().getRegistryName().toString();
-            String tex = LegacyVisualItemIcons.textureFor(id);
+            String tex = LegacyVisualItemIcons.textureFor(id,
+                    stack.getDisplayName());
             if (tex != null) {
                 drawIcon(tex, x, y);
                 drawEffect(id, x, y);

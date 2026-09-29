@@ -87,9 +87,7 @@ public final class Renderer1165 implements LegacyRenderer {
         stack.mulPose(camera.rotation());
         float s = (float) com.opendreamcore.client.render.PageDirector.BLOCKS_PER_PX;
         stack.scale(s, -s, s);
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.depthMask(false);
+        // 混合/深度写由世界相位总闸统一按原值设置与还原（见 PageDirector.renderWorldPhase）
         worldActive = true;
         return true;
     }
@@ -97,7 +95,7 @@ public final class Renderer1165 implements LegacyRenderer {
     @Override
     public void endWorld() {
         worldActive = false;
-        RenderSystem.depthMask(true);
+        // 状态还原在总闸里按进入前的原值做
         stack.popPose();
     }
 

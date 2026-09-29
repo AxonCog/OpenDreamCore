@@ -862,13 +862,13 @@ public final class EditorPanels {
                         double y = "y".equals(prop) ? v : vp.unlayoutY(node.y());
                         host.setElementPos(host.selectedId(), x, y);
                     }
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) { /* 非数字坐标：保持原值不动 */ }
             }
             case "width", "height" -> {
                 try {
                     double v = Double.parseDouble(editBuffer.trim());
                     host.setElementProp(host.selectedId(), prop, v);
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) { /* 非数字尺寸：保持原值不动 */ }
             }
             default -> host.setElementPropDeep(host.selectedId(), prop, editBuffer);
         }

@@ -67,11 +67,7 @@ public final class Renderer164 implements LegacyRenderer {
             return false;
         }
         GL11.glPushMatrix();
-        GL11.glEnable(GL11.GL_BLEND);
-        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-        GL11.glDisable(GL11.GL_LIGHTING);
-        GL11.glDisable(GL11.GL_CULL_FACE);
-        GL11.glDepthMask(false);
+        // 混合/光照/剔除/深度写由世界相位总闸统一按原值设置与还原（见 PageDirector.renderWorldPhase）
         GL11.glTranslated(-camX, -camY, -camZ);
         GL11.glTranslated(anchorX, anchorY, anchorZ);
         net.minecraft.client.renderer.entity.RenderManager rm =
@@ -85,9 +81,7 @@ public final class Renderer164 implements LegacyRenderer {
 
     @Override
     public void endWorld() {
-        GL11.glDepthMask(true);
-        GL11.glEnable(GL11.GL_CULL_FACE);
-        GL11.glEnable(GL11.GL_LIGHTING);
+        // 状态还原在总闸里按进入前的原值做
         GL11.glPopMatrix();
     }
 

@@ -128,16 +128,17 @@ public final class OdcCommands {
         }
         forwarding = true;
         try {
-            String full = "odc" + (args == null || args.isEmpty() ? "" : " " + args);
+            // 转发带插件名前缀：服务器端裸 odc 可能被其它插件占用/冲突（实测只有
+            // opendreamcore:odc 有效），带前缀保证一定命中本插件的命令树。
+            // 静默转发：不弹"已发送"提示，服务器执行结果（成功/失败）直接由服务端返回。
+            String full = "opendreamcore:odc" + (args == null || args.isEmpty() ? "" : " " + args);
             logForward(full);
             sendChatCommandRaw(conn, full);
-            ok("§7[OpenDreamCore] §f已发送 /" + full + " → 服务器");
             return Command.SINGLE_SUCCESS;
         } catch (Throwable t) {
             // 反射发包失败兜底：退回 sendCommand（NeoForge 会再进客户端命令树，护栏截断不递归）
             try {
-                conn.sendCommand("odc" + (args == null || args.isEmpty() ? "" : " " + args));
-                ok("§7[OpenDreamCore] §f已发送 /odc" + (args == null || args.isEmpty() ? "" : " " + args) + " → 服务器");
+                conn.sendCommand("opendreamcore:odc" + (args == null || args.isEmpty() ? "" : " " + args));
                 return Command.SINGLE_SUCCESS;
             } catch (Throwable t2) {
                 err("odc 转发失败: " + t2.toString());

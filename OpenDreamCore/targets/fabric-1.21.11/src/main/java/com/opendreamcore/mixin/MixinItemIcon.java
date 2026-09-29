@@ -12,8 +12,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 物品图标覆写（1.21.8 专用）：这版 GuiGraphics 只剩 9 参 blit（uv 比例），
- * 覆写图整张画就是 uv 0-1。
+ * 物品图标覆写（1.21.11 专用）：这版 GuiGraphics 只剩 9 参 blit（uv 比例）。
+ * 整图直出零切割：uv 全幅（0-1）就是整张贴图；gif 用帧表当前帧切片
+ * （tickAll 推进，自动播动画）；规则按显示名匹配（textureFor 带 hoverName）。
  */
 @Mixin(GuiGraphics.class)
 public abstract class MixinItemIcon {
@@ -25,16 +26,25 @@ public abstract class MixinItemIcon {
             return;
         }
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        String tex = VisualItemSkins.textureFor(id);
+        String tex = VisualItemSkins.textureFor(id, stack.getHoverName().getString());
         if (tex == null) {
             return;
         }
-        Identifier rl = LooseResourceLoader.lookup(tex);
-        if (rl == null) {
+        var si = LooseResourceLoader.sheetOf(tex);
+        if (si == null) {
             return;
         }
+        float u0 = 0.0F;
+        float u1 = 1.0F;
+        if (si.frames() > 1) {
+            float step = 1.0F / si.frames();
+            u0 = si.frame() * step;
+            u1 = u0 + step;
+        }
+        Identifier rl = si.rl();
         GuiGraphics g = (GuiGraphics) (Object) this;
-        g.blit(rl, x, y, 16, 16, 0.0F, 0.0F, 1.0F, 1.0F);
+        // 整图直出：uv 全幅；gif 切当前帧区间
+        g.blit(rl, x, y, 16, 16, u0, 0.0F, u1, 1.0F);
         ci.cancel();
     }
 }

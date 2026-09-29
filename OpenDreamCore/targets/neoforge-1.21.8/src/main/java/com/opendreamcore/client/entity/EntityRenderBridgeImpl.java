@@ -70,45 +70,19 @@ public final class EntityRenderBridgeImpl implements EntityRenderBridge {
         }
     }
 
-    /**
-     * 按 id 反射取 EntityType：兼容老端直接返回实体类型 / 新版返回 Optional<Reference>；
-     * create 签名各版本漂移（1.21.8+ 加 SpawnReason），统一反射创建。
-     */
+    /** 按 id 取实体类型：直调注册表（getValue 找不到返回 null，不做按名反射）。 */
     private static Object resolveEntityType(String id) {
-        try {
-            Class<?> regClass = Class.forName("net.minecraft.core.registries.BuiltInRegistries");
-            Object reg = regClass.getField("ENTITY_TYPE").get(null);
-            Class<?> rlClass = Class.forName("net.minecraft.resources.ResourceLocation");
-            Object rl = rlClass.getMethod("tryParse", String.class).invoke(null, id);
-            Object got = reg.getClass().getMethod("get", Object.class).invoke(reg, rl);
-            if (got instanceof java.util.Optional<?> opt) {
-                return opt.map(o -> {
-                    try {
-                        return o.getClass().getMethod("value").invoke(o);
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }).orElse(null);
-            }
-            return got;
-        } catch (Throwable t) {
+        net.minecraft.resources.ResourceLocation rl = net.minecraft.resources.ResourceLocation.tryParse(id);
+        if (rl == null) {
             return null;
         }
+        return net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(rl);
     }
 
-    /** 反射创建实体：找单参 create 且参数能接收该 level 的重载。 */
-    private static Object createEntity(Object type, Object level) {
-        try {
-            for (var m : type.getClass().getMethods()) {
-                if (m.getName().equals("create") && m.getParameterCount() == 1) {
-                    if (m.getParameterTypes()[0].isAssignableFrom(level.getClass())) {
-                        return m.invoke(type, level);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+    /** 造展示实体：1.21.5+ 的 create 需要 EntitySpawnReason。 */
+    private static Object createEntity(net.minecraft.world.entity.EntityType<?> type,
+                                       net.minecraft.world.level.Level level) {
+        return type.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
     }
 
     @Override

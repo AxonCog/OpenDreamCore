@@ -22,9 +22,11 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 @Mixin(HumanoidArmorLayer.class)
 public abstract class MixinArmorLayer {
 
-    @Redirect(method = "render(Lcom/mojang/blaze3d/vertex/PoseStack;"
-            + "Lnet/minecraft/client/renderer/MultiBufferSource;I"
-            + "Lnet/minecraft/client/renderer/entity/state/HumanoidRenderState;FF)V",
+    // 调用点位于 renderArmorPiece 内部（不是 render）：写错目标方法会扫到 0 个调用点导致注入失败。
+    @Redirect(method = "renderArmorPiece(Lcom/mojang/blaze3d/vertex/PoseStack;"
+            + "Lnet/minecraft/client/renderer/MultiBufferSource;"
+            + "Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/EquipmentSlot;"
+            + "ILnet/minecraft/client/model/HumanoidModel;)V",
             at = @At(value = "INVOKE",
                     target = "Lnet/minecraft/client/renderer/entity/layers/EquipmentLayerRenderer;"
                             + "renderLayers(Lnet/minecraft/client/resources/model/EquipmentClientInfo$LayerType;"

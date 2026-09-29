@@ -19,18 +19,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 物品图标覆写（1.16.5）：ItemIcon 规则命中就把原版图标换成自定义贴图。
  * renderGuiItem 是 2D 图标入口，画完 cancel 掉原版那套。
+ *
+ * 注入串写 srg 名：这代没有运行时反混淆，注解里的名字不会被重映射。
  */
 @Mixin(ItemRenderer.class)
 public abstract class MixinItemIcon {
 
-    @Inject(method = "renderGuiItem(Lnet/minecraft/item/ItemStack;II)V",
+    @Inject(method = "func_175042_a(Lnet/minecraft/item/ItemStack;II)V",
             at = @At("HEAD"), cancellable = true)
     private void opendreamcore$overrideIcon(ItemStack stack, int x, int y, CallbackInfo ci) {
         if (stack == null || stack.isEmpty()) {
             return;
         }
         String id = ForgeRegistries.ITEMS.getKey(stack.getItem()).toString();
-        String tex = LegacyVisualItemIcons.textureFor(id);
+        String tex = LegacyVisualItemIcons.textureFor(id,
+                stack.getDisplayName().getString());
         if (tex == null) {
             return;
         }

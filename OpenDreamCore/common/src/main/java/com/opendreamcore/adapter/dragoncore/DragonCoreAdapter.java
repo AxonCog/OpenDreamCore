@@ -14,7 +14,7 @@ import java.util.Map;
  * 龙核方言适配器（住在 adapter/dragoncore/ 这个龙核专用文件夹里的那位）。
  *
  * 龙核（DragonCore）老服主的配置文件不能白扔：plugins/DragonCore/ 顶层的
- * 原生配置，由他认领并翻译成 ODC 九系统规则。链上第一位（priority=0），
+ * 原生配置，由他认领并翻译成 ODC 十系统规则。链上第一位（priority=0），
  * 只要装了龙核就是他先说话。
  *
  * 认领表就在这（Blood.yml → HeadTag 这种"名字不一样但说的是一回事"的
@@ -30,7 +30,7 @@ import java.util.Map;
  */
 public final class DragonCoreAdapter implements Adapter, AdapterChain.Prioritized {
 
-    /** 龙核方言文件名 → 九系统名（认领表；小写比对，别跟服主的大小写较劲）。 */
+    /** 龙核方言文件名 → 十系统名（认领表；小写比对，别跟服主的大小写较劲）。 */
     private static final Map<String, String> FILE_ROUTES = buildRoutes();
 
     private static Map<String, String> buildRoutes() {

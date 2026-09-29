@@ -37,6 +37,7 @@ sourceSets {
     main {
         java.srcDir "$buildDir/generated/common-main"
         java.srcDir "$buildDir/generated/client-main"
+        java.srcDir "$buildDir/generated/worldrender-1.21.8"
         resources.srcDir '../../common/src/main/resources'
     }
 }
@@ -51,6 +52,11 @@ tasks.register('prepareClientSources', Sync) {
     from('../../client/src/main/java')
     into "$buildDir/generated/client-main"
 }
+tasks.register('prepareWorldRender1218', Sync) {
+    from('../../gensrc/worldrender-1.21.8/src/main/java')
+    into "$buildDir/generated/worldrender-1.21.8"
+}
+
 tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift' }
 
 // 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
@@ -176,7 +182,7 @@ tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
 
 // 1.21.2+ DynamicTexture 构造器需标签参数（贴图调试名）：生成副本机械重映射
 tasks.register('remapDrift') {
-    dependsOn 'prepareCommonSources', 'prepareClientSources'
+    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareWorldRender1218'
     doLast {
         [file("$buildDir/generated/common-main"), file("$buildDir/generated/client-main")].each { dir ->
             if (!dir.exists()) return
@@ -192,3 +198,5 @@ tasks.register('remapDrift') {
 tasks.named('compileJava').configure { dependsOn 'remapDrift' }
 tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
 tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
+
+tasks.named('prepareWorldRender1218') { outputs.upToDateWhen { false } }

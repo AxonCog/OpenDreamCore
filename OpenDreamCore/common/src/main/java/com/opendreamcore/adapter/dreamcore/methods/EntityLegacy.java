@@ -51,6 +51,18 @@ public final class EntityLegacy {
         Object aimedEntity();
         String field(String field);
         Object nearby(String type, double range);
+
+        /**
+         * 头顶页面语境字段：当前渲染名牌的实体（HeadTag/Blood 页面表达式里的
+         * 方法.取实体血量() 等由此取值，优先于指向实体）。field 取
+         * health / maxHealth / name / height / ratio；无语境返回 null。
+         */
+        default Object headField(String field) { return null; }
+    }
+
+    /** 头顶语境字段读取（client 安装实现；未安装或无当前实体返回 null）。 */
+    public static Object headField(String field) {
+        return h().headField(field);
     }
 
     private static String str(Object[] a, int i) {

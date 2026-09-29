@@ -47,10 +47,19 @@ public final class VisualItemSkins {
      * 类型名会去掉命名空间前缀（minecraft:diamond_sword → diamond_sword）再匹配。
      */
     public static String textureFor(String itemType) {
+        return textureFor(itemType, null);
+    }
+
+    /**
+     * 带显示名匹配：龙核规则常按物品名（match/name）命中——调用点必须把
+     * stack.getHoverName() 传进来，否则按名规则永远不命中（物品贴图整体失效主因之一）。
+     */
+    public static String textureFor(String itemType, String displayName) {
         ensureLoaded();
         String t = stripNs(itemType);
+        String dn = displayName == null ? "" : displayName;
         for (SkinEntry e : entries) {
-            if (e.spec().matches(new ItemView(t, "", List.of(), Map.of()))) {
+            if (e.spec().matches(new ItemView(t, dn, List.of(), Map.of()))) {
                 return e.texture();
             }
         }

@@ -212,7 +212,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         pages.load();
 
         // 视觉规则管理器：
-        // 九系统的规则 YAML 装载与 ready 时下发；目录缺失自动生成默认示例
+        // 十系统的规则 YAML 装载与 ready 时下发；目录缺失自动生成默认示例
         visualRules = new com.opendreamcore.plugin.server.visual.VisualRuleManager(
                 getDataFolder().toPath());
         // 服务器装了龙核的话，plugins/DragonCore/ 下的原生配置一并翻译并入
@@ -269,7 +269,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         // 服务端自己的 themes/ 目录也进库——附属用 ThemeAPI 注册、
         // 或服主直接丢文件都行；服务端侧页面编译/校验即用即取。
         Path themeDir = getDataFolder().toPath().resolve("themes");
-        try { Files.createDirectories(themeDir); } catch (Exception ignored) {}
+        try { Files.createDirectories(themeDir); } catch (Exception ignored) { /* 目录已存在或不可创建：主题加载将自行报错 */ }
         int themeCount = com.opendreamcore.api.ThemeAPI.get().loadFromDir(themeDir);
         getLogger().info("主题已加载 " + themeCount + " 个 (" + themeDir + ")");
 
@@ -297,7 +297,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         getCommand("odc").setTabCompleter(command);
         getLogger().info("命令 /odc 已就绪（executor/tabcompleter 就位；permissionless 直发，权限在 onCommand 自查）");
 
-        // 文件监听自动热重载（UI / resources / tooltips / themes / 视觉九系统）
+        // 文件监听自动热重载（UI / resources / tooltips / themes / 视觉十系统）
         if (getConfig().getBoolean("file-watcher.enabled", true)) {
             watcher = new com.opendreamcore.plugin.server.UiWatcher(this,
                     getConfig().getLong("file-watcher.debounce-ms", 300));
@@ -310,9 +310,9 @@ public class OpenDreamCorePlugin extends JavaPlugin {
             }
             // 扩展目录（R3：DreamLang 扩展脚本/页面包，附属开发者的投放点）
             watcher.watch(getDataFolder().toPath().resolve("extensions"));
-            // 统一规则库目录（九系统的同名文件夹形态之外的根文件形态）
+            // 统一规则库目录（十系统的同名文件夹形态之外的根文件形态）
             watcher.watch(getDataFolder().toPath().resolve("systems"));
-            // 龙核配置目录也监听：服主改 DragonCore 的 yml，九系统跟着热重载
+            // 龙核配置目录也监听：服主改 DragonCore 的 yml，十系统跟着热重载
             Path watchedDragonCore = visualRules.getExternalRoot();
             if (watchedDragonCore != null) {
                 watcher.watch(watchedDragonCore);

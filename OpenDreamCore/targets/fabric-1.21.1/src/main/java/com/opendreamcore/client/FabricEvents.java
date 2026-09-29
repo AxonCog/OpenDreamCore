@@ -56,6 +56,9 @@ public final class FabricEvents {
     }
 
     public static void register() {
+        // 生产环境 ResourceLocation 方法名是 intermediary，共享模块反射找不到——注入本版本编译期工厂
+        com.opendreamcore.client.CompatRender.setRlFactory(
+                (ns, path) -> net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(ns, path));
         // 实体渲染桥（entity/model 组件 GUI 渲染）
         com.opendreamcore.client.entity.EntityViews.register(
                 new com.opendreamcore.client.entity.EntityRenderBridgeImpl());
@@ -132,7 +135,8 @@ public final class FabricEvents {
                 (message, overlay) -> ClientController.get().addChatMessage(LegacyText.toLegacy(message)));
 
         // 世界全息（实体渲染后）+ 名牌（与 NeoForge onRenderLevel 对齐）
-        WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+        // 挂 LAST（世界渲染最末），理由同 1.20.1 侧：避免在实体中段插入世界叠加几何。
+        WorldRenderEvents.LAST.register(context -> {
             var camera = context.camera();
             float partialTick = context.tickCounter().getGameTimeDeltaPartialTick(false);
             ClientController.get().renderWorld(camera, partialTick);

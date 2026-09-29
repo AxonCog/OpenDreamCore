@@ -60,7 +60,7 @@ public final class ChatSoundScheduleLegacy {
                 if (url != null && !J8.isBlank(url)) {
                     java.awt.Desktop.getDesktop().browse(new java.net.URI(url));
                 }
-            } catch (Exception ignored) { }
+            } catch (Exception ignored) { /* 浏览器/URI 异常：功能降级静默 */ }
             return null;
         });
         LegacyMethods.register("game_advancements", a -> null);
@@ -115,7 +115,7 @@ public final class ChatSoundScheduleLegacy {
         LegacyMethods.register("get_tick_counter", a -> 0.0);
         LegacyMethods.register("reset_tick_counter", a -> null);
         LegacyMethods.register("thread_sleep", a -> {
-            try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { }
+            try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { /* 睡眠被打断：静默恢复，不影响调度 */ }
             return null;
         });
 
@@ -204,7 +204,9 @@ public final class ChatSoundScheduleLegacy {
             return null;
         });
         LegacyMethods.register("debug", a -> {
-            System.out.println("[ODC-debug] " + (a.length > 0 ? String.valueOf(a[0]) : ""));
+            if (Boolean.getBoolean("odc.debug")) {
+                System.out.println("[ODC-debug] " + (a.length > 0 ? String.valueOf(a[0]) : ""));
+            }
             return null;
         });
         LegacyMethods.register("println", a -> {

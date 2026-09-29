@@ -76,6 +76,34 @@ public final class ClientKeyConfigTrigger {
         }
     }
 
+    /**
+     * 按规则 ID 找组合（脚本 Key.模拟按下 / 旧版「按键指令」桥）：
+     * ID 精确匹配，取该规则第一个键元素归一为规范组合；老形态键名即组合串，按 ID 触发即触发它自己。
+     * 找不到返回 null。
+     */
+    public static String firstComboOfRule(Map<String, String> rulesYaml, String ruleId) {
+        for (String yaml : rulesYaml.values()) {
+            try {
+                Map<String, Object> ir = new com.opendreamcore.config.YamlParser().parse(yaml);
+                if (ir == null) {
+                    continue;
+                }
+                for (Map.Entry<String, Object> e : ir.entrySet()) {
+                    if (!ruleId.equals(e.getKey())) {
+                        continue;
+                    }
+                    if (e.getValue() instanceof Map<?, ?> m && m.containsKey("keys")) {
+                        var keys = asStringList(m.get("keys"));
+                        return keys.isEmpty() ? null : KeyCombo.canonical(keys.get(0));
+                    }
+                    return KeyCombo.canonical(ruleId);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
     private static java.util.List<String> asStringList(Object o) {
         java.util.List<String> out = new java.util.ArrayList<>();
         if (o instanceof java.util.List<?> l) {
