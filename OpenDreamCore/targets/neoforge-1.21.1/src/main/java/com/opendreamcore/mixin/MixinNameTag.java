@@ -30,7 +30,7 @@ public abstract class MixinNameTag {
     private void opendreamcore$replaceNameTag(Entity entity, Component displayName,
                                               PoseStack pose, MultiBufferSource buffer,
                                               int light, float partialTick, CallbackInfo ci) {
-        VisualNameTags.Hit hit = VisualNameTags.hitFor(entity);
+        VisualNameTags.Hit hit = VisualNameTags.pendingHit(entity); // 匹配已前置到 dispatcher（见 MixinEntityDispatcher）
         if (hit == null) {
             return; // 没规则命中，原版名牌照旧
         }
@@ -73,10 +73,12 @@ public abstract class MixinNameTag {
         float b = (bg & 0xFF) / 255.0F;
         float left = -fw / 2.0F;
         float top = -fh / 2.0F;
-        quad.addVertex(matrix, left, top, 0.0F).setColor(r, g, b, a);
-        quad.addVertex(matrix, left, top + fh, 0.0F).setColor(r, g, b, a);
-        quad.addVertex(matrix, left + fw, top + fh, 0.0F).setColor(r, g, b, a);
-        quad.addVertex(matrix, left + fw, top, 0.0F).setColor(r, g, b, a);
+        // 1.20.5+ 的 textBackgroundSeeThrough 格式是 POSITION_COLOR_LIGHTMAP：四条顶点必须补 setLight，
+        // 否则缺 UV2 的不完整顶点毒化共享批次，下一次 getBuffer 冲刷直接崩（2026-10-02 18:40 实机定根）。
+        quad.addVertex(matrix, left, top, 0.0F).setColor(r, g, b, a).setLight(light);
+        quad.addVertex(matrix, left, top + fh, 0.0F).setColor(r, g, b, a).setLight(light);
+        quad.addVertex(matrix, left + fw, top + fh, 0.0F).setColor(r, g, b, a).setLight(light);
+        quad.addVertex(matrix, left + fw, top, 0.0F).setColor(r, g, b, a).setLight(light);
         // 文字（白底黑边配色：规则文字色）
         font.drawInBatch(text, -tw / 2.0F, -font.lineHeight / 2.0F,
                 style.textColor(), false, matrix, buffer, Font.DisplayMode.NORMAL, 0, light);

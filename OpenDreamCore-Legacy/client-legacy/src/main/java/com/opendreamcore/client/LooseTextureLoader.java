@@ -221,6 +221,11 @@ public final class LooseTextureLoader {
                 return e.getValue();
             }
         }
+        // 云兼底：云文件不在散装资源扫描根里，同步下来没人注册（图标/字符贴图取不到）
+        String cloud = LegacyCloudTextureFallback.tryRegister(want);
+        if (cloud != null) {
+            return cloud;
+        }
         return null;
     }
 

@@ -82,6 +82,21 @@ OpenDreamCore-Plugin/
 平台层（targets/）只包含加载器特定代码：
 入口类、网络注册、事件钩子。
 
+## 反臃肿门禁（规范 §10）
+
+改完代码顺手跑一遍（纯静态，不用编译）：
+
+```bash
+python .github/scripts/check_bloat.py                  # 全仓体检（报告模式，永远不失败）
+python .github/scripts/check_bloat.py --gate OpenDreamCore/common/src/main/java/com/opendreamcore/core
+python .github/scripts/check_bloat.py --selftest        # 改了规则必须跑：证明规则真会抓
+```
+
+规则是给**新代码**立的，存量违规记在 `.github/scripts/bloat-baseline.txt`，所以门禁只对**新增**违规失败。
+细则（12 条规则的实现近似程度、豁免名单、基线为什么不带行号、已知未覆盖）都在 `.github/scripts/README.md`。
+提 PR 前请自查三点：① 新写的类 ≤500 行、方法 ≤60 行；② 热路径要反射得说明理由，否则走句柄缓存/索引；
+③ 新增/修改规则时，必须同时在 `--selftest` 里加夹具。
+
 ## 提交规范
 
 ```

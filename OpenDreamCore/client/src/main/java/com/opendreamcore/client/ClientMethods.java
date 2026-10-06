@@ -43,6 +43,7 @@ public final class ClientMethods {
         UuidMethods.register();
         DisplayMethods.register();
         CameraMethods.register();
+        com.opendreamcore.client.methods.ModelMethods.register();
         MessageMethods.register();
         TipMethods.register();
         KeyMethods.register();

@@ -6,14 +6,19 @@
   "client": [
     "MixinNetworkFilters",
     "MixinNameTag",
+    "MixinEntityDispatcher",
     "MixinCursor",
     "MixinArmorLayer",
     "MixinItemIcon",
+    "MixinItemHeldSubmit",
     "MixinItemEffect",
     "MixinTooltip",
     "MixinGuiGraphicsExtractor",
     "FontSetSourceMixin",
-    "WorldRenderTypeMixin"
+    "WorldRenderTypeMixin",
+    "OdcCameraMixin",
+    "OdcFovMixin",
+    "OdcEntityModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

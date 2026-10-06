@@ -34,6 +34,9 @@ public final class Diagnostics {
                 ? "§aHUD 常驻 " + cc.hudPageId()
                 : (cc.isOpen() ? "已开 " + cc.currentPageId() : "§7无")));
         out.add("  本地页面: " + cc.localPages().ids().size() + " 个");
+        // 相机子系统（M1.2）：规则条数 + 当前播放状态，实机核对运镜时不用翻日志
+        out.add("  相机: " + com.opendreamcore.client.camera.CameraPlayback.get().statusLine()
+                + " §7规则 " + com.opendreamcore.camera.CameraStore.get().rules().size() + " 条");
         out.add("  §7想操作服务器页面就找服务器插件的 /odc，两边互不借道§r");
         return out;
     }

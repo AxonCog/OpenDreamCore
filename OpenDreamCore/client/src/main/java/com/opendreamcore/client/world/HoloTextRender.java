@@ -64,6 +64,7 @@ public final class HoloTextRender {
 
     public static void renderText(PoseStack pose, MultiBufferSource buffers, RenderNode node,
                                   double fade, String scope, Map<String, Object> pageVars, double[] drag) {
+        com.opendreamcore.client.PerfProbe.countText();
         Map<?, ?> spec = com.opendreamcore.client.UiRenderer.propsMap(node, "text");
         String content = com.opendreamcore.client.UiRenderer.interpolate(
                 node, com.opendreamcore.client.UiRenderer.str(spec.get("content")), pageVars);
@@ -131,8 +132,25 @@ public final class HoloTextRender {
         pose.popPose();
     }
 
-    /** 世界文本自动折行：按字体像素宽度逐字折行（中文/英文都适用）。 */
+    /** 规则重载时清空折行缓存（上限淘汰是保底，主动清更干净）。 */
+    public static void clearWrapCache() {
+        WRAP_CACHE.clear();
+    }
+
+    /** 折行结果缓存：键 = 文本 + \u0001 + 宽度上限。文本含 {vars} 插值，值一变键就换，
+     *  静态文本（规则里绝大多数）整帧零重折。上限 1024，超限不再收新条目。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.List<String>> WRAP_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 世界文本自动折行：按字体像素宽度逐字折行（中文/英文都适用）。
+     *  原实现是 O(n²)：每折一个字符就对累计串量一次宽。折行结果只取决于
+     *  (文本, maxPx)，按对缓存，命中时零 font.width 调用。 */
     public static java.util.List<String> wrapText(Font font, String text, int maxPx) {
+        String key = text + '\u0001' + maxPx;
+        java.util.List<String> cached = WRAP_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
         java.util.List<String> out = new java.util.ArrayList<>();
         StringBuilder cur = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
@@ -147,6 +165,9 @@ public final class HoloTextRender {
         }
         if (cur.length() > 0) {
             out.add(cur.toString());
+        }
+        if (WRAP_CACHE.size() < 1024) {
+            WRAP_CACHE.put(key, out);
         }
         return out;
     }

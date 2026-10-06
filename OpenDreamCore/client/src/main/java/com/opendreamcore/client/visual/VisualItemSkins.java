@@ -60,10 +60,28 @@ public final class VisualItemSkins {
         String dn = displayName == null ? "" : displayName;
         for (SkinEntry e : entries) {
             if (e.spec().matches(new ItemView(t, dn, List.of(), Map.of()))) {
+                reportHit(t, e.texture());
                 return e.texture();
             }
         }
         return null;
+    }
+
+    /** 命中与缺图的提示：以前全是静默返回 null，用户只能看到“图标没换”。 */
+    private static final java.util.Set<String> HIT_LOG = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final java.util.Set<String> MISS_LOG = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static void reportHit(String itemType, String texture) {
+        if (texture == null || !HIT_LOG.add(itemType + "|" + texture)) {
+            return;
+        }
+        com.opendreamcore.client.OdcDebug.log("[ODC-itemicon] 命中规则: " + itemType + " -> " + texture);
+        if (MISS_LOG.add(texture)
+                && com.opendreamcore.client.resources.LooseResourceLoader.sheetOf(texture) == null) {
+            com.opendreamcore.client.OdcDebug.log("[ODC-itemicon] 但贴图取不到: " + texture
+                    + "（resourcepacks/OpenDreamCore 和 OpenDreamCore 下都没有同名文件，"
+                    + "把 png 放进去即可；也支持 http(s) 开头的链接）");
+        }
     }
 
     /** 命中条目的换帧间隔（gif 用）；无声明 null。单次遍历（渲染热路径，逐帧都会查）。 */
@@ -93,6 +111,18 @@ public final class VisualItemSkins {
         try {
             Map<String, Object> ir = new com.opendreamcore.config.YamlParser().parse(yamlText);
             if (ir == null) {
+                return out;
+            }
+            // 平铺形态（服务端 VisualRuleManager 逐条 VisualYaml.dump 下发的就是它）：
+            // 规则体直接在根层（match/texture 平铺），顶层不再包规则 id。
+            // 判别用 texture 的值类型：平铺时是字符串；嵌套文档里若真有叫 texture 的规则 id，
+            // 它的值是规则体 Map，不会被误判。两种形态同时兼容，互不干扰。
+            if (ir.get("texture") instanceof String rootTex && !rootTex.isBlank()) {
+                var spec0 = MatchSpec.parse(ir);
+                Double frameMs0 = ir.get("frame_ms") instanceof Number n0 ? n0.doubleValue() : null;
+                out.add(new SkinEntry(spec0, 0, rootTex, frameMs0,
+                        num(ir.get("scale"), 1), bool(ir.get("held")),
+                        bool(ir.get("center"))));
                 return out;
             }
             int prio = 0;

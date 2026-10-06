@@ -135,6 +135,8 @@ public final class CloudCache {
 
     public static void handleDone(CloudDone done) {
         synced = true;
+        // 刚下来的文件之前可能被记成「云里也没有」，清一下才能被按需贴图找到
+        LegacyCloudTextureFallback.reset();
         LOGGER.info("[ODC] 云资源同步完成");
     }
 

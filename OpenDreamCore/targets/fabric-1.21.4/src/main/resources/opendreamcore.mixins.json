@@ -6,13 +6,18 @@
   "client": [
     "MixinGui",
     "MixinItemIcon",
+    "MixinItemHeld",
     "MixinNameTag",
+    "MixinEntityDispatcher",
     "MixinTooltip",
     "MixinItemEffect",
     "MixinSubtitleOverlay",
     "MixinArmorLayer",
     "MixinCursor",
-    "FontSetMixin"
+    "FontSetMixin",
+    "OdcCameraMixin",
+    "OdcFovMixin",
+    "OdcEntityModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

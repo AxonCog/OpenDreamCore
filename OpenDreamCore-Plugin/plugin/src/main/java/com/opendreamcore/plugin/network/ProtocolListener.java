@@ -505,7 +505,7 @@ public final class ProtocolListener implements PluginMessageListener {
     /** 广播全部页面给所有已握手玩家（文件热重载后同步新内容）。 */
     public void broadcastPages() {
         // 必须按玩家编译后下发：原文含 DreamLang 函数块/条件/占位符，
-        // 客户端解析会丢元素（和 ready 推送同款，别图省事发原文）
+        // 客户端解析会丢元素（和 ready 推送一致，别图省事发原文）
         for (Player online : plugin.getServer().getOnlinePlayers()) {
             if (!isReady(online)) {
                 continue;

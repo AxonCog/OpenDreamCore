@@ -310,7 +310,7 @@ public final class PackInstaller {
         }
     }
 
-    /** 包名安全化：接 basename、非法字符换下划线（中文保留）、补 .zip——与服务端 PackAPI.safeName 同款。 */
+    /** 包名安全化：接 basename、非法字符换下划线（中文保留）、补 .zip——白名单与服务端 PackAPI.safeName 一致。 */
     private static String sanitizePackName(String raw) {
         String name = raw.replace('\\', '/');
         int slash = name.lastIndexOf('/');
@@ -439,7 +439,7 @@ public final class PackInstaller {
     private static Path extractForRead(Path zip, String password) throws IOException {
         Path dest = managedPackDir(zip).toAbsolutePath().normalize();
         if (Files.exists(dest) && !Files.isDirectory(dest)) {
-            // 同名普通文件占着坑（比如玩家手工放过一个无后缀文件），别覆盖别人的东西
+            // 同名普通文件已存在（玩家手工放过的无后缀文件）时不覆盖
             throw new IOException("解压目标被同名文件占用: " + dest);
         }
         Files.createDirectories(dest);

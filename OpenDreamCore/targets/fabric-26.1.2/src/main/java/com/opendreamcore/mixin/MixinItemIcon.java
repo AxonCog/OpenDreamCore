@@ -48,4 +48,25 @@ public abstract class MixinItemIcon {
         g.blit(rl, x, y, 16, 16, u0, 0.0F, u1, 1.0F);
         ci.cancel();
     }
+    // 容器槽位四参重载（seed）：TrMenu 等菜单的图标从这条路出（1.21.1 实机实证）。
+    @Inject(method = "item(Lnet/minecraft/world/item/ItemStack;III)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconSeed(ItemStack stack, int x, int y, int seed, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
+    // 物品展示框/实体手持经 LivingEntity 重载：一并拦截，否则展示框图标绕过替换。
+    @Inject(method = "item(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/item/ItemStack;III)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconEntity(net.minecraft.world.entity.LivingEntity entity, ItemStack stack, int x, int y, int seed, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
+    // renderFakeItem/fakeItem 直调路径（配方书等）：一并拦截，防绕过。
+    @Inject(method = "fakeItem(Lnet/minecraft/world/item/ItemStack;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconFake(ItemStack stack, int x, int y, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
 }

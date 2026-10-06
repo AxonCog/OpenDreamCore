@@ -122,6 +122,7 @@ public final class LooseResourceLoader {
         GIFS.clear();
         GIF_FPS.clear();
         PENDING.clear();
+        CloudTextureFallback.reset();
     }
 
     /** 注册表查询：命中返回 RL（gif 给当帧），未命中 null。 */
@@ -172,7 +173,8 @@ public final class LooseResourceLoader {
                 return e.getValue();
             }
         }
-        return null;
+        // 云兼底：贴图可能是服务端同步下来的（磁盘上是加密+哈希名，不在上面的扫描根里）
+        return CloudTextureFallback.tryRegister(want);
     }
 
     /** FontConfig 的 fps 字段落地：纹理名 → gif 播放帧率（0=用 gif 自带帧间隔）。 */
@@ -311,39 +313,16 @@ public final class LooseResourceLoader {
         return null;
     }
 
-        /** 1x1 白色纹理（世界名牌背景等纯色 quad 用）；懒注册（渲染线程）。 */
-    private static volatile ResourceLocation whiteRl;
-
+        /** 纯色 quad 的贴图（1x1 白）。三级来源与告警都在 {@link WhiteTextureSource}。 */
     public static ResourceLocation whiteTexture() {
-        if (whiteRl == null) {
-            synchronized (LooseResourceLoader.class) {
-                if (whiteRl == null) {
-                    try {
-                        var img = whitePixelImage();
-                        ResourceLocation rl = com.opendreamcore.client.CompatRender.rl("opendreamcore", "loose/_white");
-                        Object tex = com.opendreamcore.client.CompatRender.newDynamicTexture(img);
-                        if (tex != null) {
-                            Minecraft.getInstance().getTextureManager().register(rl,
-                                    (net.minecraft.client.renderer.texture.AbstractTexture) tex);
-                            whiteRl = rl;
-                            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理注册成功: " + rl); }
-                        } else {
-                            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理 newDynamicTexture 返回 null（反射构造失败）"); }
-                        }
-                    } catch (Throwable t) {
-                        if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] 白色纹理注册失败: " + t); }
-                    }
-                }
-            }
-        }
-        return whiteRl;
+        return WhiteTextureSource.get();
     }
 
     /** 1×1 不透明白色 NativeImage：走 PNG 直调路径（跨映射可靠，见 toPngNative 注释）。
      *  以前是「反射 setPixelRGBA / setColor 双名探测」——在 Fabric 生产环境（方法名是
      *  intermediary 的 method_xxxx）两个名字都不存在，写进去的像素全是 0，
      *  于是纯色 quad（名牌背景等）整片透明。 */
-    private static NativeImage whitePixelImage() throws IOException {
+    static NativeImage whitePixelImage() throws IOException {
         BufferedImage bi = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         bi.setRGB(0, 0, 0xFFFFFFFF);
         return toPngNative(bi);
@@ -527,7 +506,7 @@ public final class LooseResourceLoader {
             LOGGER.info("本机散装资源渲染线程注册完成：{} 个", n);
             // 本地纹理（包区/资源云/散装目录）批量就绪：失效字形判定缓存，
             // 引用这些纹理的替换字符下一帧自动接管（否则 usable 首次判定在纹理就绪前，
-            // 永远走原版字形——历史静默坑）。
+            // 走原版字形）。
             com.opendreamcore.client.visual.ReplaceFontProvider.invalidateTextures();
         }
         return n;
@@ -573,7 +552,7 @@ public final class LooseResourceLoader {
             return toPngNative(bi);
         } catch (Throwable t) {
             if (Boolean.getBoolean("odc.debug")) {
-                System.out.println("[ODC-diag] 图片转 NativeImage 失败: " + t);
+                com.opendreamcore.client.OdcDebug.log("[ODC-diag] 图片转 NativeImage 失败: " + t);
             }
             return null;
         }

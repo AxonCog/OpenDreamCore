@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import com.opendreamcore.client.elements.BadgeIconDraws;
 import com.opendreamcore.client.elements.ButtonDraws;
 import com.opendreamcore.client.elements.CardDraws;
@@ -114,6 +115,8 @@ public final class UiRenderer {
     private static final Pattern TEMPLATE = Pattern.compile("\\{\\{\\s*([^}]+?)\\s*}}");
     /** 单花括号页面变量：{vars.xxx} / {global.xxx}（与 {{vars.xxx}} 等价，双写法都支持）。 */
     private static final Pattern VARS_BRACE = Pattern.compile("\\{(vars|global)\\.[^}]+}");
+    /** 裸名页面变量：{health} / {name} —— 头顶页/血条实时值就靠它，能解析才替换。 */
+    private static final Pattern BARE_BRACE = Pattern.compile("\\{([A-Za-z_][A-Za-z0-9_.]*)}");
 
     private UiRenderer() {
     }
@@ -984,7 +987,7 @@ public final class UiRenderer {
         CompatRender.poseTranslate(pose, -icon / 2.0, -icon / 2.0);
         g.renderItem(stack, 0, 0);
         if (count > 1) g.renderItemDecorations(font, stack, 0, 0);
-        // ItemIcon 皮肤覆盖（旋转展示同款待遇：整图直出 + gif 动画）
+        // ItemIcon 皮肤覆盖（与旋转展示相同：整图直出 + gif 动画）
         overlayItemSkin(g, id, stack);
         CompatRender.posePop(pose);
     }
@@ -1009,7 +1012,7 @@ public final class UiRenderer {
         if (si == null) {
             return;
         }
-        CompatRender.blit(g, si.rl(), 0, 0, 16, 16,
+        GuiBlitCompat.blit(g, si.rl(), 0, 0, 16, 16,
                 si.frame() * si.frameW(), 0, si.frameW(), si.frameH(),
                 si.frameW() * si.frames(), si.frameH());
     }
@@ -1066,6 +1069,18 @@ public final class UiRenderer {
         if (content == null) {
             return null;
         }
+        PerfProbe.countInterpolation();
+        long t0 = PerfProbe.enabled() ? System.nanoTime() : 0L;
+        try {
+            return interpolate0(node, content, pageVars);
+        } finally {
+            if (PerfProbe.enabled()) {
+                PerfProbe.msInterpolate += (System.nanoTime() - t0) / 1_000_000L;
+            }
+        }
+    }
+
+    private static String interpolate0(RenderNode node, String content, java.util.Map<String, Object> pageVars) {
         Matcher m = TEMPLATE.matcher(content);
         StringBuilder sb = new StringBuilder();
         while (m.find()) {
@@ -1083,12 +1098,21 @@ public final class UiRenderer {
             vb.appendReplacement(out, Matcher.quoteReplacement(value == null ? vb.group() : String.valueOf(value)));
         }
         vb.appendTail(out);
+        // 裸名变量：{health} / {name} / {entity.health_ratio}（龙核与头顶模板的写法）
+        StringBuilder bare = new StringBuilder();
+        Matcher bb = BARE_BRACE.matcher(out.toString());
+        while (bb.find()) {
+            String path = bb.group(1);
+            Object value = resolvePath(pageVars, path);
+            bb.appendReplacement(bare, Matcher.quoteReplacement(value == null ? bb.group() : String.valueOf(value)));
+        }
+        bb.appendTail(bare);
         // 多语言占位符：{lang.键名} → 客户端语言文件（游戏目录覆盖 / 模组资源 / en_us 回退）
-        return WorldLang.resolve(com.opendreamcore.script.PlaceholderRegistry.resolve(out.toString()));
+        return WorldLang.resolve(com.opendreamcore.script.PlaceholderRegistry.resolve(bare.toString()));
     }
 
     private static Object resolvePath(java.util.Map<String, Object> pageVars, String path) {
-        com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+        com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
         if (pageVars != null) {
             pageVars.forEach(scope::assignVar);
         }

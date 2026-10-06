@@ -47,7 +47,7 @@ public final class RemotePrefetch {
             return;
         }
         boolean gif = u.toLowerCase(java.util.Locale.ROOT).endsWith(".gif");
-        if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] 预取: " + (gif ? "gif" : "图片") + " " + u); }
+        if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] 预取: " + (gif ? "gif" : "图片") + " " + u); }
         try {
             if (gif) {
                 com.opendreamcore.client.GifPlayer.of(u);
@@ -55,7 +55,7 @@ public final class RemotePrefetch {
                 com.opendreamcore.client.RemoteImageStore.get(u);
             }
         } catch (Throwable t) {
-            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] 预取触发失败: " + u + " 原因=" + t); }
+            if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] 预取触发失败: " + u + " 原因=" + t); }
         }
     }
 

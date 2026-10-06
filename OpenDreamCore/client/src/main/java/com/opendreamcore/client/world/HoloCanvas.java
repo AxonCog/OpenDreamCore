@@ -53,9 +53,9 @@ public final class HoloCanvas {
         com.opendreamcore.client.CompatRender.defaultBlendFunc();
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         com.opendreamcore.client.CompatRender.setColorShader();
-        var builder = com.opendreamcore.client.CompatRender.begin(
-                com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = com.opendreamcore.client.render.WorldSolidRect.begin(
+                com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
+        builder.fixedUv(0F, 0F);
         for (Object brushObj : brushes) {
             if (!(brushObj instanceof Map<?, ?> m)) {
                 continue;

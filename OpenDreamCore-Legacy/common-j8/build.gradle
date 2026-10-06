@@ -17,7 +17,7 @@ plugins {
     id 'java-library'
 }
 
-version = '0.1.2.2'
+version = '0.2.1'
 group = 'com.opendreamcore'
 
 java {

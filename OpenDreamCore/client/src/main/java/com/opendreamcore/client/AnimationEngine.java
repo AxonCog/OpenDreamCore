@@ -315,9 +315,9 @@ public final class AnimationEngine {
             }
             if (vars != null) {
                 try {
-                    com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                    com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
                     vars.forEach(scope::assignVar);
-                    Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+                    Object r = com.opendreamcore.script.engine.DreamLang.evaluate(s, scope);
                     if (r instanceof Number n) {
                         return n.doubleValue();
                     }

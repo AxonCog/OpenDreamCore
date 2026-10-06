@@ -237,7 +237,7 @@ public final class ChatSoundScheduleLegacy {
         if (code.isEmpty()) return;
         if (!code.endsWith(")") && !code.contains("(")) code = code + "()";
         try {
-            com.opendreamcore.script.DreamLang.execute(code, null);
+            com.opendreamcore.script.engine.DreamLang.execute(code, null);
         } catch (Throwable t) {
             System.out.println("[ODC-fn-error] " + t.getMessage());
         }

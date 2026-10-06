@@ -1,5 +1,6 @@
 package com.opendreamcore.client.visual;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import com.opendreamcore.client.CompatRender;
 import com.opendreamcore.client.UiRenderer;
 import com.opendreamcore.client.resources.LooseResourceLoader;
@@ -143,11 +144,11 @@ public final class GlyphRenderer {
         }
         if (si.frames() > 1) {
             // gif 帧表：横向按当前帧偏移像素 uv（帧宽 = 单帧像素宽）
-            CompatRender.blitGuiTextured(g, si.rl(), x, y, glyph.width(), glyph.height(),
+            GuiBlitCompat.blitGuiTextured(g, si.rl(), x, y, glyph.width(), glyph.height(),
                     si.frame() * si.frameW(), 0, si.frameW(), si.frameH(),
                     si.frameW() * si.frames(), si.frameH());
         } else {
-            CompatRender.blitGuiTextured(g, si.rl(), x, y, glyph.width(), glyph.height(),
+            GuiBlitCompat.blitGuiTextured(g, si.rl(), x, y, glyph.width(), glyph.height(),
                     glyph.u(), glyph.v(), glyph.frameW(), glyph.frameH(), si.frameW(), si.frameH());
         }
     }
@@ -159,7 +160,6 @@ public final class GlyphRenderer {
         if (si == null) {
             return;
         }
-        var consumer = buffer.getBuffer(RenderType.text(si.rl()));
         float w = Math.max(1, g.frameW());
         float h = Math.max(1, g.frameH());
         float u0;
@@ -180,7 +180,24 @@ public final class GlyphRenderer {
             u1 = (g.u() + g.frameW()) / texW;
             v1 = (g.v() + g.frameH()) / texH;
         }
-        // 顶点 API 版本漂移（1.20.1 vertex/uv/color/light）统一走 CompatRender 全链垫片
-        CompatRender.glyphQuad(consumer, matrix, x, y, w, h, u0, v0, u1, v1, packedLight);
+        // 自立批次直写（CompatBuffer 编译期直调，生产重映射有效），不再写进共享 bufferSource 的
+        // text 批次。旧实现走反射顶点链写 text 批次，生产映射下 setLight
+        // 失配被吞，留下缺 UV2（光照）的不完整顶点；下一次 getBuffer 冲刷该批次时
+        // “Missing elements in vertex: UV2” 直接崩客户端。独立批次即使有异常也只影响自身。
+        com.opendreamcore.client.CompatRender.enableBlend();
+        com.opendreamcore.client.CompatRender.defaultBlendFunc();
+        com.opendreamcore.client.CompatRender.setShaderTexture(0, si.rl());
+        com.opendreamcore.client.CompatRender.setTextureShader();
+        com.opendreamcore.client.CompatRender.shaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        try (com.opendreamcore.client.CompatBuffer buf = com.opendreamcore.client.CompatRender.begin(
+                com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
+                com.opendreamcore.client.CompatRender.worldTextureFormat())) {
+            com.opendreamcore.client.CompatRender.texturedVertex(buf, matrix, x, y, u0, v0, 1.0F);
+            com.opendreamcore.client.CompatRender.texturedVertex(buf, matrix, x, y + h, u0, v1, 1.0F);
+            com.opendreamcore.client.CompatRender.texturedVertex(buf, matrix, x + w, y + h, u1, v1, 1.0F);
+            com.opendreamcore.client.CompatRender.texturedVertex(buf, matrix, x + w, y, u1, v0, 1.0F);
+        } catch (Throwable t) {
+            com.opendreamcore.model.bake.ModelLog.warn("字形独立批次绘制失败（跳过）: " + t);
+        }
     }
 }

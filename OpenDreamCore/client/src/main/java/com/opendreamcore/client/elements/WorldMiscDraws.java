@@ -1,5 +1,6 @@
 package com.opendreamcore.client.elements;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import net.minecraft.resources.ResourceLocation;
 
 import com.opendreamcore.client.GifPlayer;
@@ -329,7 +330,7 @@ public final class WorldMiscDraws {
         double y = node.y() + UiRenderer.num(m.get("y"), 0);
         double w = UiRenderer.num(m.get("width"), 16);
         double h = UiRenderer.num(m.get("height"), 16);
-        CompatRender.blit(g, texture, (int) x, (int) y, (int) w, (int) h, 0.0F, 0.0F, (int) w, (int) h, (int) w, (int) h);
+        GuiBlitCompat.blit(g, texture, (int) x, (int) y, (int) w, (int) h, 0.0F, 0.0F, (int) w, (int) h, (int) w, (int) h);
     }
 
     /** 顶部 Boss 条：暗屏 + 分段血条 + 居中文字（P3 由服务端控制进度）。 */

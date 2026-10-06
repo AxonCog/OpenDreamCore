@@ -84,7 +84,7 @@ class ViewportTest {
         assertTrue(Viewport.of(1920, 800, 1920, 800).isIdentity());
         // 合规基准 1080 正常启用（半缩放下非恒等）
         assertFalse(Viewport.of(1920, 1080, 960, 540).isIdentity());
-        // 注意：合规基准在等尺寸屏幕上 s=1、无偏移，isIdentity() 恰为 true（老包等价），
+        // 合规基准在等尺寸屏幕上 s=1、无偏移，isIdentity() 为 true（老包等价），
         // 这不代表被闸门退回——用 designWidth 佐证基准已被记住
         assertEquals(1920.0, Viewport.of(1920, 1080, 1920, 1080).designWidth(), EPS);
     }

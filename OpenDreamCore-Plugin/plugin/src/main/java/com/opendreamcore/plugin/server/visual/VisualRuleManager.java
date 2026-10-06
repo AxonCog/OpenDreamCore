@@ -12,16 +12,16 @@ import java.util.Map;
 /**
  * 服务端视觉规则管理器。
  *
- * 启动/reload 时对十个系统做双形态装载（根文件 + 同名文件夹，缺失自动生成
+ * 启动/reload 时对各系统做双形态装载（根文件 + 同名文件夹，缺失自动生成
  * 默认示例），把全部规则原文打包成 VisualRulesSync 在玩家 ready 时下发——
  * 匹配与渲染在客户端，服务端只负责"谁生效"的权威分发。
  */
 public final class VisualRuleManager {
 
-    /** 十系统的固定清单：system 名 → 数据目录相对名（同名）。 */
+    /** 视觉系统的固定清单：system 名 → 数据目录相对名（同名）。 */
     public static final List<String> SYSTEMS = java.util.Arrays.asList(
             "ItemIcon", "ItemEffect", "HeadTag", "Blood", "FontConfig", "ArmorLayer",
-            "KeyConfig", "Sounds", "WorldTexture", "SlotConfig");
+            "KeyConfig", "Sounds", "WorldTexture", "SlotConfig", "Camera", "EntityModel", "ItemModel");
 
     private final Path dataRoot;
     // system → (规则id → 规则 YAML 原文)
@@ -63,7 +63,7 @@ public final class VisualRuleManager {
                     com.opendreamcore.visual.VisualRules.load(dataRoot, system);
             Map<String, String> bundle = new LinkedHashMap<>();
             for (Map.Entry<String, Map<String, Object>> e : rules.entrySet()) {
-                bundle.put(e.getKey(), dumpYaml(e.getValue()));
+                bundle.put(e.getKey(), com.opendreamcore.visual.VisualYaml.dump(e.getValue()));
                 total++;
             }
             if (!bundle.isEmpty()) {
@@ -125,7 +125,7 @@ public final class VisualRuleManager {
                         k -> new LinkedHashMap<>());
                 for (Map.Entry<String, Map<String, Object>> rule : entry.getValue().entrySet()) {
                     String id = "dc/" + rule.getKey();
-                    bundle.put(id, dumpYaml(rule.getValue()));
+                    bundle.put(id, com.opendreamcore.visual.VisualYaml.dump(rule.getValue()));
                     if (system.equals("KeyConfig")) {
                         keyRules.put(id, rule.getValue());
                     }
@@ -180,38 +180,6 @@ public final class VisualRuleManager {
      * 极简 YAML 序列化：规则 IR 都是两层以内的标量/map，
      * 不引第三方依赖，手写足够（值里的特殊字符走引号包裹）。
      */
-    private static String dumpYaml(Map<String, Object> ir) {
-        StringBuilder sb = new StringBuilder();
-        dumpMap(ir, sb, 0);
-        return sb.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void dumpMap(Map<String, Object> ir, StringBuilder sb, int depth) {
-        String pad = repeat("  ", depth);
-        for (Map.Entry<String, Object> e : ir.entrySet()) {
-            Object v = e.getValue();
-            if (v instanceof Map<?, ?> child) {
-                sb.append(pad).append(e.getKey()).append(":\n");
-                dumpMap((Map<String, Object>) child, sb, depth + 1);
-            } else if (v instanceof List<?> list) {
-                for (Object item : list) {
-                    sb.append(pad).append(e.getKey()).append(": ").append(scalar(item)).append('\n');
-                }
-            } else {
-                sb.append(pad).append(e.getKey()).append(": ").append(scalar(v)).append('\n');
-            }
-        }
-    }
-
-    private static String scalar(Object v) {
-        String s = String.valueOf(v);
-        boolean needQuote = s.contains(": ") || s.startsWith("#") || s.contains(" #")
-                || s.contains("{") || s.contains("[") || (s).trim().isEmpty()
-                || s.matches(".*\\d.*") && (s.startsWith("0") && s.length() > 1);
-        return needQuote ? '"' + s.replace("\"", "'") + '"' : s;
-    }
-
     private static String sha32(String text) {
         try {
             var d = java.security.MessageDigest.getInstance("SHA-256");
@@ -226,17 +194,8 @@ public final class VisualRuleManager {
         }
     }
 
-    /** 供协议层取"要下发的系统列表"。 */
+    /** 供协议层取“要下发的系统列表”。 */
     public List<String> systems() {
         return new ArrayList<>(SYSTEMS);
-    }
-
-    /** Java11 才有 String.repeat，这里手动拼。 */
-    private static String repeat(String s, int n) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < n; i++) {
-            sb.append(s);
-        }
-        return sb.toString();
     }
 }

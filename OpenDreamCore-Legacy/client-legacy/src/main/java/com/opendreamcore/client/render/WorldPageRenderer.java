@@ -155,12 +155,12 @@ public final class WorldPageRenderer {
             return def;
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             Map<String, Object> ent = Placeholders.entityScopeMap();
             if (ent != null) {
                 scope.assign("entity", ent);
             }
-            Object out = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            Object out = com.opendreamcore.script.engine.DreamLang.evaluate(s, scope);
             if (out instanceof Number) {
                 return ((Number) out).doubleValue();
             }

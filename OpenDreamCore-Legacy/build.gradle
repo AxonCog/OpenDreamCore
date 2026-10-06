@@ -34,7 +34,8 @@ tasks.register('verifySharedLayer') {
             throw new GradleException('mod_version 未定义，无法核对内嵌共享层')
         }
         def problems = []
-        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+        // 1.6.4 已冻结：不随版本重建、不参与本核对（它的产物停在 0.1.2.2，永远追不上当前版本号）。
+        ['1.7.10', '1.12.2', '1.16.5'].each { v ->
             def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
             def jar = file("targets/forge-${v}/build/libs/${name}")
             if (!jar.exists()) {
@@ -55,7 +56,7 @@ tasks.register('verifySharedLayer') {
             problems.each { println "  ${it}" }
             throw new GradleException("verifySharedLayer: ${problems.size} 处共享层缺失，先烘 :common-j8:jar 再重建相关 target")
         }
-        println 'verifySharedLayer: 四版内嵌共享层类齐备（FontRules/VisualRules）'
+        println 'verifySharedLayer: 三版内嵌共享层类齐备（FontRules/VisualRules）'
     }
 }
 tasks.register('collectOutput') {
@@ -71,7 +72,8 @@ tasks.register('collectOutput') {
         legacyOut.mkdirs()
         allOut.mkdirs()
         def missing = []
-        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+        // 1.6.4 已冻结（产物停在 0.1.2.2，不再随版本重建），因此不参与本轮汇总与硬门禁。
+        ['1.7.10', '1.12.2', '1.16.5'].each { v ->
             def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
             def src = file("targets/forge-${v}/build/libs/${name}")
             if (!src.exists()) { missing << name; return }
@@ -87,13 +89,13 @@ tasks.register('collectOutput') {
             }?.each { it.delete() }
         }
         if (missing) {
-            // 硬门禁：四个远古产物缺任何一个就失败。以前这里只 println 提醒，
-            // 提醒没人盯，结果 1.6.4/1.7.10 长期停在旧产物上，外面看就像它们没编。
+            // 硬门禁：在建的三个远古产物缺任何一个就失败。以前这里只 println 提醒，
+            // 提醒没人盯，结果 1.7.10 长期停在旧产物上，外面看就像它们没编。
             // 发布面不允许“少一个但构建通过”。
             missing.each { println "  MISSING ${it}" }
-            throw new GradleException("collectOutput: 四个远古产物缺 ${missing.size} 个，发布面不完整")
+            throw new GradleException("collectOutput: 在建的三个远古产物缺 ${missing.size} 个，发布面不完整")
         } else {
-            println "collectOutput: 4/4 legacy 产物已汇入 output/legacy 与 output/all"
+            println "collectOutput: 3/3 legacy 产物已汇入 output/legacy 与 output/all（1.6.4 冻结，不参与）"
         }
     }
 }
@@ -111,6 +113,7 @@ tasks.register('collectOutput') {
 def targetBuilds = [
         'forge-1.16.5': 'targets/forge-1.16.5',
         'forge-1.12.2': 'targets/forge-1.12.2',
+        'forge-1.7.10': 'targets/forge-1.7.10',
 ]
 
 def activeTargets = targetBuilds.findAll { name, dir -> file("${dir}/build.gradle").exists() }
@@ -133,6 +136,19 @@ activeTargets.each { targetName, dir ->
         // 1.12.2 真栽过这个：它的 jar 比共享层还早建，连 visual/FontRules 都没进去。
         dependsOn ':common-j8:jar'
         workingDir rootDir
+        // 子工程各自的 Gradle 版本对 JVM 有硬要求（1.7.10 用的是 Gradle 2.14，只能跑 JDK8，
+        // 碰到 JDK9+ 直接报 "Could not determine java version from '24.0.1'"）。
+        // 这里把子工程 gradle.properties 里声明的 org.gradle.java.home 作为该 Exec 的 JAVA_HOME，
+        // 避免继承外层 shell 的新版 JDK。声明缺失时不动环境。
+        def ownProps = file("${dir}/gradle.properties")
+        if (ownProps.exists()) {
+            def p = new Properties()
+            ownProps.withInputStream { p.load(it) }
+            def jh = p.getProperty('org.gradle.java.home')
+            if (jh) {
+                environment 'JAVA_HOME', jh
+            }
+        }
         commandLine 'cmd', '/c', gradlewFor(dir), '-p', dir.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
     }
 }

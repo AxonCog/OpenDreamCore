@@ -6,8 +6,8 @@ import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import com.opendreamcore.plugin.event.OdcEvents;
 import com.opendreamcore.plugin.page.ServerPageManager;
 import com.opendreamcore.protocol.message.UiEvent;
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.Scope;
 import org.bukkit.entity.Player;
 
 import java.util.Map;

@@ -6,6 +6,7 @@ import com.opendreamcore.client.CompatRender;
 import com.opendreamcore.client.UiRenderer;
 import com.opendreamcore.client.UiStyle;
 import com.opendreamcore.client.WorldHologram;
+import com.opendreamcore.client.render.WorldSolidRect;
 import com.opendreamcore.ui.RenderNode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -56,8 +57,8 @@ public final class HoloDecor {
         CompatRender.defaultBlendFunc();
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
+        builder.fixedUv(0F, 0F);
         if (box) {
             // 上/下/左/右四条边框
             edge(builder, matrix, -hw, -hh, hw, -hh + t, r, g, b, a);
@@ -104,8 +105,8 @@ public final class HoloDecor {
         CompatRender.defaultBlendFunc();
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
+        builder.fixedUv(0F, 0F);
         // 四层同心辉光：1.25x / 1.6x / 2.1x / 2.8x，透明度递减
         float[] alphas = {0.30F, 0.16F, 0.08F, 0.04F};
         float[] scales = {1.25F, 1.6F, 2.1F, 2.8F};
@@ -157,8 +158,8 @@ public final class HoloDecor {
         CompatRender.defaultBlendFunc();
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
+        builder.fixedUv(0F, 0F);
         // 三层向下偏移阴影：偏移 0.08/0.16/0.26，透明度递减，尺寸微扩
         float[] alphas = {0.30F, 0.14F, 0.06F};
         float[] offsets = {0.08F, 0.16F, 0.26F};
@@ -228,8 +229,8 @@ public final class HoloDecor {
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
             CompatRender.setColorShader();
             var matrix = pose.last().pose();
-            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
+            builder.fixedUv(0F, 0F);
             int seg = 12;
             float prevX = (float) rb;
             float prevY = 0;
@@ -344,8 +345,8 @@ public final class HoloDecor {
         CompatRender.defaultBlendFunc();
         WorldHologram.applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
+        builder.fixedUv(0F, 0F);
         float rr = (float) Math.max(0, Math.min(borderRadius, Math.min(w, h) / 2));        if (rr > 0.01F) {
             // 圆角描边：四条直边（端点内缩 rr）+ 四角圆弧（半径 rr..rr+t）；虚线/双线仅直线矩形支持
             edge(builder, matrix, -hw + rr, -hh, hw - rr, -hh + t, r, g, b, a);
@@ -613,8 +614,8 @@ public final class HoloDecor {
         CompatRender.defaultBlendFunc();
         CompatRender.disableDepthTest();
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
+        builder.fixedUv(0F, 0F);
         // 四边框（比 hover 粗）
         edge(builder, matrix, -hw, -hh, hw, -hh + t, r, g, b, a);
         edge(builder, matrix, -hw, hh - t, hw, hh, r, g, b, a);

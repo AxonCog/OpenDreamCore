@@ -41,21 +41,18 @@ final class Painters {
         return type == null ? "" : type.toLowerCase(Locale.ROOT).replace("_", "");
     }
 
+    /**
+     * 数字取值：数字直接取，字符串按表达式求值（当前作用域由 {@link ExprValues} 提供）。
+     *
+     * <p>求值失败或没作用域时返回 0，与旧行为一致。
+     */
     public static double num(Object v) {
-        return v instanceof Number ? ((Number) v).doubleValue() : 0;
+        return ExprValues.num(v, 0);
     }
 
+    /** 同上，求值失败/无作用域时用 fallback。 */
     public static double num(Object v, double fallback) {
-        if (v instanceof Number) {
-            return ((Number) v).doubleValue();
-        }
-        if (v != null) {
-            try {
-                return Double.parseDouble(String.valueOf(v));
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return fallback;
+        return ExprValues.num(v, fallback);
     }
 
     public static String str(Object v) {

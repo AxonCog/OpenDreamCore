@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 光标形态（1.21.4）：这版 GuiGraphics 的 blit 全删了（只剩 blitSprite），
  * Screen 也没有可 @Shadow 的鼠标字段，直接用 render 参数 + fill 示意。
- * 与 fabric-1.21.4 同款，跨平台行为一致。
+ * 与 fabric 版实现一致，跨平台行为相同。
  */
 @Mixin(Screen.class)
 public abstract class MixinCursor {

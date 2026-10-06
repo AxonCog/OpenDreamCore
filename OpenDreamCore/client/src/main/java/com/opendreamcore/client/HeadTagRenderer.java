@@ -54,6 +54,10 @@ public final class HeadTagRenderer {
 
     /** 实体渲染收尾统一绘制本帧全部名牌；结束清空帧登记（下一帧实体 hook 重新登记）。 */
     public static void renderFrame(Camera camera, float partialTick) {
+        long tFrame = com.opendreamcore.client.PerfProbe.enabled() ? System.nanoTime() : 0L;
+        com.opendreamcore.client.camera.CameraPathDrag.poll(Minecraft.getInstance(), camera); // M1.8 L2 拖拽/撤销轮询（会话未激活时无操作）
+        com.opendreamcore.client.camera.CameraPathHolo.render(camera, partialTick); // M1.7 运镜路径全息（编辑会话激活时才有开销）
+        com.opendreamcore.client.model.ModelPreviewHolo.render(camera, partialTick); // P6 模型全息预览（未开启时零开销）
         try {
             if (FRAME.isEmpty()) {
                 return;
@@ -68,18 +72,69 @@ public final class HeadTagRenderer {
                     continue;
                 }
                 for (VisualNameTags.Entry entry : it.getValue()) {
+                    diagTotal++;
+                    // 剔除前置：距离/背后实体零渲染调用（配合表达式缓存，静态场景每帧只剩矩阵变换）
+                    if (shouldSkip(entity, entry, camera)) {
+                        continue;
+                    }
+                    diagDrawn++;
                     drawHeadTag(entity, entry, camera, partialTick);
                 }
             }
         } catch (Exception e) {
             LOGGER.warn("HeadTag 渲染异常: {}", e.toString());
         } finally {
+            long now = System.currentTimeMillis();
+            if (now - lastDiagMs > 30_000) {
+                lastDiagMs = now;
+                com.opendreamcore.client.OdcDebug.log(String.format(
+                        "[ODC-headtag] 帧诊断(30s): 登记%s 绘制%s 超距剔%s 背后剔%s",
+                        diagTotal, diagDrawn, diagDist, diagBack));
+                diagTotal = diagDrawn = diagDist = diagBack = 0;
+            }
             FRAME.clear();
+            if (com.opendreamcore.client.PerfProbe.enabled()) {
+                com.opendreamcore.client.PerfProbe.msRenderFrame += (System.nanoTime() - tFrame) / 1_000_000L;
+                com.opendreamcore.client.PerfProbe.frame();
+            }
         }
+    }
+
+    /**
+     * 剔除判定（渲染线程，每实体每帧一次，都是便宜运算）：
+     * ① 规则 distance > 0 且超距 → 跳；② 锚点在相机背后（点积 ≤ 0）→ 跳。
+     * 不做视锥精确判定：原版名牌 hook 本身已被视锥裁过，这里只挡漏网的。
+     */
+    /** 帧诊断：30 秒一行，报登记/绘制/剔除计数（用户实机无法看断点时的定根手段）。 */
+    private static long lastDiagMs;
+    private static int diagTotal, diagDrawn, diagDist, diagBack;
+
+    private static boolean shouldSkip(Entity entity, VisualNameTags.Entry entry, Camera camera) {
+        if (entry.distance() > 0.0) {
+            double dx = entity.getX() - camera.getPosition().x;
+            double dy = entity.getY() - camera.getPosition().y;
+            double dz = entity.getZ() - camera.getPosition().z;
+            if (dx * dx + dy * dy + dz * dz > entry.distance() * entry.distance()) {
+                diagDist++;
+                return true;
+            }
+        }
+        // 前向不调 getLookVector()（1.21.11 改名 forwardVector()），用全版本都在的
+        // rotation() 自乘：Camera.FORWARDS 在所有代都是 (0,0,1)
+        var look = new org.joml.Vector3f(0.0F, 0.0F, 1.0F).rotate(camera.rotation());
+        double rx = entity.getX() + entity.getBbHeight() * 0.5 - camera.getPosition().x;
+        double ry = entity.getY() + entity.getBbHeight() * 0.5 - camera.getPosition().y;
+        double rz = entity.getZ() - camera.getPosition().z;
+        boolean behind = rx * look.x + ry * look.y + rz * look.z <= 0.0;
+        if (behind) {
+            diagBack++;
+        }
+        return behind;
     }
 
     private static void drawHeadTag(Entity entity, VisualNameTags.Entry entry,
                                     Camera camera, float partialTick) {
+        com.opendreamcore.client.PerfProbe.countHeadTag();
         LegacyClientHost.install(); // 头顶页面脚本可用 方法.* 桩（含 CURRENT_ENTITY 实体语境）
         Page page = PAGES.computeIfAbsent(entry,
                 e -> VisualWorldPages.headTagToPage(e.ruleId(), e.pageIr()));
@@ -142,5 +197,9 @@ public final class HeadTagRenderer {
         PAGES.clear();
         NODES.clear();
         FRAME.clear();
+        // 表达式结果缓存一并清：键虽含变量值（规则重载自然出新键），规则换了就别留旧结果
+        com.opendreamcore.script.engine.DreamLang.clearEvalCache();
+        // 文本折行缓存同理：上限兕1024 自然淘汰，规则重载时主动清更干净
+        com.opendreamcore.client.world.HoloTextRender.clearWrapCache();
     }
 }

@@ -269,14 +269,14 @@ public final class ServerPageManager {
         @Override
         public boolean condition(String expr) {
             try {
-                com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
                 if (player != null) {
                     scope.assignPlayer("name", player.getName());
                     scope.assignPlayer("uuid", player.getUniqueId().toString());
                     scope.assignPlayer("health", (double) player.getHealth());
                     scope.assignPlayer("level", (double) player.getLevel());
                 }
-                Object result = com.opendreamcore.script.DreamLang.evaluate(expr, scope);
+                Object result = com.opendreamcore.script.engine.DreamLang.evaluate(expr, scope);
                 return result instanceof Boolean b ? b : result != null;
             } catch (Exception e) {
                 return false;
@@ -357,14 +357,14 @@ public final class ServerPageManager {
         if (match.when() != null && !match.when().trim().isEmpty()) {
             // 表达式条件：DreamLang 求值（player.xxx + 页面变量）
             try {
-                com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
                 if (player != null) {
                     scope.assignPlayer("name", player.getName());
                     scope.assignPlayer("uuid", player.getUniqueId().toString());
                     scope.assignPlayer("health", (double) player.getHealth());
                     scope.assignPlayer("level", (double) player.getLevel());
                 }
-                Object result = com.opendreamcore.script.DreamLang.evaluate(match.when(), scope);
+                Object result = com.opendreamcore.script.engine.DreamLang.evaluate(match.when(), scope);
                 if (!(result instanceof Boolean b) || !b) {
                     return false;
                 }

@@ -10,9 +10,16 @@
     "MixinCursor",
     "MixinArmorLayer",
     "MixinNameTag",
+    "MixinEntityDispatcher",
+    "MixinEntityDispatcher",
     "MixinItemEffect",
     "MixinItemIcon",
-    "FontSetMixin"
+    "MixinItemStatic",
+    "MixinItemHeld",
+    "FontSetMixin",
+    "OdcCameraMixin",
+    "OdcFovMixin",
+    "OdcEntityModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -50,7 +50,16 @@ public final class VisualRules {
 
         // 根文件先行
         if (Files.isRegularFile(rootFile)) {
-            out.putAll(parseRoot(rootFile, system));
+            Map<String, Object> raw = readRoot(rootFile, system);
+            if (raw != null) {
+                if (WHOLE_FILE_SYSTEMS.contains(system) && looksLikeWholeFilePage(raw)) {
+                    // 整份 HeadTag.yml = 一个头顶页。误当「每键一规则」时 entity/Functions/血条底
+                    // 会各变成一条都布局不出元素的规则，而 Mixin 已经交出原版名牌 → 名牌全没。
+                    out.put(system, raw);
+                } else {
+                    out.putAll(parseRoot(raw, system));
+                }
+            }
         }
         // 同名文件夹后扫，同 id 覆盖根文件的条目
         if (Files.isDirectory(dir)) {
@@ -99,27 +108,70 @@ public final class VisualRules {
 
     /** 根文件解析：map 键 = 规则 id。 */
     private static Map<String, Map<String, Object>> parseRoot(Path file, String system) {
-        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        Map<String, Object> raw = readRoot(file, system);
+        return raw == null ? new LinkedHashMap<String, Map<String, Object>>() : parseRoot(raw, system);
+    }
+
+    /** 读根文件并解析成 map（失败返回 null，记日志）。 */
+    private static Map<String, Object> readRoot(Path file, String system) {
         try {
             String text = J8.readString(file, StandardCharsets.UTF_8);
             Map<String, Object> raw = new YamlParser().parse(text);
-            if (raw == null) {
-                return out;
-            }
-            for (Map.Entry<String, Object> e : raw.entrySet()) {
-                if (e.getValue() instanceof Map<?, ?> m && !m.isEmpty()) {
-                    Map<String, Object> copy = new LinkedHashMap<>();
-                    for (Map.Entry<?, ?> de : m.entrySet()) {
-                        copy.put(String.valueOf(de.getKey()), de.getValue());
-                    }
-                    out.put(e.getKey(), copy);
-                }
-            }
+            return raw == null ? new LinkedHashMap<String, Object>() : raw;
         } catch (Exception e) {
             LOGGER.warning(() -> "[OpenDreamCore][visual] " + system + " 根文件解析失败: " + e);
+            return null;
+        }
+    }
+
+    private static Map<String, Map<String, Object>> parseRoot(Map<String, Object> raw, String system) {
+        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            if (e.getValue() instanceof Map<?, ?> m && !m.isEmpty()) {
+                Map<String, Object> copy = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> de : m.entrySet()) {
+                    copy.put(String.valueOf(de.getKey()), de.getValue());
+                }
+                out.put(e.getKey(), copy);
+            }
         }
         return out;
     }
+
+    /**
+     * 根文件是否就是「一页」（而非「多规则集合」）。
+     *
+     * <p>三个信号任一命中即是：
+     * ① 顶层出现非 map 值（entity: zombie / distance: 64 这类页面级标量）；
+     * ② 顶层出现页面级保留键（Functions/match/display/world/…）；
+     * ③ 顶层某个 map 元素自身带 type（说明它就是页面元素，不是规则容器）。
+     * 全不命中 → 按旧语义「每个顶层键一条规则」（多规则单文件写法照旧可用）。
+     */
+    static boolean looksLikeWholeFilePage(Map<String, Object> raw) {
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            Object v = e.getValue();
+            if (!(v instanceof Map<?, ?> m)) {
+                return true;
+            }
+            if (PAGE_LEVEL_KEYS.contains(e.getKey())) {
+                return true;
+            }
+            if (m.containsKey("type") || m.containsKey("hologram")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 「整文件即一条规则」的系统（龙核/老壳的 HeadTag/Blood 语义）。 */
+    private static final java.util.Set<String> WHOLE_FILE_SYSTEMS = J8.set("HeadTag", "Blood");
+
+    /** 页面级保留键（出现在顶层即说明这文件本身就是一个页面）。 */
+    private static final java.util.Set<String> PAGE_LEVEL_KEYS = J8.set(
+            "Functions", "match", "title", "display", "world", "through", "background",
+            "hideVanilla", "hideVanillaList", "animations", "draggable", "allowEscClose",
+            "theme", "design", "class", "style",
+            "entity", "实体", "contains", "包含", "distance", "offsetX", "offsetY", "y");
 
     /** 列出某系统目录下全部资产相对路径（调试/清单用）。 */
     public static List<String> listAssets(Path dir) {

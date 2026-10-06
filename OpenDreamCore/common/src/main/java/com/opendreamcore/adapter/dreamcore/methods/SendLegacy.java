@@ -31,7 +31,7 @@ public final class SendLegacy {
         LegacyMethods.register("执行", a -> {
             String script = LegacyMethods.str(a, 0);
             if (script != null && !J8.isBlank(script)) {
-                com.opendreamcore.script.DreamLang.execute(script, null);
+                com.opendreamcore.script.engine.DreamLang.execute(script, null);
             }
             return null;
         });
@@ -39,7 +39,7 @@ public final class SendLegacy {
             String script = LegacyMethods.str(a, 0);
             if (script != null && !J8.isBlank(script)) {
                 java.util.concurrent.CompletableFuture.runAsync(() ->
-                        com.opendreamcore.script.DreamLang.execute(script, null));
+                        com.opendreamcore.script.engine.DreamLang.execute(script, null));
             }
             return null;
         });

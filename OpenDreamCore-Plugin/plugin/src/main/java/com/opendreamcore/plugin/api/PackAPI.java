@@ -21,7 +21,7 @@ import java.util.Base64;
  * 两条通道（新客户端自动识别；老客户端只认 JSON 指令，会忽略字节流通道）：
  *   {@link #CHANNEL}      JSON 指令 {"spec","password","top"}——https url 原样转发，客户端自己下载；
  *   {@link #DATA_CHANNEL} 字节分片流 "push|名字|md5|大小|片数|置顶|密码B64" + "part|md5|序号|b64"，
- *                         与资源云同款 48KB 分块，远程玩家也能拿到服务端本地文件。
+ *                         48KB 分块，远程玩家也能拿到服务端本地文件。
  *
  * 用法（附属插件）：
  * <pre>
@@ -247,7 +247,7 @@ public final class PackAPI {
                 "part|" + md5 + "|" + seq + "|" + Base64.getEncoder().encodeToString(piece));
     }
 
-    /** 文件名安全化：掐 basename、掐掉协议保留字符（与客户端 sanitizePackName 同款白名单）、补 .zip。 */
+    /** 文件名安全化：掐 basename、掐掉协议保留字符（白名单与客户端 sanitizePackName 一致）、补 .zip。 */
     private static String safeName(String raw) {
         String name = raw.replace('\\', '/');
         int slash = name.lastIndexOf('/');

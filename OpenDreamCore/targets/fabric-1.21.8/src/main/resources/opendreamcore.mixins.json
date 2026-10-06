@@ -8,13 +8,18 @@
     "FontSetMixin",
     "MixinSubtitleOverlay",
     "MixinItemIcon",
+    "MixinItemHeld",
     "MixinItemEffect",
     "MixinNameTag",
+    "MixinEntityDispatcher",
     "MixinArmorLayer",
     "MixinCursor",
     "MixinTooltip",
     "MixinRenderPipelinesAccessor",
-    "MixinCompositeStateAccessor"
+    "MixinCompositeStateAccessor",
+    "OdcCameraMixin",
+    "OdcFovMixin",
+    "OdcEntityModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -1,5 +1,7 @@
 package com.opendreamcore.script;
 
+import com.opendreamcore.script.engine.DreamLangExecutor;
+
 import com.opendreamcore.util.J8;
 
 import java.util.ArrayList;

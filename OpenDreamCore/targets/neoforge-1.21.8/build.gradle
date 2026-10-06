@@ -38,6 +38,9 @@ sourceSets {
         java.srcDir "$buildDir/generated/common-main"
         java.srcDir "$buildDir/generated/client-main"
         java.srcDir "$buildDir/generated/worldrender-1.21.8"
+        java.srcDir "$buildDir/generated/camera-1.20-1.21.8"
+        java.srcDir "$buildDir/generated/camera-fov-1.21.4-1.21.11"
+        java.srcDir "$buildDir/generated/model-1.21.8"
         resources.srcDir '../../common/src/main/resources'
     }
 }
@@ -55,6 +58,25 @@ tasks.register('prepareClientSources', Sync) {
 tasks.register('prepareWorldRender1218', Sync) {
     from('../../gensrc/worldrender-1.21.8/src/main/java')
     into "$buildDir/generated/worldrender-1.21.8"
+}
+
+// camera-1.20-1.21.8/ 是 1.20.1/1.21.1/1.21.4/1.21.8 四代共用的相机接管混入
+// （这四代 Camera.setup 的首个形参都是 BlockGetter，签名同形）。
+tasks.register('prepareCamera120To1218', Sync) {
+    from('../../gensrc/camera-1.20-1.21.8/src/main/java')
+    into "$buildDir/generated/camera-1.20-1.21.8"
+}
+
+// camera-fov-1.21.4-1.21.11/ 是 M1.5 的 FOV 混入（gen2+gen3：1.21.4/1.21.8/1.21.11，getFov 返回 float）
+tasks.register('prepareCameraFov1214To12111', Sync) {
+    from('../../gensrc/camera-fov-1.21.4-1.21.11/src/main/java')
+    into "$buildDir/generated/camera-fov-1.21.4-1.21.11"
+}
+
+// model-1.21.8/ 实体模型替换（1.21.4/1.21.8：流式链同 1.21.1，RenderType 工厂仍在）
+tasks.register('prepareModel121418', Sync) {
+    from('../../gensrc/model-1.21.8/src/main/java')
+    into "$buildDir/generated/model-1.21.8"
 }
 
 tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift' }
@@ -182,7 +204,7 @@ tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
 
 // 1.21.2+ DynamicTexture 构造器需标签参数（贴图调试名）：生成副本机械重映射
 tasks.register('remapDrift') {
-    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareWorldRender1218'
+    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareWorldRender1218', 'prepareCamera120To1218', 'prepareCameraFov1214To12111', 'prepareModel121418'
     doLast {
         [file("$buildDir/generated/common-main"), file("$buildDir/generated/client-main")].each { dir ->
             if (!dir.exists()) return

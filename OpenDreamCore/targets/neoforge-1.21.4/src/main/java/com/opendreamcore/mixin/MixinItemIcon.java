@@ -64,4 +64,32 @@ public abstract class MixinItemIcon {
         consumer.addVertex(pose, x + w, y, z).setUv(u1, 0.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
         ci.cancel();
     }
+    // 容器槽位三参重载（seed）：TrMenu 等菜单的图标从这条路出（1.21.1 实机实证）。
+    @Inject(method = "renderItem(Lnet/minecraft/world/item/ItemStack;III)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconSeed(ItemStack stack, int x, int y, int seed, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
+    // 四参重载：一并拦。处理器参数必须与目标逐个对齐，少写一个 int 就是启动崩溃（11.02 实机教训）。
+    @Inject(method = "renderItem(Lnet/minecraft/world/item/ItemStack;IIII)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconSeed4(ItemStack stack, int x, int y, int seed, int extra, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
+    // 物品展示框/实体手持经 LivingEntity 重载：一并拦截，否则展示框图标绕过替换。
+    @Inject(method = "renderItem(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/item/ItemStack;III)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconEntity(net.minecraft.world.entity.LivingEntity entity, ItemStack stack, int x, int y, int seed, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
+    // renderFakeItem/fakeItem 直调路径（配方书等）：一并拦截，防绕过。
+    @Inject(method = "renderFakeItem(Lnet/minecraft/world/item/ItemStack;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void opendreamcore$overrideIconFake(ItemStack stack, int x, int y, CallbackInfo ci) {
+        opendreamcore$overrideIcon(stack, x, y, ci);
+    }
+
 }

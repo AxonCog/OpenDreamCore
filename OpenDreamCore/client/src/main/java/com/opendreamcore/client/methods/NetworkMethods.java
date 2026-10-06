@@ -45,7 +45,7 @@ public final class NetworkMethods {
         NamespaceRegistry.register("Network", args -> {
             // Network.订阅(通道, lambda) → 服务端下行分发（payload 作参数）；返回订阅 id
             if (args.length < 2 || args[0] == null
-                    || !(args[1] instanceof com.opendreamcore.script.DreamLangExecutor.Callable c)) {
+                    || !(args[1] instanceof com.opendreamcore.script.engine.DreamLangExecutor.Callable c)) {
                 return -1.0;
             }
             return (double) com.opendreamcore.script.EventBus.subscribe("custom:" + args[0], c);

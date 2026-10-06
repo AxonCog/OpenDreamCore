@@ -36,11 +36,21 @@ sourceSets {
         java.srcDir "$buildDir/generated/glyph-1.21.5+"
         java.srcDir "$buildDir/generated/worldrender-1.21.5+"
         java.srcDir "$buildDir/generated/worldrender-pipe-1.21.11"
+        java.srcDir "$buildDir/generated/camera-1.21.11"
+        java.srcDir "$buildDir/generated/camera-fov-1.21.4-1.21.11"
+        java.srcDir "$buildDir/generated/model-1.21.11"
+        java.srcDir "$buildDir/generated/itemicon-submit"
         resources.srcDir '../../common/src/main/resources'
     }
 }
 
 // common/ 源码原样复制；antlr4-runtime 的包路径重定向由 shadow 插件在打包阶段完成。
+// itemicon-submit/ 是 ItemIcon 手持替换胶水（1.21.11 + 26.1.2：submit 管线里拿得到 ItemStack 的提交点）
+tasks.register('prepareItemIconSubmit', Sync) {
+    from('../../gensrc/itemicon-submit/src/main/java')
+    into "$buildDir/generated/itemicon-submit"
+}
+
 tasks.register('prepareCommonSources', Sync) {
     from('../../common/src/main/java')
     into "$buildDir/generated/common-main"
@@ -69,7 +79,25 @@ tasks.register('prepareWorldRenderPipe12111', Sync) {
 }
 tasks.named('prepareCommonSources') { outputs.upToDateWhen { false } }
 tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources' }
+// camera-1.21.11/ 是 gen3（1.21.11）的相机接管混入：仅 Camera.setup 首参 BlockGetter→Level。
+tasks.register('prepareCamera12111', Sync) {
+    from('../../gensrc/camera-1.21.11/src/main/java')
+    into "$buildDir/generated/camera-1.21.11"
+}
+
+// camera-fov-1.21.4-1.21.11/ 是 M1.5 的 FOV 混入（gen2+gen3：1.21.4/1.21.8/1.21.11，getFov 返回 float）
+tasks.register('prepareCameraFov1214To12111', Sync) {
+    from('../../gensrc/camera-fov-1.21.4-1.21.11/src/main/java')
+    into "$buildDir/generated/camera-fov-1.21.4-1.21.11"
+}
+
+// model-1.21.11/ 实体模型替换（submit/RenderState 管线：extractRenderState+submit 注入）
+tasks.register('prepareModel12111', Sync) {
+    from('../../gensrc/model-1.21.11/src/main/java')
+    into "$buildDir/generated/model-1.21.11"
+}
+
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareItemIconSubmit' }
 
 // 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
 tasks.withType(JavaCompile).configureEach {
@@ -191,7 +219,7 @@ tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
 // ② Window.getWindow()(GLFW 句柄) 改名 handle()
 // ③ Screen.hasShiftDown/hasControlDown 移除 → CompatInput 反射垫片（FQN 避免补 import）
 tasks.register('remapDrift') {
-    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph1215Plus', 'prepareWorldRender1215Plus', 'prepareWorldRenderPipe12111'
+    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph1215Plus', 'prepareWorldRender1215Plus', 'prepareWorldRenderPipe12111', 'prepareCamera12111', 'prepareCameraFov1214To12111', 'prepareModel12111'
     doLast {
         // 1.21.9+ mojmap 输入系统重构：Screen 输入方法改为事件记录对象。
         // 仅改写 Screen 子类的覆写（OdcScreen/WorldEdit*Screen）；EditorPanels 是自有类保持原签名；

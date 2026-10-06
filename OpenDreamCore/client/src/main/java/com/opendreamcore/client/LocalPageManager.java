@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.util.ClientChat;
 import com.opendreamcore.config.PageSchema;
 import com.opendreamcore.config.YamlParser;
 import com.opendreamcore.page.DisplayMode;
@@ -75,9 +76,9 @@ public final class LocalPageManager {
                     raws.put(id, entry.getValue()); // 原文留着，布局报错要指行
                 } catch (Exception ex) {
                     ClientController.LOGGER.warn("本地页面解析失败 {}: {}", id, ex.toString());
-                    ClientController.chatWarnOnce("local-page:" + id,
+                    ClientChat.chatWarnOnce("local-page:" + id,
                             "§c[OpenDreamCore] §f本地页面 " + id + " 解析失败: "
-                                    + ClientController.shortReason(ex));
+                                    + ClientChat.shortReason(ex));
                 }
             }
         }
@@ -145,14 +146,14 @@ public final class LocalPageManager {
         if (match.when() != null && !match.when().isBlank()) {
             // 表达式条件：DreamLang 求值（player.xxx + 页面变量）
             try {
-                com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
                 var player = net.minecraft.client.Minecraft.getInstance().player;
                 if (player != null) {
                     scope.assignPlayer("name", player.getName().getString());
                     scope.assignPlayer("health", (double) player.getHealth());
                     scope.assignPlayer("level", (double) player.experienceLevel);
                 }
-                Object result = com.opendreamcore.script.DreamLang.evaluate(match.when(), scope);
+                Object result = com.opendreamcore.script.engine.DreamLang.evaluate(match.when(), scope);
                 if (!(result instanceof Boolean b) || !b) {
                     return false;
                 }

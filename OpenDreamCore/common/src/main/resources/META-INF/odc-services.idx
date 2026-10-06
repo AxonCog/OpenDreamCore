@@ -1,0 +1,11 @@
+# odc-services.idx —— OpenDreamCore 编译期服务索引（v1）
+# 由 .github/scripts/gen_index.py 从源码注解生成：**不要手改**（CI 用 --check 校验新鲜度）。
+#
+# 行格式（TAB 分隔）：KIND <TAB> key <TAB> 实现类名 <TAB> k=v <TAB> k=v ...
+#   SYSTEM      key=系统 id            impl=实现类（implements SystemImpl）
+#               属性：cn / en / snake / side / sync / hotReload / schema
+#   METHOD      key=命名空间           impl=全类名#方法名（必须是 static (ScriptContext,Object[])→Object）
+#               属性：cn / en / snake / args / desc
+#   CAPABILITY  key=能力接口全名        impl=实现类
+#
+# 运行期语义：行不合法或条目重复 → 记一条 WARN 并跳过（启动绝不因此失败）。

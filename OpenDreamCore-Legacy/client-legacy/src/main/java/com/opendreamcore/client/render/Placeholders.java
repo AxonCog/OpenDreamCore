@@ -52,6 +52,7 @@ public final class Placeholders {
         m.put("name", s.name);
         m.put("type", s.typeId);
         m.put("health", s.health);
+        m.put("health_max", s.maxHealth); // 与现代端同名，别让配置分两套写法
         m.put("max_health", s.maxHealth);
         m.put("health_ratio", s.maxHealth > 0 ? s.health / s.maxHealth : 0.0);
         m.put("height", s.height);
@@ -114,8 +115,11 @@ public final class Placeholders {
             if ("health".equals(f)) {
                 return trimNum(s.health);
             }
-            if ("max_health".equals(f)) {
+            if ("max_health".equals(f) || "health_max".equals(f)) {
                 return trimNum(s.maxHealth);
+            }
+            if ("entity_height".equals(f) || "height_entity".equals(f)) {
+                return trimNum(s.height);
             }
             if ("health_ratio".equals(f)) {
                 return trimNum(s.maxHealth > 0 ? s.health / s.maxHealth : 0.0);
@@ -133,6 +137,30 @@ public final class Placeholders {
                 return trimNum(s.z);
             }
             return null;
+        }
+        // 实体裸名别名：{name}/{health}/{health_max}/{health_ratio}/{entity_height}
+        // ——头顶页与血条模板里的实时变量写法（现代端 UiRenderer 裸名同款，两边语义一致）
+        if (key.indexOf('.') < 0) {
+            Object ent = ENTITY.get();
+            if (ent instanceof com.opendreamcore.client.spi.EntitySource.Snapshot) {
+                com.opendreamcore.client.spi.EntitySource.Snapshot s =
+                        (com.opendreamcore.client.spi.EntitySource.Snapshot) ent;
+                if ("name".equals(key)) {
+                    return s.name;
+                }
+                if ("health".equals(key)) {
+                    return trimNum(s.health);
+                }
+                if ("health_max".equals(key) || "max_health".equals(key)) {
+                    return trimNum(s.maxHealth);
+                }
+                if ("health_ratio".equals(key)) {
+                    return trimNum(s.maxHealth > 0 ? s.health / s.maxHealth : 0.0);
+                }
+                if ("entity_height".equals(key)) {
+                    return trimNum(s.height);
+                }
+            }
         }
         if (key.startsWith("player.")) {
             PlayerInfoSource src = PlayerInfoSource.Host.current();

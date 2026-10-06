@@ -328,7 +328,7 @@ public final class RoadmapGapLegacy {
                             java.util.concurrent.TimeUnit.MILLISECONDS)
                     .execute(() -> {
                         try {
-                            com.opendreamcore.script.DreamLang.execute(c, null);
+                            com.opendreamcore.script.engine.DreamLang.execute(c, null);
                         } catch (Throwable ignored) {
                         }
                     });

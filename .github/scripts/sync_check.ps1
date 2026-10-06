@@ -9,9 +9,11 @@ $modernRoot = Join-Path $root 'OpenDreamCore\targets'
 $legacyRoot  = Join-Path $root 'OpenDreamCore-Legacy\targets'
 # 共享生成源树：1.21.4+ 目标的字体/世界渲染 mixin 由它们提供（构建时复制进 build/generated/<gen>），
 # 因此门禁扫源文件时必须把它们一起算进来。
-$genDirs = @('glyph-1.20-1.21.4', 'glyph-1.21.5+', 'worldrender-1.21.8', 'worldrender-1.21.5+',
-             'worldrender-pipe-1.21.11', 'worldrender-pipe-26.1.2')
+# 候选集从实际目录取，不写死列表：写死过一次，只列了 6 个 glyph/worldrender 组，漏掉
+# camera-* / camera-fov-* / model-*，于是 OdcCameraMixin / OdcFovMixin / OdcEntityModelMixin
+# 在 12 个现代目标全被报成「幽灵登记」——24 处假警报，真缺口会被噪声淹没。
 $genRoot = Join-Path $root 'OpenDreamCore\gensrc'
+$genDirs = @(if (Test-Path $genRoot) { Get-ChildItem $genRoot -Directory | ForEach-Object { $_.Name } })
 $fail = 0
 
 $modernTargets = @(

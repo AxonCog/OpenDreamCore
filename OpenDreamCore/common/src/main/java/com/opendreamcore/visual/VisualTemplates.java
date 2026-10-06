@@ -209,6 +209,136 @@ public final class VisualTemplates {
               skin: true                       # 时装兼容
             """;
 
+    public static final String CAMERA = """
+            # 相机运镜规则：shot=固定机位 | path=关键帧路径 | free=自由相机
+            # 服务端下发（visual/Camera.yml）或本地 /codc reload（gameDir/OpenDreamCore/visual/Camera.yml）
+            # 播放：/odc camera play <id> ｜ 停止：/odc camera stop ｜ 状态：/odc camera status
+            # 本文件只定义"有哪些运镜"，不自动播放
+            # 字段缺省即安全：不写 lock_input 就是不锁、不写 player 就是 keep
+
+            固定机位_城门:
+              type: shot                      # 固定机位
+              position: [128.5, 70.0, -32.5]  # 世界坐标（支持表达式写法，M1.3 起求值）
+              rotation: [90.0, 15.0]          # yaw, pitch（与 look 二选一，look 优先）
+              # look: 实体:剧情NPC_01         # 可选：看向目标（M1.4 起求值）
+              perspective: third_person_back  # first_person | third_person_back | third_person_front
+              player: hide_body               # hide_body=假人模式 | follow=随本体 | keep
+              transition: [20, 40]            # 进/出过渡 tick
+              lock_input: true                # 锁玩家移动/视角/交互
+              hide_hud: true                  # 隐藏原版 HUD
+              shake: [0.0, 0]                 # [强度, 时长tick]（M1.5 起生效）
+              stretch: 1.0                    # 视野拉伸倍率（M1.5 起生效）
+              interrupt: [damage, move]       # 打断策略（M1.5 起生效）
+              players: "@a[distance=..32]"    # 目标玩家（原样保留，服务端裁决时解析）
+
+            运镜_两点直线:
+              type: path                      # 最简路径：两点一线，播完自动停并恢复相机
+              duration: 6.0                   # 秒（不写则取末帧 t）
+              speed: 1.0                      # 时间轴倍速（>1 更快）
+              smooth: false                   # catmull-rom 平滑（M1.3 起生效；false=线性）
+              keyframes:
+                - t: 0.0
+                  pos: [100, 72, 0]           # 起点 A
+                  rot: [0, 0]
+                - t: 6.0
+                  pos: [120, 72, 20]          # 终点 B
+                  rot: [45, 0]
+
+            运镜_开场:
+              type: path                      # 关键帧路径（多点）
+              duration: 8.0                   # 秒
+              loop: false
+              speed: 1.0
+              smooth: true                    # catmull-rom 平滑（false=线性，M1.3 起生效）
+              transition: [10, 20]            # 进/出过渡 tick（过渡不占用 duration）
+              keyframes:
+                - t: 0.0
+                  pos: [100, 72, 0]
+                  rot: [0, 0]
+                  fov: 70
+                - t: 3.0
+                  pos: [110, 74, 10]
+                  rot: [45, -10]
+                - t: 8.0
+                  pos: [120, 68, 20]
+                  look: 实体:国王              # M1.4 起求值；本期靠上一帧的 rot 延续朝向
+
+            运镜_四点环绕:
+              type: path                      # 四点方角：验 M1.3 曲线（拐角被拉圆）与不抖
+              duration: 12.0                  # 秒
+              loop: false
+              speed: 1.0
+              smooth: true                    # true=Catmull-Rom（缺省就是 true，写出来是给读配置的人看）
+              transition: [10, 20]
+              keyframes:
+                - t: 0.0
+                  pos: [120, 74, 10]          # 绕 (110, 74, 10) 转一圈，半径 10
+                  rot: [90, -5]               # 朝心：yaw 90 = 面向 -X
+                - t: 4.0
+                  pos: [110, 74, 20]
+                  rot: [180, -5]
+                - t: 8.0
+                  pos: [100, 74, 10]
+                  rot: [270, -5]
+                - t: 12.0
+                  pos: [110, 74, 0]
+                  rot: [0, -5]                # 360 ≡ 0：最短角一路 +90，不会反向绕圈
+            """;
+
+    private static final String ENTITY_MODEL = """
+            # 实体模型替换：把生物/玩家/盔甲架换成自己的模型（本地模板 = _local_override，最后合并、覆盖服务器同名规则）
+            # 基础目录两处都扫（子文件夹随建）：OpenDreamCore/assets/model 与 resourcepacks/OpenDreamCore
+            # 写在 resourcepacks 里的包建议开 pack_format 字段，否则部分加载器会忽略整个包
+            # path 写路径不带扩展名：bbmodel/rpg_skeleton、geo/creeper、obj/cube
+            # 裸文件名也认：path: 刺锤.bbmodel 直接命中同目录同名文件
+            # 贴图默认取模型同目录同名 .png；没有图就是纯色（模型照样能画出来）
+            # 下面两条是真生效的示例（苦力怕 + 羊）；停用就删掉整块或给键名加前导 #
+            # 实时变量与调试：/odc model rules 看已加载规则，/odc model formats 看可用格式
+
+            示例苦力怕:
+              match: "Type:minecraft:creeper"     # 实体类型（minecraft: 前缀可省）；按自定义名就写 Name:xxx
+              path: geo/creeper
+              scale: 1                            # 缩放大小（默认 1 倍）
+              # texture: creeper                  # 指定贴图（可选）
+              # y_offset: 0                       # 垂直偏移（格）
+              # render_distance: 64               # 超出距离回落原版模型（省性能）
+              # hide_name: true                   # 是否隐藏头顶原版名称
+              # glow: false                       # 发光描边
+
+            示例羊:
+              match: "Type:minecraft:sheep"
+              path: bbmodel/rpg_skeleton
+              scale: 0.6
+
+            # 多条件用 ; 连接 = 全部满足才生效；块式写法与单行等价，二选一：
+            # 烈焰之王:
+            #   match: "Type:minecraft:blaze;Name:烈焰之王"
+            #   path: bbmodel/hz1
+            # 村民僵尸:
+            #   match:
+            #     type: minecraft:zombie
+            #     name: 村民僵尸
+            #   path: bbmodel/rpg_zombie1
+            """;
+
+    private static final String ITEM_MODEL = """
+            # 物品模型替换：手持/掉落/展示框里的物品按条件换模型（本地模板 = _local_override，最后合并）
+            # path 同 EntityModel（assets/model 与 resourcepacks/OpenDreamCore 两处都扫，带不带扩展名都行）
+            # 背包/物品栏的 gui 图标替换走 CDM 资源包通道（需要 cmd 编号），不是这个文件
+            # 下面一条是真生效的示例（钻石剑换成方块模型）；停用就删掉整块或给键名加前导 #
+            # 实时变量与调试：/odc model rules 看已加载规则
+
+            示例钻石剑:
+              match: "ID:diamond_sword"           # 物品 id + 可选自定义名：ID:diamond_sword;Name:幽冥剑
+              path: obj/cube
+              scale: 0.5
+              # texture: sword                    # 指定贴图（可选）
+              # held: true                        # 手持时替换（默认 true）
+              # gui: true                         # 背包/物品栏图标替换
+              # cmd: 1001                         # CDM 编号（gui 通道用）
+              # Lore: 幽冥                        # 只看 Lore 就写 Lore:xxx；NBT:{TAG} 精确匹配
+            """;;
+
     /** 全部系统的默认模板（system 名 → YAML）。 */
     public static java.util.Map<String, String> all() {
         java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
@@ -222,6 +352,9 @@ public final class VisualTemplates {
         m.put("Sounds", SOUNDS);
         m.put("WorldTexture", WORLD_TEXTURE);
         m.put("SlotConfig", SLOT_CONFIG);
+        m.put("Camera", CAMERA);
+        m.put("EntityModel", ENTITY_MODEL);
+        m.put("ItemModel", ITEM_MODEL);
         return m;
     }
 }

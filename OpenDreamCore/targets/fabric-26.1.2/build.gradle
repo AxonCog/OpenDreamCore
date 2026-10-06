@@ -37,11 +37,20 @@ sourceSets {
         java.srcDir "$buildDir/generated/glyph-1.21.5+"
         java.srcDir "$buildDir/generated/worldrender-1.21.5+"
         java.srcDir "$buildDir/generated/worldrender-pipe-26.1.2"
+        java.srcDir "$buildDir/generated/camera-26.1.2"
+        java.srcDir "$buildDir/generated/model-26.1.2"
+        java.srcDir "$buildDir/generated/itemicon-submit"
         resources.srcDir '../../common/src/main/resources'
     }
 }
 
 // common/ 源码原样复制；antlr4-runtime 的包路径重定向由 shadow 插件在打包阶段完成。
+// itemicon-submit/ 是 ItemIcon 手持替换胶水（1.21.11 + 26.1.2：submit 管线里拿得到 ItemStack 的提交点）
+tasks.register('prepareItemIconSubmit', Sync) {
+    from('../../gensrc/itemicon-submit/src/main/java')
+    into "$buildDir/generated/itemicon-submit"
+}
+
 tasks.register('prepareCommonSources', Sync) {
     from('../../common/src/main/java')
     into "$buildDir/generated/common-main"
@@ -68,7 +77,19 @@ tasks.register('prepareWorldRenderPipe2612', Sync) {
     from('../../gensrc/worldrender-pipe-26.1.2/src/main/java')
     into "$buildDir/generated/worldrender-pipe-26.1.2"
 }
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift' }
+// camera-26.1.2/ 是 gen4（26.1.2）的相机接管混入：这代 setup 已移除，注入点换成 update(DeltaTracker)/tick()。
+tasks.register('prepareCamera2612', Sync) {
+    from('../../gensrc/camera-26.1.2/src/main/java')
+    into "$buildDir/generated/camera-26.1.2"
+}
+
+// model-26.1.2/ 实体模型替换（26.1.2 submit 管线：CameraRenderState 在 state.level 包）
+tasks.register('prepareModel2612', Sync) {
+    from('../../gensrc/model-26.1.2/src/main/java')
+    into "$buildDir/generated/model-26.1.2"
+}
+
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift', 'prepareItemIconSubmit' }
 
 // 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
 tasks.withType(JavaCompile).configureEach {
@@ -203,7 +224,7 @@ tasks.register('zipfsProbe') {
 // 家族：Identifier 改名 / GuiGraphics→GuiGraphicsExtractor / drawString→text / renderItem→item /
 //       displayClientMessage→sendSystem/OverlayMessage / 输入事件记录 / Window.handle() / Camera.position()
 tasks.register('remapDrift') {
-    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph1215Plus', 'prepareWorldRender1215Plus', 'prepareWorldRenderPipe2612'
+    dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph1215Plus', 'prepareWorldRender1215Plus', 'prepareWorldRenderPipe2612', 'prepareCamera2612', 'prepareModel2612'
     doLast {
         def BS_NL = System.lineSeparator()
         def INPUT_FILES = ['OdcScreen.java', 'WorldEditAlignScreen.java', 'WorldEditFindScreen.java',

@@ -61,6 +61,8 @@ public final class LegacyVisualSkins {
         LegacyVisualItemEffects.refresh();
         LegacyVisualArmorLayer.refresh();
         LegacyVisualNameTags.refresh();
+        // 实体模型替换（Model bundle）：三代 Legacy 共用同一规则库
+        com.opendreamcore.client.model.LegacyModelRuleStore.get().applyBundle(rulesOf("Model"));
         registerWorldPages(dispatcher);
     }
 

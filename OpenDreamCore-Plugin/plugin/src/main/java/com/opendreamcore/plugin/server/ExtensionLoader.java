@@ -1,10 +1,10 @@
 package com.opendreamcore.plugin.server;
 
 import com.opendreamcore.config.YamlParser;
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.DreamLangExecutor;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.DreamLangExecutor;
 import com.opendreamcore.script.NamespaceRegistry;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.Scope;
 import com.opendreamcore.adapter.Adapter;
 import com.opendreamcore.adapter.AdapterChain;
 

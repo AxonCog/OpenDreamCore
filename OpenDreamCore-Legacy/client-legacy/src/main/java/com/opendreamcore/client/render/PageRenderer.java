@@ -1,8 +1,8 @@
 package com.opendreamcore.client.render;
 
 import com.opendreamcore.page.Element;
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.Scope;
 import com.opendreamcore.page.Page;
 
 import java.util.List;
@@ -129,6 +129,9 @@ public final class PageRenderer {
         // 全页元素就会一齐塌到 (0,0)（实机踩过）
         com.opendreamcore.page.Layout lay = e.layout();
         Map<String, Object> env = layoutEnv(page, e, parentX, parentY, parentW, parentH, viewW, viewH);
+        // 元素 props 里的数值属性（rect 宽高、opacity、progress.value…）走 Painters.num，
+        // 那条路靠当前作用域做表达式求值，压到本元素画完（含提前 return）
+        ExprValues.push(env);
         // 表达式逐帧重算太浪费（DreamLang 每次都重新解析求值），按现代端
         // layoutHash 同义做缓存：环境没变就直接复用上帧的盒子
         double[] box = layoutBox(page, e, lay, env);
@@ -142,6 +145,7 @@ public final class PageRenderer {
                 page.options() == null ? null : page.options().get("animations"), now);
         double alpha = parentAlpha * fx.alphaMul;
         if (alpha <= 0.01) {
+            ExprValues.pop();
             return;
         }
 
@@ -312,6 +316,7 @@ public final class PageRenderer {
                 drawHoverTooltip(r, e, alpha);
             }
         } finally {
+            ExprValues.pop();
             r.popPose();
         }
 
@@ -472,6 +477,16 @@ public final class PageRenderer {
         if (page != null && page.variables() != null) {
             env.putAll(page.variables());
         }
+
+        // 实体实时变量进作用域：裸名（health / health_ratio / health_max）
+        // 与成员链（entity.health_ratio）都通。老版本缺的正是这一段——
+        // 血条宽度写成表达式时作用域里没有实体变量，求值拿不到值，宽度退化成 0。
+        // 布局缓存键含 env，所以每只怪的血量各自算出自己的盒子。
+        Map<String, Object> ent = Placeholders.entityScopeMap();
+        if (ent != null) {
+            env.put("entity", ent);
+            env.putAll(ent);
+        }
         // 服务端全局变量平铺进作用域（现代端 scopeOf=vars+globals 同款），
         // 表达式里直接写 {online}/{tps} 就能拿到，和 {{global.online}} 等价
         env.putAll(com.opendreamcore.client.MessageDispatcher.globalsView());
@@ -479,38 +494,7 @@ public final class PageRenderer {
     }
 
     private static double evalNum(Object v, Map<String, Object> env, double fallback) {
-        if (v instanceof Number) {
-            return ((Number) v).doubleValue();
-        }
-        if (v == null) {
-            return fallback;
-        }
-        String s = String.valueOf(v).trim();
-        if (s.isEmpty()) {
-            return fallback;
-        }
-        try {
-            if (s.matches("-?\\d+(\\.\\d+)?")) {
-                return Double.parseDouble(s);
-            }
-            // window/parent/this 走局部命名空间（成员链 window.width 才通），
-            // 其余进 vars（裸名/vars.xxx 都能引用）——和高版本 LayoutEngine.scopeOf 一字同款
-            Scope scope = new Scope();
-            for (Map.Entry<String, Object> en : env.entrySet()) {
-                String k = en.getKey();
-                if ("window".equals(k) || "parent".equals(k) || "this".equals(k)) {
-                    scope.assign(k, en.getValue());
-                } else {
-                    scope.assignVar(k, en.getValue());
-                }
-            }
-            Object out = DreamLang.evaluate(s, scope);
-            if (out instanceof Number) {
-                return ((Number) out).doubleValue();
-            }
-        } catch (Throwable ignored) {
-        }
-        return fallback;
+        return ExprValues.num(v, env, fallback);
     }
 
     /** 元素 z 序（props.z，缺省 0）：大者后画盖上面。 */
@@ -614,8 +598,8 @@ public final class PageRenderer {
         } catch (Exception ignored) {
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
-            Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
+            Object r = com.opendreamcore.script.engine.DreamLang.evaluate(s, scope);
             return r instanceof Number ? ((Number) r).doubleValue() : fallback;
         } catch (Exception ignored) {
             return fallback;

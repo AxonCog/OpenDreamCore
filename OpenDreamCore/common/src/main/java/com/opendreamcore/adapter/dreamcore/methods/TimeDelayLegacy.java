@@ -13,7 +13,7 @@ public final class TimeDelayLegacy {
             long ms = (long) LegacyMethods.num2(a, 0);
             if (script != null && ms > 0) {
                 J8.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
-                        .execute(() -> com.opendreamcore.script.DreamLang.execute(script, null));
+                        .execute(() -> com.opendreamcore.script.engine.DreamLang.execute(script, null));
             }
             return null;
         });
@@ -22,7 +22,7 @@ public final class TimeDelayLegacy {
             long ms = (long) LegacyMethods.num2(a, 1);
             if (fn != null && ms > 0) {
                 J8.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
-                        .execute(() -> com.opendreamcore.script.DreamLang.execute(fn + "()", null));
+                        .execute(() -> com.opendreamcore.script.engine.DreamLang.execute(fn + "()", null));
             }
             return null;
         });
@@ -31,7 +31,7 @@ public final class TimeDelayLegacy {
             String fn = LegacyMethods.str(a, 0);
             long interval = (long) LegacyMethods.num2(a, 1);
             if (fn != null) {
-                com.opendreamcore.script.DreamLang.execute(fn + "()", null);
+                com.opendreamcore.script.engine.DreamLang.execute(fn + "()", null);
             }
             return null;
         });

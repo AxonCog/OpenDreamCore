@@ -62,6 +62,48 @@ public final class VisualNameTags {
     /** Blood（纯血条）规则集：独立存储，与 HeadTag 并行独立认领（可同屏叠加）。 */
     private static volatile List<Entry> bloodEntries = List.of();
 
+    /** 本帧已匹配结果（entityId→Hit，MISS 哨兵代 null 未命中——CHM 不收 null）；新帧第一次 claim 时清。 */
+    private static final java.util.Map<Integer, Hit> PENDING = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Hit MISS = new Hit(null, false);
+    private static volatile long claimFrame;
+
+    /** 实体渲染入口逐实体调用（MixinEntityDispatcher）：匹配一次并存本帧结果。 */
+    public static void claimFor(Entity entity) {
+        if (entity == null || (entries.isEmpty() && bloodEntries.isEmpty())) {
+            return;
+        }
+        long now = net.minecraft.client.Minecraft.getInstance().level == null ? 0
+                : net.minecraft.client.Minecraft.getInstance().level.getGameTime();
+        if (now != claimFrame) {
+            claimFrame = now;
+            PENDING.clear();
+        }
+        int id = entity.getId();
+        if (PENDING.containsKey(id)) {
+            return; // 本帧已匹配过
+        }
+        Hit hit = hitFor(entity);
+        PENDING.put(id, hit != null ? hit : MISS); // 本帧不再重复匹配
+    }
+
+    /** 名牌 hook（MixinNameTag）读本帧匹配结果，不再自己匹配。 */
+    public static Hit pendingHit(Entity entity) {
+        if (entity == null) {
+            return null;
+        }
+        Hit h = PENDING.get(entity.getId());
+        return h == MISS ? null : h;
+    }
+
+    /** 匹配诊断（30s 一行）：hook 调用数、两侧规则数、各规则首个未命中原因。 */
+    private static long lastMatchDiagMs;
+    private static int matchChecked;
+    private static final java.util.Map<String, String> matchReject = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void reject(String ruleId, String why) {
+        matchReject.putIfAbsent(ruleId, why);
+    }
+
     /** 当前正在渲染的实体（1.21.4+ state 体系下由 extractRenderState 钩子写入，名牌 hook 读取）。 */
     private static final ThreadLocal<Entity> CURRENT_ENTITY = new ThreadLocal<>();
 
@@ -196,45 +238,68 @@ public final class VisualNameTags {
         String entityName = entity.getName().getString();
         float dist = mc.player != null ? entity.distanceTo(mc.player) : 0.0F;
         boolean crosshair = mc.crosshairPickEntity == entity;
+        matchChecked++;
         // 两系统独立认领：HeadTag 与 Blood 各自判定，命中的整页都登记给
         // HeadTagRenderer 叠加渲染；返回值只决定原版名牌接管与就地样式，
         // HeadTag 优先（样式语义），Blood 纯血条紧随其后
         Hit hit = matchList(entity, entries, fullType, type, entityName, dist, crosshair);
         matchList(entity, bloodEntries, fullType, type, entityName, dist, crosshair);
+        long now = System.currentTimeMillis();
+        if (now - lastMatchDiagMs > 30_000) {
+            lastMatchDiagMs = now;
+            com.opendreamcore.client.OdcDebug.log("[ODC-headtag] 匹配诊断(30s): hook调用" + matchChecked
+                    + " HeadTag规则" + entries.size() + " Blood规则" + bloodEntries.size()
+                    + " 未命中=" + matchReject);
+            matchChecked = 0;
+            matchReject.clear();
+        }
         return hit;
     }
 
     private static Hit matchList(Entity entity, List<Entry> list, String fullType, String type,
                                  String entityName, float dist, boolean crosshair) {
         for (Entry e : list) {
+            // 便宜条件先筛，昂贵的 spec.matches（每次 new ItemView）放最后：
+            // AND 语义不变，多数规则在前几项就被跳过，不再白建对象
             if (!e.entityTypes().isEmpty()
                     && !e.entityTypes().contains(type) && !e.entityTypes().contains(fullType)) {
-                continue;
-            }
-            if (!e.spec().matches(new ItemView(type, "", List.of(), Map.of()))) {
+                reject(e.ruleId(), "类型" + fullType);
                 continue;
             }
             if (e.name() != null && !e.name().isEmpty()
                     && (entityName == null || !entityName.contains(e.name()))) {
+                reject(e.ruleId(), "名字≠" + e.name());
                 continue;
             }
             if (e.distance() > 0 && dist > e.distance()) {
+                reject(e.ruleId(), "超距");
+                continue;
+            }
+            if (!e.spec().matches(new ItemView(type, "", List.of(), Map.of()))) {
+                reject(e.ruleId(), "条件");
                 continue;
             }
             boolean living = entity instanceof LivingEntity;
             switch (e.mode()) {
                 case "aim" -> {
                     if (!crosshair) {
+                        reject(e.ruleId(), "非准星");
                         continue;
                     }
                 }
                 case "health" -> {
-                    if (!living || isFullHealth((LivingEntity) entity)) {
+                    if (!living) {
+                        reject(e.ruleId(), "非生物");
+                        continue;
+                    }
+                    if (isFullHealth((LivingEntity) entity)) {
+                        reject(e.ruleId(), "满血");
                         continue;
                     }
                 }
                 case "aimorhealth" -> {
                     if (!crosshair && (!living || isFullHealth((LivingEntity) entity))) {
+                        reject(e.ruleId(), "非准星且满血");
                         continue;
                     }
                 }
@@ -244,6 +309,7 @@ public final class VisualNameTags {
             // 只有带整页内容的规则才把原版名牌交出去；只说样式（背景/文字）的规则
             // 必须就地画文字条——判错就会整条名牌消失（详见 hasPageContent 注释）
             boolean fullHud = e.hasContent();
+            matchReject.remove(e.ruleId());
             if (fullHud) {
                 com.opendreamcore.client.HeadTagRenderer.noteEntity(entity.getId(), e);
             }

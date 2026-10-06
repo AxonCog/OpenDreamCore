@@ -16,7 +16,9 @@ repositories {
     mavenCentral()
 }
 
-def commonJ8 = fileTree(dir: '../../OpenDreamCore-Legacy/common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
+// 懒解析：这份 jar 由另一个构建烘出（见本文件末 bakeSharedLayer），配置期可能还不存在；
+// 用 files { ... } 让它在「用到时」重新列目录，配合 bakeSharedLayer 的先后顺序才不会拿到空集合。
+def commonJ8 = files({ fileTree(dir: '../../OpenDreamCore-Legacy/common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar').files })
 
 dependencies {
     // 成品 jar 用 api 露出去：plugin/nms 模块通过 project(':core') 直接拿到类
@@ -37,11 +39,39 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-// jar 是另一个构建的产物，缺了别装死，当场说人话
-tasks.named('jar') {
-    doFirst {
-        if (commonJ8.files.isEmpty()) {
-            throw new GradleException('缺 opendreamcore-common-j8 jar：先在 OpenDreamCore-Legacy 跑 gradlew :common-j8:jar')
-        }
+// ── 共享层成品 jar 的新鲜度：由本构建自己先烘，而不是再立一道哨兵 ────────────────────
+// 本模块是纯 JDK8 模块（toolchain 8），而共享树源码含 record、得经 Jabel 脱糖，
+// 所以这里不能直接编源码，只能吃 OpenDreamCore-Legacy/:common-j8:jar 烘出的成品 jar。
+// 麻烦在于那是**另一个构建**的产物：gradle 不会替我们盯它的新旧，共享树改了而 jar 没重烘时，
+// 插件会把旧逻辑静默打进包（实战踩过：插件里的 Camera 模板比主树旧两轮，服务端播种就少规则）。
+//
+// 试过两道哨兵，都不行：
+//   · 比时间戳 —— gradle 按内容判 up-to-date，只改 mtime（touch、重新 checkout）时它压根不重写 jar，
+//     报错后按提示重烘还是报错，假阳性永远追不上；
+//   · 比内容指纹（由 jar 任务写）—— 任何 jar 自己写的指纹必然匹配它自己的内容，抓不到“旧 jar”本身；
+//     而且注释级改动不改字节码，jar 任务 up-to-date 不重写指纹，同样追不上。
+//
+// 正解就是老老实实“先烘再用”：让本构建先把 jar 烘出来，内层 gradle 自己按内容判 up-to-date——
+// 语义没变就秒过（不重编），语义变了必重建，根本不存在“有旧 jar”的窗口。
+// 这也与远古线的 build_with_shared.bat / verifySharedLayer 同一套路（先烘 :common-j8:jar 再建）。
+// 用 Exec 调远古 wrapper（7.6.1）而不是 GradleBuild：后者会拿本构建的 8.8 去评估那边的脚本。
+def bakeSharedLayer = tasks.register('bakeSharedLayer', Exec) {
+    group = 'build'
+    description = '先让 OpenDreamCore-Legacy 烘出 common-j8 成品 jar，再让本构建吃它'
+    workingDir file('../../OpenDreamCore-Legacy')
+    def innerArgs = [':common-j8:jar', '--console=plain']
+    if (gradle.startParameter.offline) {
+        innerArgs << '--offline'   // 外层离线时别让内层去撞网
     }
+    if (System.getProperty('os.name').toLowerCase().contains('win')) {
+        commandLine(['cmd', '/c', 'gradlew.bat'] + innerArgs)
+    } else {
+        commandLine(['./gradlew'] + innerArgs)
+    }
+    // 内层自己会判 up-to-date，这里不要替它省事
+    outputs.upToDateWhen { false }
 }
+
+tasks.named('compileJava') { dependsOn bakeSharedLayer }
+tasks.named('jar') { dependsOn bakeSharedLayer }
+tasks.named('test') { dependsOn bakeSharedLayer }

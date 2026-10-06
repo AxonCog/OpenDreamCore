@@ -13,7 +13,7 @@ import java.util.Map;
  * 世界面板射线拾取与命中检测。
  * 射线构造、递归拾取、billboard 命中距离、交互/拖拽/锁定判定。
  */
-final class WorldPicking {
+public final class WorldPicking {
 
     private WorldPicking() {
     }

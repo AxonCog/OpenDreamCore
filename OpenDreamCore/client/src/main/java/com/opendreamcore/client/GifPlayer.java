@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.util.ClientChat;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
@@ -135,13 +136,13 @@ public final class GifPlayer {
                 Minecraft.getInstance().getTextureManager().register(textureId,
                         (net.minecraft.client.renderer.texture.AbstractTexture) tex);
                 if (Boolean.getBoolean("odc.debug")) {
-                    System.out.println("[ODC-diag] gif 纹理已注册: " + textureId
+                    com.opendreamcore.client.OdcDebug.log("[ODC-diag] gif 纹理已注册: " + textureId
                             + " 帧=" + first.getWidth() + "x" + first.getHeight()
                             + " 帧数=" + frames.size());
                 }
             }
         } catch (Throwable t) {
-            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-diag] gif 纹理注册失败: " + t + " " + textureId); }
+            if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-diag] gif 纹理注册失败: " + t + " " + textureId); }
         }
         return textureId;
     }
@@ -257,7 +258,7 @@ public final class GifPlayer {
     /** 远程 GIF：下载完成后在渲染线程解码注册（未就绪返回 null，页面先占位）。 */
     private static GifPlayer ofRemote(String url) {
         if (!com.opendreamcore.remote.RemoteMedia.isSafeUrl(url)) {
-            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 拒绝（非安全 url）: " + url); }
+            if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 拒绝（非安全 url）: " + url); }
             return null; // SSRF 防护拒绝
         }
         GifPlayer cached = CACHE.get(url);
@@ -265,7 +266,7 @@ public final class GifPlayer {
             return cached;
         }
         if (REQ_LOGGED.add(url)) {
-            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 下载请求(仅首帧打): " + url); }
+            if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 下载请求(仅首帧打): " + url); }
         }
         com.opendreamcore.remote.RemoteMedia.get(url, RemoteImageStore.cacheDir()).thenAccept(path -> {
             Minecraft.getInstance().execute(() -> {
@@ -276,31 +277,31 @@ public final class GifPlayer {
                         GifPlayer player = new GifPlayer(frames, frames.stream().mapToInt(Frame::delayMs).sum());
                         CACHE.put(url, player);
                         if (Boolean.getBoolean("odc.debug")) {
-                            System.out.println("[ODC-font] url gif 解码成功 帧数=" + frames.size()
+                            com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 解码成功 帧数=" + frames.size()
                                     + " url=" + url);
                         }
                         // 远程 gif 就绪：只失效判定/烘焙缓存（保留字符表），引用该 url 的替换字形下帧重新 bake 显示
                         com.opendreamcore.client.visual.ReplaceFontProvider.invalidateTextures();
                         REQ_LOGGED.remove(url);
                     } else {
-                        if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 解码为空帧 url=" + url); }
+                        if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 解码为空帧 url=" + url); }
                         REQ_LOGGED.remove(url);
                     }
                 } catch (Exception e) {
-                    if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 解码失败: " + e + " url=" + url); }
-                    ClientController.chatWarnOnce("gif-decode:" + url,
+                    if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 解码失败: " + e + " url=" + url); }
+                    ClientChat.chatWarnOnce("gif-decode:" + url,
                             "§e[OpenDreamCore] §fGIF 解码失败，10秒后自动重试: " + url);
                     com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
                     REQ_LOGGED.remove(url);
                 }
             });
         }).exceptionally(t -> {
-            if (Boolean.getBoolean("odc.debug")) { System.out.println("[ODC-font] url gif 下载失败: " + t + " url=" + url); }
+            if (Boolean.getBoolean("odc.debug")) { com.opendreamcore.client.OdcDebug.log("[ODC-font] url gif 下载失败: " + t + " url=" + url); }
             // 失败别哑巴：图床抖一下就把字符替换摁死一整个会话，玩家一头雾水。
             // 聊天栏吱一声 + 10 秒后自动重试（上限 3 次，见 RemotePrefetch）
-            ClientController.chatWarnOnce("gif-dl:" + url,
+            ClientChat.chatWarnOnce("gif-dl:" + url,
                     "§e[OpenDreamCore] §fGIF 下载失败，10秒后自动重试: " + url
-                            + "（" + ClientController.shortReason(t) + "）");
+                            + "（" + ClientChat.shortReason(t) + "）");
             com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
             REQ_LOGGED.remove(url);
             return null;

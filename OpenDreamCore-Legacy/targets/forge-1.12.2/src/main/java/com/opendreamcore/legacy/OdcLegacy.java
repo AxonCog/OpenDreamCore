@@ -40,6 +40,9 @@ public final class OdcLegacy {
                 new com.opendreamcore.client.TextureRegistrar1212());
         com.opendreamcore.client.LooseTextureLoader.scan(
                 net.minecraft.client.Minecraft.getMinecraft().gameDir.toPath());
+        // 实体模型替换：贴图注册回调 + 资产扫描 + 本地规则
+        com.opendreamcore.model1212.ModelRenderer1212.init(
+                net.minecraft.client.Minecraft.getMinecraft().gameDir.toPath());
         // /odc 不在客户端注册命令：客户端一份+服务器插件一份的话，
         // 原版 TabCompleter 会把两边补全零去重拼在一起，TAB 弃两条 /odc
         // （实机截图实锤的“指令注册两遍”）。现在改为聊天事件拦截转发，

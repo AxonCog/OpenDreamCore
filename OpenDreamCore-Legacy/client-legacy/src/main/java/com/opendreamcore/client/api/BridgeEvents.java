@@ -31,7 +31,7 @@ public final class BridgeEvents {
         }
         final Listener sink = listener;
         return com.opendreamcore.script.EventBus.subscribe(topic(channel),
-                new com.opendreamcore.script.DreamLangExecutor.Callable() {
+                new com.opendreamcore.script.engine.DreamLangExecutor.Callable() {
                     @Override
                     public Object call(Object[] args) {
                         sink.accept(args != null && args.length > 0 && args[0] != null

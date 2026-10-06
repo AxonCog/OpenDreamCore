@@ -20,6 +20,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * （入口执行时着色器编译可能已经开始）。
  *
  * <p>NeoForge 侧不需要这条：那边有官方的管线注册事件，由事件完成同一件事。
+ *
+ * <p>odc:mixin-alternative = NeoForge 侧由 RegisterRenderPipelinesEvent 完成同一件事，
+ * 所以 NeoForge 目标刻意不登记本 mixin；Fabric 侧仍需登记。
  */
 @Mixin(RenderPipelines.class)
 public abstract class WorldRenderPipelinesMixin {

@@ -41,7 +41,7 @@ public abstract class MixinNameTag {
                                               PoseStack pose, MultiBufferSource buffer,
                                               int light, CallbackInfo ci) {
         Entity current = VisualNameTags.currentEntity();
-        VisualNameTags.Hit hit = current == null ? null : VisualNameTags.hitFor(current);
+        VisualNameTags.Hit hit = current == null ? null : VisualNameTags.pendingHit(current); // 匹配已前置到 dispatcher（见 MixinEntityDispatcher）
         if (hit == null) {
             return; // 没规则命中，原版名牌照旧
         }

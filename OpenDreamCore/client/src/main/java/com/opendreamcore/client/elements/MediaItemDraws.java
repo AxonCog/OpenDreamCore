@@ -1,5 +1,6 @@
 package com.opendreamcore.client.elements;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import net.minecraft.resources.ResourceLocation;
 
 import com.opendreamcore.client.ContainerStore;
@@ -80,10 +81,10 @@ public final class MediaItemDraws {
             if (sh <= 0) {
                 sh = Math.max(sw, 1);
             }
-            CompatRender.blit(g, tex, (int) node.x(), (int) node.y(), (int) node.width(), (int) node.height(),
+            GuiBlitCompat.blit(g, tex, (int) node.x(), (int) node.y(), (int) node.width(), (int) node.height(),
                     sx, sy, sw, sh, tw, th);
         } else {
-            CompatRender.blit(g, tex, (int) node.x(), (int) node.y(), (int) node.width(), (int) node.height(),
+            GuiBlitCompat.blit(g, tex, (int) node.x(), (int) node.y(), (int) node.width(), (int) node.height(),
                     0.0F, 0.0F, (int) node.width(), (int) node.height(),
                     (int) node.width(), (int) node.height());
         }
@@ -145,7 +146,7 @@ public final class MediaItemDraws {
             }
             return;
         }
-        CompatRender.blit(g, texture, x, y, w, h, 0.0F, 0.0F, w, h, w, h);
+        GuiBlitCompat.blit(g, texture, x, y, w, h, 0.0F, 0.0F, w, h, w, h);
         // seek 条（video.seekable: true 且播放器有时间轴）：底部进度条，点击跳转
         if (UiRenderer.bool(spec.get("seekable"), false) && videoFile && FfmpegVideoPlayer.available()) {
             FfmpegVideoPlayer vp = FfmpegVideoPlayer.byElement(node.id());
@@ -256,7 +257,7 @@ public final class MediaItemDraws {
                 for (int xx = 0; xx < w; xx += tw) {
                     int cw = Math.min(tw, w - xx);
                     int ch = Math.min(th, h - yy);
-                    CompatRender.blit(g, texture, (int) (node.x() + xx), (int) (node.y() + yy), cw, ch, su, sv, Math.min(tw, cw), Math.min(th, ch), texW, texH);
+                    GuiBlitCompat.blit(g, texture, (int) (node.x() + xx), (int) (node.y() + yy), cw, ch, su, sv, Math.min(tw, cw), Math.min(th, ch), texW, texH);
                 }
             }
         } else if (ns != null) {
@@ -267,24 +268,24 @@ public final class MediaItemDraws {
             int midW = Math.max(0, sw - left - right);
             int midH = Math.max(0, sh - top - bottom);
             if (midW > 0 && midH > 0) {
-                CompatRender.blit(g, texture, (int) (node.x() + left), (int) (node.y() + top),
+                GuiBlitCompat.blit(g, texture, (int) (node.x() + left), (int) (node.y() + top),
                         (int) (w - left - right), (int) (h - top - bottom),
                         su + left, sv + top, midW, midH, texW, texH);
             }
-            CompatRender.blit(g, texture, (int) node.x(), (int) node.y(), left, top, su, sv, left, top, texW, texH);
-            CompatRender.blit(g, texture, (int) (node.x() + w - right), (int) node.y(), right, top, su + sw - right, sv, right, top, texW, texH);
-            CompatRender.blit(g, texture, (int) node.x(), (int) (node.y() + h - bottom), left, bottom, su, sv + sh - bottom, left, bottom, texW, texH);
-            CompatRender.blit(g, texture, (int) (node.x() + w - right), (int) (node.y() + h - bottom), right, bottom, su + sw - right, sv + sh - bottom, right, bottom, texW, texH);
+            GuiBlitCompat.blit(g, texture, (int) node.x(), (int) node.y(), left, top, su, sv, left, top, texW, texH);
+            GuiBlitCompat.blit(g, texture, (int) (node.x() + w - right), (int) node.y(), right, top, su + sw - right, sv, right, top, texW, texH);
+            GuiBlitCompat.blit(g, texture, (int) node.x(), (int) (node.y() + h - bottom), left, bottom, su, sv + sh - bottom, left, bottom, texW, texH);
+            GuiBlitCompat.blit(g, texture, (int) (node.x() + w - right), (int) (node.y() + h - bottom), right, bottom, su + sw - right, sv + sh - bottom, right, bottom, texW, texH);
             if (midW > 0) {
-                CompatRender.blit(g, texture, (int) (node.x() + left), (int) node.y(), (int) (w - left - right), top, su + left, sv, midW, top, texW, texH);
-                CompatRender.blit(g, texture, (int) (node.x() + left), (int) (node.y() + h - bottom), (int) (w - left - right), bottom, su + left, sv + sh - bottom, midW, bottom, texW, texH);
+                GuiBlitCompat.blit(g, texture, (int) (node.x() + left), (int) node.y(), (int) (w - left - right), top, su + left, sv, midW, top, texW, texH);
+                GuiBlitCompat.blit(g, texture, (int) (node.x() + left), (int) (node.y() + h - bottom), (int) (w - left - right), bottom, su + left, sv + sh - bottom, midW, bottom, texW, texH);
             }
             if (midH > 0) {
-                CompatRender.blit(g, texture, (int) node.x(), (int) (node.y() + top), left, (int) (h - top - bottom), su, sv + top, left, midH, texW, texH);
-                CompatRender.blit(g, texture, (int) (node.x() + w - right), (int) (node.y() + top), right, (int) (h - top - bottom), su + sw - right, sv + top, right, midH, texW, texH);
+                GuiBlitCompat.blit(g, texture, (int) node.x(), (int) (node.y() + top), left, (int) (h - top - bottom), su, sv + top, left, midH, texW, texH);
+                GuiBlitCompat.blit(g, texture, (int) (node.x() + w - right), (int) (node.y() + top), right, (int) (h - top - bottom), su + sw - right, sv + top, right, midH, texW, texH);
             }
         } else {
-            CompatRender.blit(g, texture, (int) node.x(), (int) node.y(), w, h, su, sv, sw, sh, texW, texH);
+            GuiBlitCompat.blit(g, texture, (int) node.x(), (int) node.y(), w, h, su, sv, sw, sh, texW, texH);
         }
         CompatRender.posePop(pose);
     }

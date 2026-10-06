@@ -76,13 +76,13 @@ public final class ItemModelComponent {
         } catch (NumberFormatException ignore) {
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             var p = net.minecraft.client.Minecraft.getInstance().player;
             if (p != null) {
                 scope.assignPlayer("name", p.getName().getString());
                 scope.assignVar("player_name", p.getName().getString());
             }
-            Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            Object r = com.opendreamcore.script.engine.DreamLang.evaluate(s, scope);
             return r instanceof Number n ? n.doubleValue() : fallback;
         } catch (Exception e) {
             return fallback;

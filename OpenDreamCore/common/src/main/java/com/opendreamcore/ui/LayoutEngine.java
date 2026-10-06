@@ -5,8 +5,8 @@ import com.opendreamcore.util.J8;
 import com.opendreamcore.page.Element;
 import com.opendreamcore.page.Layout;
 import com.opendreamcore.page.Page;
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.Scope;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

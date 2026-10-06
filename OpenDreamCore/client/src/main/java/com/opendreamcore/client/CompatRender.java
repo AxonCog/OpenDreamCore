@@ -89,15 +89,36 @@ public final class CompatRender {
         shaderByName("getPositionTexShader");
     }
 
+    /**
+     * 贴图版着色器绑定：世界里的纯色矩形也得走它。
+     *
+     * <p>为什么不用 {@link #setColorShader()}：它依赖 GameRenderer.getPositionColorShader()，
+     * 那个 getter 在 1.21.2 起被移除，而 shaderByName 找不到方法是静默 return——着色器压根没设，
+     * 拿上一个着色器画出来的矩形是隐形的（实测血条底/前景永远看不见）。
+     */
+    public static void bindSolidColorShader() {
+        shaderByName("getPositionTexShader");
+    }
+
+    private static final java.util.Set<String> SHADER_LOG =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void shaderByName(String getterName) {
         try {
             Method getter = resolveMethod(GameRenderer.class, getterName);
             if (getter == null) {
+                if (SHADER_LOG.add(getterName + "#noGetter")) {
+                    com.opendreamcore.client.OdcDebug.log("[ODC-shader] 找不到着色器 getter: " + getterName
+                            + "（该版本由管线自管，不需手动设）");
+                }
                 return; // ≥1.21.2：shader getter 已移除，管线自动处理
             }
             Object shader = getter.invoke(null);
             if (shader == null) {
+                if (SHADER_LOG.add(getterName + "#nullShader")) {
+                    com.opendreamcore.client.OdcDebug.log("[ODC-shader] 着色器 getter 返回 null: " + getterName);
+                }
                 return;
             }
             Method m = resolveMethod(RenderSystem.class, "setShader", Supplier.class);
@@ -778,8 +799,8 @@ public final class CompatRender {
         }
         CompatBuffer buf = new CompatBuffer(mode, format);
         if (com.opendreamcore.client.render.WorldRenderTypeDispatch.inWorldDraw()) {
-            // 格式决定顶点带不带 UV：贴图几何才能用原生盔甲半透明那条类型回退，
-            // 纯色几何只由自建实现接管（用错格式会因顶点元素不匹配而画不出东西）
+            // 格式决定顶点带不带 UV。纯色几何（血条、描边）也已带 UV——贴图格式 + 1x1 白纹理，
+            // 颜色仍由顶点色给；1.21.5+ 管线才会接管它们，无 UV 时它退回旧上传路径而隐形。
             boolean textured = isTexturedFormat(format);
             Object rt = com.opendreamcore.client.render.WorldRenderTypeDispatch.resolve(
                     textured, WorldHologram.isSeeThroughPass(), mode);
@@ -947,105 +968,6 @@ public final class CompatRender {
         }
     }
 
-    private static volatile Boolean modernBlit;
-    private static volatile MethodHandle legacyBlit;
-    private static volatile MethodHandle modernFactory;
-
-    /** 探测 GuiGraphics 的 11 参 blit 重载形态（首参 ResourceLocation=旧版 / Function=新版）。 */
-    private static void detect() {
-        try {
-            for (Method m : GuiGraphics.class.getMethods()) {
-                if (!"blit".equals(m.getName()) || m.getParameterCount() != 11) {
-                    continue;
-                }
-                Class<?> first = m.getParameterTypes()[0];
-                if (first == ResourceLocation.class) {
-                    legacyBlit = MethodHandles.lookup().unreflect(m);
-                    modernBlit = Boolean.FALSE;
-                    return;
-                }
-                if (first == java.util.function.Function.class) {
-                    modernBlit = Boolean.TRUE;
-                    legacyBlit = MethodHandles.lookup().unreflect(m);
-                    return;
-                }
-            }
-        } catch (IllegalAccessException ignored) {
-            // 反射受限：保持未解析状态，blit 调用走兜底吞异常
-        }
-        // 未找到 11 参重载：退回旧签名尝试（保持行为可见的失败）
-        modernBlit = Boolean.FALSE;
-    }
-
-    private static Object guiTexturedFactory(ResourceLocation tex) {
-        try {
-            if (modernFactory == null) {
-                synchronized (CompatRender.class) {
-                    if (modernFactory == null) {
-                        Class<?> rt = resolveClass("net.minecraft.client.renderer.RenderType");
-                        Method f = rt.getMethod("guiTextured", ResourceLocation.class);
-                        modernFactory = MethodHandles.lookup().unreflect(f);
-                    }
-                }
-            }
-            return modernFactory.invoke(tex);
-        } catch (Throwable t) {
-            return tex; // 兜底：直接传贴图（最坏情况渲染层自行处理）
-        }
-    }
-
-    /**
-     * GuiGraphics.blit 的版本安全等价：
-     * 旧版 blit(RL, x,y,w,h, u,v,uW,vH,texW,texH) /
-     * 新版 blit(Function<RL,RenderType>, 同参数表)。
-     */
-    public static void blit(GuiGraphics g, ResourceLocation tex,
-                            int x, int y, int w, int h,
-                            float u, float v, int uw, int vh, int tw, int th) {
-        if (modernBlit == null) {
-            synchronized (CompatRender.class) {
-                if (modernBlit == null) {
-                    detect();
-                }
-            }
-        }
-        try {
-            if (Boolean.TRUE.equals(modernBlit)) {
-                legacyBlit.invoke(g,
-                        guiTexturedFactory(tex), x, y, w, h, u, v, uw, vh, tw, th);
-            } else {
-                legacyBlit.invoke(g, tex, x, y, w, h, u, v, uw, vh, tw, th);
-            }
-        } catch (Throwable ignored) {
-            // 单次贴图失败不拖垮整页渲染
-        }
-    }
-
-    /**
-     * KongCore 式 GUI_TEXTURED 管线 blit（1.21.2+：blit(RenderPipeline, RL, x, y, u, v, w, h, tw, th, color)）。
-     * 字体重绘/自定义贴图用这个比 Function 版 blit 可靠；旧版本没有 RenderPipelines 时回退 blit()。
-     */
-    public static void blitGuiTextured(GuiGraphics g, ResourceLocation tex,
-                                       int x, int y, int w, int h,
-                                       float u, float v, int uw, int vh, int tw, int th) {
-        try {
-            Class<?> pipelines = resolveClass("net.minecraft.client.renderer.RenderPipelines");
-            Object pipeline = pipelines.getField("GUI_TEXTURED").get(null);
-            Class<?> pipelineCls = resolveClass("net.minecraft.client.renderer.RenderPipeline");
-            Method m = GuiGraphics.class.getMethod("blit", pipelineCls, ResourceLocation.class,
-                    int.class, int.class, float.class, float.class,
-                    int.class, int.class, int.class, int.class, int.class);
-            m.invoke(g, pipeline, tex, x, y, u, v, uw, vh, tw, th, 0xFFFFFFFF);
-        } catch (Throwable ignored) {
-            blit(g, tex, x, y, w, h, u, v, uw, vh, tw, th);
-        }
-    }
-
-    // GUI pose 栈方言（≥1.21.6 Matrix3x2fStack 替代 PoseStack）
-    // 两分支都是直接类型调用（PoseStack 与 JOML Matrix3x2fStack 在所有目标版本 classpath 上都存在），零反射热路径。
-    // 注意：2D 栈无 Z 轴/四元数，X/Y 旋转在 GUI 平面无意义 → 新版路径仅应用 Z 分量。
-
-    /** pose().pushPose() / pushMatrix()。 */
     public static void posePush(Object pose) {
         if (pose instanceof org.joml.Matrix3x2fStack s) {
             s.pushMatrix();
@@ -1256,40 +1178,7 @@ public final class CompatRender {
 
     private static volatile MethodHandle texViewGetter;
 
-    /** 字形贴图 quad 完整写入。1.20.1 顶点 API 是 vertex/uv/color/light，1.21.x 是 addVertex/setUv/setColor/setLight——
-     *  全链反射垫片，跨版本编译安全。 */
-    public static void glyphQuad(Object consumer, Object matrix, float x, float y, float w, float h,
-                                 float u0, float v0, float u1, float v1, int packedLight) {
-        try {
-            quadVertex(consumer, matrix, x, y, u0, v0, packedLight);
-            quadVertex(consumer, matrix, x, y + h, u0, v1, packedLight);
-            quadVertex(consumer, matrix, x + w, y + h, u1, v1, packedLight);
-            quadVertex(consumer, matrix, x + w, y, u1, v0, packedLight);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void quadVertex(Object consumer, Object matrix, float x, float y, float u, float v,
-                                   int light) throws Exception {
-        Object cur = consumer;
-        cur = glyphInvoke(cur, "addVertex", "vertex", matrix, x, y, 0.0F);
-        cur = glyphInvoke(cur, "setUv", "uv", u, v);
-        cur = glyphInvoke(cur, "setColor", "color", 255, 255, 255, 255);
-        glyphInvoke(cur, "setLight", "light", light);
-    }
-
-    private static Object glyphInvoke(Object target, String n1, String n2, Object... args) throws Exception {
-        for (String n : new String[]{n1, n2}) {
-            for (Method m : target.getClass().getMethods()) {
-                if (m.getName().equals(n) && m.getParameterCount() == args.length
-                        && glyphParamsOk(m, args)) {
-                    return m.invoke(target, args);
-                }
-            }
-        }
-        throw new NoSuchMethodException(n1 + "/" + n2);
-    }
-
+ 
     private static boolean glyphParamsOk(Method m, Object[] args) {
         Class<?>[] ps = m.getParameterTypes();
         for (int i = 0; i < args.length; i++) {

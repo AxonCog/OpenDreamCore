@@ -32,6 +32,8 @@ public final class CloudSyncClient {
 
     private byte[] sessionKey = new byte[0];
     private boolean synced;
+    /** 服务端清单里的路径列表（按需贴图查找时要按尾名反查）。 */
+    private volatile java.util.List<String> manifestPaths = java.util.List.of();
 
     public CloudSyncClient() {
     }
@@ -60,6 +62,11 @@ public final class CloudSyncClient {
             LOGGER.warn("云缓存目录创建失败: {}", e.toString());
             return;
         }
+        java.util.List<String> paths = new java.util.ArrayList<String>();
+        for (CloudManifest.Entry entry : manifest.entries()) {
+            paths.add(entry.path());
+        }
+        manifestPaths = java.util.Collections.unmodifiableList(paths);
         List<String> missing = new ArrayList<>();
         for (CloudManifest.Entry entry : manifest.entries()) {
             Path file = safeResolve(entry.path());
@@ -106,11 +113,18 @@ public final class CloudSyncClient {
 
     public void handleDone(CloudDone done) {
         synced = true;
+        // 刚下来的文件之前可能被记成「云里也没有」，清一下才能被按需贴图找到
+        com.opendreamcore.client.resources.CloudTextureFallback.reset();
         LOGGER.info("云资源同步完成");
     }
 
     public boolean isSynced() {
         return synced;
+    }
+
+    /** 服务端清单里的路径（未收到清单=空）。 */
+    public java.util.List<String> manifestPaths() {
+        return manifestPaths;
     }
 
     /** 从缓存加载并解密资源到内存（使用时调用；加密态文件 → 内存明文）。 */

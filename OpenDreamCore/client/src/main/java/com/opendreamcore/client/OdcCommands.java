@@ -99,8 +99,19 @@ public final class OdcCommands {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static LiteralArgumentBuilder buildServerForwardRoot() {
-        return (LiteralArgumentBuilder) ((LiteralArgumentBuilder) LiteralArgumentBuilder.literal("odc"))
-                .executes(ctx -> forwardOdc(""))
+        // camera/model/diag 是客户端本地状态：注册成真实字面量节点（不然 tab 补全
+        // 树里看不到 camera，用户只能背命令），执行走本地分支；其余子命令仍走
+        // greedy 转发服务器插件。
+        LiteralArgumentBuilder root = (LiteralArgumentBuilder) LiteralArgumentBuilder.literal("odc")
+                .executes(ctx -> forwardOdc(""));
+        for (String local : new String[]{"camera", "model", "diag"}) {
+            root.then(((LiteralArgumentBuilder) LiteralArgumentBuilder.literal(local))
+                    .executes(ctx -> forwardOdc(local))
+                    .then(RequiredArgumentBuilder.argument("args", StringArgumentType.greedyString())
+                            .executes(ctx -> forwardOdc(local + " "
+                                    + StringArgumentType.getString(ctx, "args")))));
+        }
+        return (LiteralArgumentBuilder) root
                 .then(RequiredArgumentBuilder.argument("args", StringArgumentType.greedyString())
                         .executes(ctx -> forwardOdc(StringArgumentType.getString(ctx, "args"))));
     }
@@ -116,6 +127,11 @@ public final class OdcCommands {
     }
 
     private static int forwardOdc(String args) {
+        // camera/model/diag 是客户端本地状态（规则库/PerfProbe），不转发（diag 漏白名单外会被转发 →「未知子命令」）
+        if (args != null && !args.isBlank()
+                && args.trim().split("\\s+", 2)[0].matches("(?i)camera|model|diag")) {
+            return execLocalOdc(args);
+        }
         if (forwarding) {
             return 0; // 已在转发中（sendCommand 递归回来的那一脚），直接放弃避免栈溢出
         }
@@ -152,7 +168,7 @@ public final class OdcCommands {
         /** 未连服时 /odc 的本地降级：与 /codc 相同的页面/常驻控制动作。 */
     private static int execLocalOdc(String args) {
         if (args == null || args.isBlank()) {
-            ok("§e=== OpenDreamCore ===§r\n§f/odc open|close|hud|list|reload|state §7— 本地动作（连服后自动转服务器插件执行）");
+            ok("§e=== OpenDreamCore ===§r\n§f/odc open|close|hud|list|reload|diag|state|camera §7— 本地动作（连服后除 camera 外自动转服务器插件执行）");
             return Command.SINGLE_SUCCESS;
         }
         String[] p = args.trim().split("\\s+", 2);
@@ -187,12 +203,22 @@ public final class OdcCommands {
                 ok(msg);
             }
             case "reload" -> cc.reloadAll();
+            case "diag" -> ok(ClientDiagCommand.run(p.length > 1 ? p[1].trim() : null));
             case "state" -> {
                 for (String s : Diagnostics.state()) {
                     ok(s);
                 }
             }
-            default -> ok("§7/odc 子命令: open|close|hud|list|reload|state（本地动作）；连服后 /odc 整条转发服务器插件执行");
+            case "camera", "model" -> {
+                // 本地状态；解析与产出在 client/camera、client/model，本类零增量逻辑。
+                var lines = p[0].equalsIgnoreCase("model")
+                        ? com.opendreamcore.client.model.ModelCommands.run(p.length > 1 ? p[1].trim() : "")
+                        : com.opendreamcore.client.camera.CameraCommands.run(p.length > 1 ? p[1].trim() : "", cc::cameraList);
+                for (String s : lines) {
+                    ok(s);
+                }
+            }
+            default -> ok("§7/odc 子命令: open|close|hud|list|reload|diag|state|camera|model（本地动作）；连服后 /odc 整条转发服务器插件执行");
         }
         return Command.SINGLE_SUCCESS;
     }
@@ -339,6 +365,8 @@ public final class OdcCommands {
                     ok("""
                             §e=== OpenDreamCore ===§r
                             §f/codc open/close/hud/list/reload §7— 页面与常驻控制（全本地）
+                            §f/codc camera list|play|stop|status|edit|point|preview|save §7— 相机规则（本地状态）
+                            §f/codc model list|formats|reload §7— 模型规则与资产（本地状态）
                             §f/codc edit §7— 编辑器帮助
                             §f/codc state/dump §7— 本地诊断与页面转存
                             §7本命令只动本地页面；服务器页面走插件的 /odc""");

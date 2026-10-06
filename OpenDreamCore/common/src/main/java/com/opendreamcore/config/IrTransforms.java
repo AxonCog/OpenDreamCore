@@ -1,7 +1,7 @@
 package com.opendreamcore.config;
 
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.Scope;
 
 import java.util.LinkedHashMap;
 import java.util.List;

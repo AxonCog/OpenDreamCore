@@ -10,7 +10,9 @@
     "MixinTooltip",
     "MixinCursor",
     "MixinArmorLayer",
-    "MixinNameTag"
+    "MixinNameTag",
+        "OdcModelMixin1165"
+    
   ],
   "injectors": {
     "defaultRequire": 1

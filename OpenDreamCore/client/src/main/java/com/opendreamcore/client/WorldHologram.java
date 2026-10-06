@@ -1,5 +1,8 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.render.CompatItemWorld;
+import com.opendreamcore.client.render.WorldSolidRect;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.opendreamcore.ui.RenderNode;
@@ -351,8 +354,7 @@ public final class WorldHologram {
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
         // 圆角矩形用 TRIANGLES 批次（中央 + 四边 + 四角扇形），支持上下渐变
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
         float a = ((color >>> 24) & 0xFF) / 255.0F * (float) fade * (float) bgFadeIn;
         if (a > 0) {
             if (gradient != 0) {
@@ -419,12 +421,12 @@ public final class WorldHologram {
     public static void quadTris(CompatBuffer builder, org.joml.Matrix4f matrix,
                                  float x0, float y0, float x1, float y1,
                                  float red, float green, float blue, float alpha) {
-        builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha);
-        builder.addVertex(matrix, x1, y0, 0).setColor(red, green, blue, alpha);
-        builder.addVertex(matrix, x1, y1, 0).setColor(red, green, blue, alpha);
-        builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha);
-        builder.addVertex(matrix, x1, y1, 0).setColor(red, green, blue, alpha);
-        builder.addVertex(matrix, x0, y1, 0).setColor(red, green, blue, alpha);
+        builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+        builder.addVertex(matrix, x1, y0, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+        builder.addVertex(matrix, x1, y1, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+        builder.addVertex(matrix, x0, y0, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+        builder.addVertex(matrix, x1, y1, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+        builder.addVertex(matrix, x0, y1, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
     }
 
     /** 圆角矩形（TRIANGLES）：中央 + 四边 + 四角四分之一圆扇形（每角 6 段）。 */
@@ -458,9 +460,9 @@ public final class WorldHologram {
             float ang = (float) Math.toRadians(a0 + (a1 - a0) * i / seg);
             float nx = cx + (float) Math.cos(ang) * r;
             float ny = cy + (float) Math.sin(ang) * r;
-            builder.addVertex(matrix, cx, cy, 0).setColor(red, green, blue, alpha);
-            builder.addVertex(matrix, prevX, prevY, 0).setColor(red, green, blue, alpha);
-            builder.addVertex(matrix, nx, ny, 0).setColor(red, green, blue, alpha);
+            builder.addVertex(matrix, cx, cy, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+            builder.addVertex(matrix, prevX, prevY, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
+            builder.addVertex(matrix, nx, ny, 0).setColor(red, green, blue, alpha).setUv(0F, 0F);
             prevX = nx;
             prevY = ny;
         }
@@ -488,7 +490,7 @@ public final class WorldHologram {
         float g = ((c >> 8) & 0xFF) / 255.0F;
         float b = (c & 0xFF) / 255.0F;
         float a = ((c >>> 24) & 0xFF) / 255.0F * alphaMul;
-        builder.addVertex(matrix, x, y, 0).setColor(r, g, b, a);
+        builder.addVertex(matrix, x, y, 0).setColor(r, g, b, a).setUv(0F, 0F);
     }
 
     /** ARGB 线性插值。 */
@@ -641,9 +643,8 @@ public final class WorldHologram {
             return Double.parseDouble(s);
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
-            worldVars().forEach(scope::assignVar);
-            Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            // 锚点表达式同样是纯数值：走结果缓存（注意别再顺手 new Scope——那正是热路径要省的开销）
+            Object r = com.opendreamcore.script.engine.DreamLang.evaluateCached(s, worldVars());
             if (r instanceof Number n) {
                 return n.doubleValue();
             }
@@ -879,9 +880,7 @@ public final class WorldHologram {
         // 物品图标：FIXED 视角渲染（1 单位 ≈ 物品模型 16px），按世界高度缩放
         pose.scale((float) (h * 1.2), (float) (h * 1.2), (float) (h * 1.2));
         try {
-            mc.getItemRenderer().renderStatic(stack,
-                    net.minecraft.world.item.ItemDisplayContext.FIXED,
-                    0xF000F0, 0, pose, buffers, mc.level, 0);
+            CompatItemWorld.renderItemWorld(mc, stack, pose, buffers);
         } catch (Exception ignored) {
             // 物品模型渲染失败跳过
         }
@@ -990,8 +989,7 @@ public final class WorldHologram {
         CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
         for (int i = 0; i < n; i++) {
             boolean active = activeTab != null && activeTab.equals(String.valueOf(options.get(i)));
             float x0 = -hw + i * pw + gap;
@@ -1071,8 +1069,7 @@ public final class WorldHologram {
         CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
         // 框体
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2, 0xFF20242C, alphaMul);
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, -h / 2 + h * 0.08F, 0xFF505868, alphaMul);
@@ -1135,8 +1132,7 @@ public final class WorldHologram {
         CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
         // 框（底色 + 四边）
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2,
                 checked ? 0xFF2A3355 : 0xFF20242C, alphaMul);
@@ -1232,8 +1228,7 @@ public final class WorldHologram {
         CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
         double trackH = h * 0.4;
         boolean vertical = UiRenderer.bool(spec.get("vertical"), false);
         if (vertical) {
@@ -1292,8 +1287,7 @@ public final class WorldHologram {
         CompatRender.defaultBlendFunc();
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
-        var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
         // 轨道
         quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2,
                 on ? 0xFF4CAF50 : 0xFF303540, alphaMul);
@@ -1346,8 +1340,7 @@ public final class WorldHologram {
             double sweep = "circle".equalsIgnoreCase(shape) ? 360 : UiRenderer.num(spec.get("sweepAngle"), 270);
             int track = UiStyle.color(spec.get("trackColor"), 0xFF303540);
             int color = UiStyle.color(spec.get("color"), 0xFF4CAF50);
-            var arcBuilder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var arcBuilder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
             fillArcWorld(arcBuilder, matrix, 0, 0, radius, thickness, start, sweep, track, alphaMul);
             if (ratio > 0) {
                 fillArcWorld(arcBuilder, matrix, 0, 0, radius, thickness, start, start + sweep * ratio - start, color, alphaMul);
@@ -1356,8 +1349,7 @@ public final class WorldHologram {
         } else {
             double w = holoNum(holo, "width", 1, pageVars);
             double h = holoNum(holo, "height", 0.08, pageVars);
-            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
             quadV(builder, matrix, -w / 2, -h / 2, w / 2, h / 2, 0xFF303540, alphaMul);
             double fillW = w * ratio;
             if (fillW > 0.005) {
@@ -1391,12 +1383,12 @@ public final class WorldHologram {
             double iy0 = cy + rIn * Math.sin(a0);
             double ix1 = cx + rIn * Math.cos(a1);
             double iy1 = cy + rIn * Math.sin(a1);
-            builder.addVertex(matrix, (float) ox0, (float) oy0, 0).setColor(c[0], c[1], c[2], c[3]);
-            builder.addVertex(matrix, (float) ox1, (float) oy1, 0).setColor(c[0], c[1], c[2], c[3]);
-            builder.addVertex(matrix, (float) ix0, (float) iy0, 0).setColor(c[0], c[1], c[2], c[3]);
-            builder.addVertex(matrix, (float) ox1, (float) oy1, 0).setColor(c[0], c[1], c[2], c[3]);
-            builder.addVertex(matrix, (float) ix1, (float) iy1, 0).setColor(c[0], c[1], c[2], c[3]);
-            builder.addVertex(matrix, (float) ix0, (float) iy0, 0).setColor(c[0], c[1], c[2], c[3]);
+            builder.addVertex(matrix, (float) ox0, (float) oy0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+            builder.addVertex(matrix, (float) ox1, (float) oy1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+            builder.addVertex(matrix, (float) ix0, (float) iy0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+            builder.addVertex(matrix, (float) ox1, (float) oy1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+            builder.addVertex(matrix, (float) ix1, (float) iy1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+            builder.addVertex(matrix, (float) ix0, (float) iy0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
         }
     }
 
@@ -1418,24 +1410,24 @@ public final class WorldHologram {
     public static void quadV(CompatBuffer builder, org.joml.Matrix4f matrix,
                               double x0, double y0, double x1, double y1, int color, float alphaMul) {
         float[] c = rgba(color, alphaMul);
-        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x1, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x0, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]);
+        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x1, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x0, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
     }
 
     public static void quad4(CompatBuffer builder, org.joml.Matrix4f matrix,
                               double x0, double y0, double x1, double y1,
                               double x2, double y2, double x3, double y3, int color, float alphaMul) {
         float[] c = rgba(color, alphaMul);
-        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x2, (float) y2, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x2, (float) y2, 0).setColor(c[0], c[1], c[2], c[3]);
-        builder.addVertex(matrix, (float) x3, (float) y3, 0).setColor(c[0], c[1], c[2], c[3]);
+        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x1, (float) y1, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x2, (float) y2, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x0, (float) y0, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x2, (float) y2, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
+        builder.addVertex(matrix, (float) x3, (float) y3, 0).setColor(c[0], c[1], c[2], c[3]).setUv(0F, 0F);
     }
 
     /** 世界内视频面板（FFmpeg 真视频贴图到 billboard 面板）。 */
@@ -1444,32 +1436,53 @@ public final class WorldHologram {
         com.opendreamcore.client.world.HoloCanvas.renderCanvas(pose, buffers, node, fade, scope, drag, pageVars);
     }
 
+
+    /** 视频元素的探测结果。 */
+    private static final class VideoProbe {
+        final net.minecraft.resources.ResourceLocation texture;
+        final int[] rect;
+
+        VideoProbe(net.minecraft.resources.ResourceLocation texture, int[] rect) {
+            this.texture = texture;
+            this.rect = rect;
+        }
+    }
+
+    /** 视频来源探测 + 播放器注册；返回 null = 这个节点不画。 */
+    private static VideoProbe probeVideo(RenderNode node, Map<?, ?> spec, String src,
+                                        java.util.Map<String, Object> pageVars) {
+        String lower = src.toLowerCase(java.util.Locale.ROOT);
+        boolean remote = lower.startsWith("https://") || lower.startsWith("http://");
+        boolean videoFile = remote
+                || lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov")
+                || lower.endsWith(".mkv") || lower.endsWith(".avi") || lower.endsWith(".flv");
+        if (!videoFile || !FfmpegVideoPlayer.available()) {
+            return null;
+        }
+        Object loopRaw = spec.get("loop");
+        boolean loop = loopRaw == null || Boolean.parseBoolean(String.valueOf(loopRaw));
+        FfmpegVideoPlayer video = FfmpegVideoPlayer.of(src, loop, UiRenderer.str(spec.get("fit")));
+        if (video == null) {
+            return null;
+        }
+        FfmpegVideoPlayer.register(node.id(), video);
+        Map<?, ?> holo = holo(node);
+        return new VideoProbe(video.currentTexture(),
+                video.drawRect(0, 0, holoNum(holo, "width", 1, pageVars), holoNum(holo, "height", 1, pageVars)));
+    }
+
     private static void renderVideo(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
         Map<?, ?> spec = UiRenderer.propsMap(node, "video");
         String src = UiRenderer.str(spec.get("src"));
         if (src == null) {
             return;
         }
-        String lower = src.toLowerCase(java.util.Locale.ROOT);
-        boolean remote = lower.startsWith("https://") || lower.startsWith("http://");
-        boolean videoFile = remote
-                || lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov")
-                || lower.endsWith(".mkv") || lower.endsWith(".avi") || lower.endsWith(".flv");
-        net.minecraft.resources.ResourceLocation texture = null;
-        int[] rect = null;
-        if (videoFile && FfmpegVideoPlayer.available()) {
-            Object loopRaw = spec.get("loop");
-            boolean loop = loopRaw == null || Boolean.parseBoolean(String.valueOf(loopRaw));
-            FfmpegVideoPlayer video = FfmpegVideoPlayer.of(src, loop, UiRenderer.str(spec.get("fit")));
-            if (video != null) {
-                FfmpegVideoPlayer.register(node.id(), video);
-                texture = video.currentTexture();
-                rect = video.drawRect(0, 0, holoNum(holo(node), "width", 1, pageVars), holoNum(holo(node), "height", 1, pageVars));
-            }
-        }
-        if (texture == null) {
+        VideoProbe probe = probeVideo(node, spec, src, pageVars);
+        if (probe == null) {
             return;
         }
+        net.minecraft.resources.ResourceLocation texture = probe.texture;
+        int[] rect = probe.rect;
         Map<?, ?> holo = holo(node);
         double x = holoNum(holo, "x", 0, pageVars);
         double y = holoNum(holo, "y", 0, pageVars);
@@ -1498,8 +1511,9 @@ public final class WorldHologram {
         CompatRender.setTextureShader();
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        // 视频有自己的帧纹理，不能走纯色入口（那会把白纹理重新绑上去）
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        CompatRender.worldTextureFormat());
+                CompatRender.worldTextureFormat());
         CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
@@ -1545,8 +1559,9 @@ public final class WorldHologram {
         CompatRender.setTextureShader();
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        // 视频有自己的帧纹理，不能走纯色入口（那会把白纹理重新绑上去）
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        CompatRender.worldTextureFormat());
+                CompatRender.worldTextureFormat());
         CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
@@ -1574,7 +1589,52 @@ public final class WorldHologram {
 
     /** 世界内色块（rect，billboard，可作特效背景/光柱）。 */
     private static void renderRect(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
-        Map<?, ?> spec = UiRenderer.propsMap(node, "rect");
+        com.opendreamcore.client.PerfProbe.countRect();
+        long tRect = com.opendreamcore.client.PerfProbe.enabled() ? System.nanoTime() : 0L;
+        try {
+            renderRect0(pose, buffers, node, fade, scope, drag, pageVars);
+        } finally {
+            if (com.opendreamcore.client.PerfProbe.enabled()) {
+                com.opendreamcore.client.PerfProbe.msRect += (System.nanoTime() - tRect) / 1_000_000L;
+            }
+        }
+    }
+
+    /** 无条件低频取证（每元素 4 秒一行）：静态排查最怕的就是“静默不画”。 */
+    private static void traceRect(RenderNode node, String msg) {
+        String key = node.id();
+        long now = System.currentTimeMillis();
+        Long last = RECT_TRACE.get(key);
+        if (last != null && now - last < 4000L) {
+            return;
+        }
+        RECT_TRACE.put(key, now);
+        com.opendreamcore.client.OdcDebug.log("[ODC-rect] " + key + " " + msg);
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> RECT_TRACE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 纯色矩形（无渐变无圆角）：四条边一张四边形。
+     *  批次不可用时只留一行取证——静默不画是排查起来最费时间的一类故障。 */
+    private static void drawPlainQuad(PoseStack pose, Object matrix, RenderNode node,
+                                      float hw, float hh, float r, float g, float b, float a,
+                                      double w, double h, int color) {
+        var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
+        if (!builder.usable()) {
+            traceRect(node, "批次不可用（缓冲创建失败），矩形静默不画");
+            return;
+        }
+        traceRect(node, "绘制 w=" + w + " h=" + h + " color=" + Integer.toHexString(color) + " a=" + a);
+        builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+        builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+        builder.addVertex(matrix, hw, hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+        builder.addVertex(matrix, -hw, hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+        drawSafe(builder);
+    }
+
+    private static void renderRect0(PoseStack pose, MultiBufferSource buffers, RenderNode node, double fade, String scope, double[] drag, java.util.Map<String, Object> pageVars) {
+        Map<?, ?> spec = rectSpec(node);
         Map<?, ?> holo = holo(node);
         double x = holoNum(holo, "x", 0, pageVars);
         double y = holoNum(holo, "y", 0, pageVars);
@@ -1587,7 +1647,9 @@ public final class WorldHologram {
         float g = ((color >> 8) & 0xFF) / 255.0F;
         float b = (color & 0xFF) / 255.0F;
         float a = ((color >>> 24) & 0xFF) / 255.0F * (float) fade * (float) (anim == null ? 1 : anim[3]);
+        diagRect(node, w, h, color, a);
         if (a <= 0) {
+            traceRect(node, "alpha=0 color=" + Integer.toHexString(color) + " fade=" + fade);
             return;
         }
         pose.pushPose();
@@ -1608,28 +1670,54 @@ public final class WorldHologram {
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
         if (gradient != 0) {
-            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var round = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
             roundedQuadTrisGrad(round, matrix, -hw, -hh, hw, hh, rr, color, gradient, -hh, hh, (float) fade, false, 0, 0.5F);
             drawSafe(round);
         } else if (rr > 0.01F) {
-            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var round = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
             roundedQuadTris(round, matrix, -hw, -hh, hw, hh, rr, r, g, b, a);
             drawSafe(round);
         } else {
-            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-            builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, hw, hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, -hw, hh, 0).setColor(r, g, b, a);
-            drawSafe(builder);
+            drawPlainQuad(pose, matrix, node, hw, hh, r, g, b, a, w, h, color);
         }
         applyContentDepth();
         CompatRender.disableBlend();
         pose.popPose();
     }
+
+    /**
+     * rect 元素取值：平铺写法（type: rect + color: ...）与嵌套写法（rect: {color: ...}）都认，
+     * 嵌套优先。龙核与头顶/血条模板都是平铺写法，只认嵌套会让颜色、圆角、渐变全丢。
+     */
+    private static Map<?, ?> rectSpec(RenderNode node) {
+        Map<?, ?> flat = node.props();
+        Map<?, ?> nested = UiRenderer.propsMap(node, "rect");
+        if (nested.isEmpty()) {
+            return flat;
+        }
+        Map<String, Object> merged = new java.util.LinkedHashMap<String, Object>();
+        for (Map.Entry<?, ?> e : flat.entrySet()) {
+            merged.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        for (Map.Entry<?, ?> e : nested.entrySet()) {
+            merged.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        return merged;
+    }
+
+    /** rect 首次绘制时打一行诊断（odc.debug 开启时），血条不显示时能一眼看出几何/颜色/alpha。 */
+    private static void diagRect(RenderNode node, double w, double h, int color, float a) {
+        if (!com.opendreamcore.client.PerfProbe.enabled()
+                || !RECT_DIAG.add(node.id() + "@" + System.identityHashCode(node))) {
+            return;
+        }
+        com.opendreamcore.client.OdcDebug.log("[ODC-diag] rect " + node.id()
+                + " w=" + w + " h=" + h + " color=#" + Integer.toHexString(color)
+                + " alpha=" + a + " props=" + node.props().keySet());
+    }
+
+    private static final java.util.Set<String> RECT_DIAG =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * 世界内按钮（button，billboard）：背景色块（hover 高亮 / 按下变亮 + 0.95 缩放）+ 居中标签。
@@ -1687,17 +1775,15 @@ public final class WorldHologram {
         applyContentDepth(); // 内容深度:occluded=深度测试(不穿墙) / always=穿透
         CompatRender.setColorShader();
         if (rr > 0.01F) {
-            var round = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            var round = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES);
             roundedQuadTris(round, matrix, -hw, -hh, hw, hh, rr, r, g, b, a);
             drawSafe(round);
         } else {
-            var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                            com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-            builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, hw, hh, 0).setColor(r, g, b, a);
-            builder.addVertex(matrix, -hw, hh, 0).setColor(r, g, b, a);
+            var builder = WorldSolidRect.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS);
+            builder.addVertex(matrix, -hw, -hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+            builder.addVertex(matrix, hw, -hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+            builder.addVertex(matrix, hw, hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
+            builder.addVertex(matrix, -hw, hh, 0).setColor(r, g, b, a).setUv(0F, 0F);
             drawSafe(builder);
         }
         applyContentDepth();
@@ -1754,8 +1840,9 @@ public final class WorldHologram {
         // 距离淡出 + 动画 alpha：全局着色器颜色乘 alpha
         float alpha = (float) fade * (float) (anim == null ? 1 : anim[3]);
         CompatRender.shaderColor(1.0F, 1.0F, 1.0F, alpha);
+        // 视频有自己的帧纹理，不能走纯色入口（那会把白纹理重新绑上去）
         var builder = CompatRender.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS,
-                        CompatRender.worldTextureFormat());
+                CompatRender.worldTextureFormat());
         CompatRender.texturedVertex(builder, matrix, -hw, -hh, 0, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, -hh, 1, 0, alpha);
         CompatRender.texturedVertex(builder, matrix, hw, hh, 1, 1, alpha);
@@ -1853,16 +1940,19 @@ public final class WorldHologram {
         if (s.matches("-?\\d+(\\.\\d+)?")) {
             return Double.parseDouble(s);
         }
+        com.opendreamcore.client.PerfProbe.countExprEval();
+        long t0 = com.opendreamcore.client.PerfProbe.enabled() ? System.nanoTime() : 0L;
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
-            if (vars != null) {
-                vars.forEach(scope::assignVar);
-            }
-            Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            // 布局数值表达式是纯算术：走结果缓存（变量没变零计算），热路径主导开销
+            Object r = com.opendreamcore.script.engine.DreamLang.evaluateCached(s, vars);
             if (r instanceof Number n) {
                 return n.doubleValue();
             }
         } catch (Exception ignored) {
+        } finally {
+            if (com.opendreamcore.client.PerfProbe.enabled()) {
+                com.opendreamcore.client.PerfProbe.msExprEval += (System.nanoTime() - t0) / 1_000_000L;
+            }
         }
         return fallback;
     }

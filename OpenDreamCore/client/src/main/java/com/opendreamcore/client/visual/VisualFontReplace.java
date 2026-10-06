@@ -118,7 +118,7 @@ public final class VisualFontReplace {
         } catch (Throwable ignored) {
         }
         // 服务端 VisualRuleManager 把 FontConfig.yml 每条规则拆成一个 entry（id=键名，value=规则字段体），
-        // 这里必须按 id + 扁平 body 解析——把 body 当“整包多规则”解析会因全是标量而全空（历史大坑）。
+        // 按 id + 扁平 body 解析；把 body 当整包多规则解析会因全是标量而全空。
         for (Map.Entry<String, String> ruleEntry : fontRules.entrySet()) {
             String ruleId = ruleEntry.getKey();
             String yaml = ruleEntry.getValue();

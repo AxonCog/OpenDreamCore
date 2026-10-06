@@ -1,5 +1,9 @@
 package com.opendreamcore.script;
 
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.DreamLangExecutor;
+import com.opendreamcore.script.engine.Scope;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;

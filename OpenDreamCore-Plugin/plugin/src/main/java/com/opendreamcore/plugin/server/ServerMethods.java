@@ -199,10 +199,10 @@ public final class ServerMethods {
     /** 以玩家作用域执行脚本（页面变量不存在的场景：仅 player 绑定）。 */
     private static void executeFor(Player player, String script) {
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             scope.assignPlayer("name", player.getName());
             scope.assignPlayer("uuid", player.getUniqueId().toString());
-            com.opendreamcore.script.DreamLang.execute(script, scope);
+            com.opendreamcore.script.engine.DreamLang.execute(script, scope);
         } catch (Exception e) {
             OpenDreamCorePlugin.get().getLogger().warning("Script 执行失败 (" + player.getName() + "): " + e);
         }

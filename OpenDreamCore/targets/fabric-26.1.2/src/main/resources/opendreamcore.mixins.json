@@ -9,13 +9,18 @@
     "MixinSubtitleOverlay",
     "MixinGuiGraphicsExtractor",
     "MixinNameTag",
+    "MixinEntityDispatcher",
     "MixinCursor",
     "MixinArmorLayer",
     "MixinItemIcon",
+    "MixinItemHeldSubmit",
     "MixinTooltip",
     "FontSetSourceMixin",
     "WorldRenderPipelinesMixin",
-    "WorldRenderTypeMixin"
+    "WorldRenderTypeMixin",
+    "OdcCameraMixin",
+    "OdcFovMixin",
+    "OdcEntityModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

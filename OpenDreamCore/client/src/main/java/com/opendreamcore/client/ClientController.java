@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.util.ClientChat;
 import com.opendreamcore.client.methods.ClientMethodSupport;
 
 import com.mojang.logging.LogUtils;
@@ -53,40 +54,6 @@ public final class ClientController {
     private static volatile String CLIENT_VERSION;
 
     /** 聊天栏提示（主线程安全；没进世界就静默丢）。 */
-    public static void chat(String text) {
-        try {
-            var mc = Minecraft.getInstance();
-            if (mc.player != null) {
-                mc.player.displayClientMessage(
-                        net.minecraft.network.chat.Component.literal(text), false);
-            }
-        } catch (Throwable ignored) {
-            // 没玩家/没启动完：静默，别拖垮调用方
-        }
-    }
-
-    /** 失败提示去重表：同一 key 只说一次，防每帧/每包刷屏。 */
-    private static final java.util.Set<String> CHAT_WARNED = java.util.Collections.newSetFromMap(
-            new java.util.concurrent.ConcurrentHashMap<>());
-
-    /** 带去重的失败提示（key 相同只发一次）。 */
-    public static void chatWarnOnce(String key, String text) {
-        if (CHAT_WARNED.size() > 256) {
-            CHAT_WARNED.clear(); // 防膨胀：刷满就重置，宁可多提醒也别永久哑巴
-        }
-        if (CHAT_WARNED.add(key)) {
-            chat(text);
-        }
-    }
-
-    /** 异常原因缩略：聊天栏一句话说清，别贴全文堆栈。 */
-    public static String shortReason(Throwable t) {
-        if (t == null) {
-            return "未知原因";
-        }
-        String s = String.valueOf(t);
-        return s.length() > 120 ? s.substring(0, 120) + "…" : s;
-    }
 
     private static String clientVersion() {
         String v = CLIENT_VERSION;
@@ -138,7 +105,7 @@ public final class ClientController {
                     .invoke(loader, "opendreamcore")).orElse(null);
             if (container != null) {
                 Object meta = container.getClass().getMethod("metadata").invoke(container);
-                // 注意：Fabric 的 getVersion() 返回 Version 对象不是 String，别硬转，String.valueOf 兜底
+                // Fabric 的 getVersion() 返回 Version 对象，String.valueOf 兜底
                 Object ver = meta.getClass().getMethod("getVersion").invoke(meta);
                 if (ver != null) {
                     String s = String.valueOf(ver);
@@ -165,7 +132,7 @@ public final class ClientController {
                         // NeoForge 新一点：访问器叫 version()
                         ver = info.getClass().getMethod("version").invoke(info);
                     }
-                    // 注意：SemanticVersion/ModVersion 都不是 String，别硬转，String.valueOf 兜底
+                    // SemanticVersion/ModVersion 都不是 String，String.valueOf 兜底
                     if (ver != null && !String.valueOf(ver).isBlank()) {
                         return String.valueOf(ver);
                     }
@@ -383,6 +350,14 @@ public final class ClientController {
         tickHudHover();
         tickHudEditKeys();
         tickGlobalReloadKey();
+        // 运镜播放（M1.2）：每客户端 tick 推进一步时间轴并写入相机实体。
+        // 内部自带世界/玩家校验、硬上限与异常收敛（失败也会把相机还回去），
+        // 这里再包一层只是不让它影响其他 tick 逻辑。
+        try {
+            com.opendreamcore.client.camera.CameraPlayback.get().tick();
+        } catch (Throwable ignored) {
+            // 已被播放器内部兜底
+        }
         bindingsService.tick();
     }
 
@@ -1921,11 +1896,11 @@ private boolean reloadKeyPrev;
             return Double.parseDouble(s);
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             if (worldPage != null) {
                 worldPage.variables().forEach(scope::assignVar);
             }
-            Object r = com.opendreamcore.script.DreamLang.evaluate(s, scope);
+            Object r = com.opendreamcore.script.engine.DreamLang.evaluate(s, scope);
             if (r instanceof Number n) {
                 return n.doubleValue();
             }
@@ -2199,10 +2174,10 @@ private boolean reloadKeyPrev;
                 }
                 if (run != null && !run.isBlank()) {
                     try {
-                        com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+                        com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
                         scope.assignVar("system", sys.getKey());
                         scope.assignVar("rule_id", rule.getKey());
-                        com.opendreamcore.script.DreamLang.execute(
+                        com.opendreamcore.script.engine.DreamLang.execute(
                             com.opendreamcore.adapter.AdapterChain.rewriteScript(run.trim()), scope);
                     } catch (Exception e) {
                         LOGGER.warn("视觉规则脚本执行失败 {}/{}: {}", sys.getKey(), rule.getKey(), e.toString());
@@ -2493,8 +2468,8 @@ private boolean reloadKeyPrev;
         if (!hudDiagDone) {
             hudDiagDone = true;
             var w = Minecraft.getInstance().getWindow();
-            LOGGER.info("HUD 首帧诊断: 元素 {} 画布 {}x{} guiScale {}", hudNodes.size(),
-                    w.getGuiScaledWidth(), w.getGuiScaledHeight(), w.calculateScale(0, false));
+            com.opendreamcore.client.OdcDebug.log(String.format("HUD 首帧诊断: 元素 %s 画布 %sx%s guiScale %s", hudNodes.size(),
+                    w.getGuiScaledWidth(), w.getGuiScaledHeight(), w.calculateScale(0, false)));
         }
         // HUD 页面背景（options.background：颜色值 = 半透明遮罩；true = 默认深色；缺省/false = 透明）
         Object hudBg = hudPage.options() == null ? null : hudPage.options().get("background");
@@ -4465,7 +4440,7 @@ private boolean reloadKeyPrev;
                                 ux + 2, y + 2, 0xFFB3E5FC);
                         worldBorderPaletteRects.add(new int[]{ux, y, ux + 12, y + 12});
                     }
-                    // 第十一列：hover 加速开关（hoverBoost，与 渐/向 同款单格开关）
+                    // 第十一列：hover 加速开关（hoverBoost，与 渐/向 相同的单格开关）
                     int kx = sx + 170;
                     boolean hbOn = WorldEditor.get().worldEditSelected != null
                             && isWorldFlowHoverBoostOn(findElement(worldPage, WorldEditor.get().worldEditSelected));
@@ -10060,10 +10035,10 @@ private boolean reloadKeyPrev;
             return;
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             page.variables().forEach(scope::assignVar);
             // 方言脚本先进适配器链过一遍（生命周期脚本也可能是老龙核搬来的）
-            com.opendreamcore.script.DreamLang.execute(
+            com.opendreamcore.script.engine.DreamLang.execute(
                     com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("页面 {} 生命周期 {} 脚本出错: {}", page.id(), name, e.toString());
@@ -10080,13 +10055,13 @@ private boolean reloadKeyPrev;
             return;
         }
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             page.variables().forEach(scope::assignVar);
             scope.assignVar("tab", newTab);
             if (prevTab != null) {
                 scope.assignVar("prevTab", prevTab);
             }
-            com.opendreamcore.script.DreamLang.execute(
+            com.opendreamcore.script.engine.DreamLang.execute(
                     com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("页面 {} onTabChange 脚本出错: {}", page.id(), e.toString());
@@ -10215,7 +10190,7 @@ private boolean reloadKeyPrev;
     /** 本地执行页面脚本；data 非空时注入 vars.event / vars.input（事件数据）。 */
     public void runLocalAction(Page page, String script, String data) {
         try {
-            com.opendreamcore.script.Scope scope = new com.opendreamcore.script.Scope();
+            com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             page.variables().forEach(scope::assignVar);
             globals.forEach(scope::assignGlobal);
             var player = Minecraft.getInstance().player;
@@ -10231,7 +10206,7 @@ private boolean reloadKeyPrev;
                 scope.assignVar("event", data);
                 scope.assignVar("input", data);
             }
-            com.opendreamcore.script.DreamLang.execute(
+            com.opendreamcore.script.engine.DreamLang.execute(
                     com.opendreamcore.adapter.AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             LOGGER.warn("本地脚本执行失败: {}", e.toString());
@@ -10268,6 +10243,19 @@ private boolean reloadKeyPrev;
         com.opendreamcore.client.visual.VisualItemEffects.refresh();
         com.opendreamcore.client.visual.VisualArmorLayer.refresh();
         com.opendreamcore.client.visual.VisualNameTags.refresh();
+        // 相机：规则 IR 入库（服务端下发与本地重载共用 CameraStore.apply，整体覆盖）
+        var camYaml = sync.toBundles().get("Camera");
+        if (camYaml != null) {
+            String camSummary = com.opendreamcore.camera.CameraStore.get().apply(camYaml);
+            if (camSummary != null) {
+                LOGGER.info("{}", camSummary);
+            }
+        }
+        com.opendreamcore.client.model.ModelRuleStore.handleServerBundle(bundles);
+        // 连服时也要重设资产根，否则 roots 永远空、模型按名全找不到
+        try {
+            com.opendreamcore.client.model.ModelRuleStore.handleAssets(Minecraft.getInstance().gameDirectory.toPath());
+        } catch (Throwable t) { LOGGER.warn("模型资产根设置失败", t); }
             LOGGER.info("视觉规则已应用：{} 个系统 / {} 条",
                     sync.toBundles().size(), sync.entries().size());
             // run:/event: 语法增量：规则入库时触发脚本与事件总线
@@ -10330,7 +10318,7 @@ private boolean reloadKeyPrev;
         if (mc == null || mc.getWindow() == null || mc.player == null) {
             return;
         }
-        // 注意：这里刻意不拦 mc.screen != null。GLFW 轮询读的是物理键盘状态，
+        // 刻意不拦 mc.screen != null：GLFW 轮询读物理键盘状态，
         // 任何 Screen 打开时照样能按（OdcScreen 也没设 Ctrl+R 分支，两条路不会撞）。
         long win = mc.getWindow().getWindow();
         boolean r = org.lwjgl.glfw.GLFW.glfwGetKey(win, org.lwjgl.glfw.GLFW.GLFW_KEY_R) == 1;
@@ -10373,6 +10361,7 @@ private boolean reloadKeyPrev;
      * 这条主要给单机/开发本地刷配置用。
      */
     public void reloadAll() {
+        com.opendreamcore.client.PerfProbe.banner(); // 启动/重载都报一次诊断开关状态（首见幂等）
         Path gameDir = Minecraft.getInstance().gameDirectory.toPath();
         // 1. 本地视觉规则（gameDir/OpenDreamCore/visual/*.yml，缺省建模板示例）
         Map<String, Map<String, String>> localBundles = loadLocalVisualRules();
@@ -10387,6 +10376,14 @@ private boolean reloadKeyPrev;
         com.opendreamcore.client.visual.VisualItemEffects.refresh();
         com.opendreamcore.client.visual.VisualArmorLayer.refresh();
         com.opendreamcore.client.visual.VisualNameTags.refresh();
+        // 相机：本地 Camera.yml（单机路径；连服后服务端下发会整体覆盖）
+        if (localBundles != null && localBundles.containsKey("Camera")) {
+            String camSummary = com.opendreamcore.camera.CameraStore.get().apply(localBundles.get("Camera"));
+            if (camSummary != null) {
+                LOGGER.info("{}", camSummary);
+            }
+        }
+        com.opendreamcore.client.model.ModelRuleStore.handleLocal(localBundles, gameDir);
         // 3. 页面 + 字体 + 主题 + 标题
         Path uiDir = gameDir.resolve("OpenDreamCore").resolve("UI");
         localPages().load(uiDir);
@@ -10399,6 +10396,24 @@ private boolean reloadKeyPrev;
             p.displayClientMessage(net.minecraft.network.chat.Component.literal(
                     "§a[OpenDreamCore] §f本地页面/字体/规则已重载"), false);
         }
+    }
+
+    /**
+     * /odc camera list：列出当前生效的相机规则（服务端下发或本地，整体覆盖语义）。
+     * 只做展示格式化——规则解析/存储在共享层 camera 模块（版本无关，见 common/camera/MODULE.md）。
+     */
+    public java.util.List<String> cameraList() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        var rules = com.opendreamcore.camera.CameraStore.get().rules();
+        if (rules.isEmpty()) {
+            out.add("§e[OpenDreamCore] §f暂无相机规则。编辑 visual/Camera.yml 后：连服 /odc reload（服务端下发）或本地 /codc reload");
+            return out;
+        }
+        out.add("§e[OpenDreamCore] §f相机规则 " + rules.size() + " 条：");
+        for (var e : rules.entrySet()) {
+            out.add("§7- §f" + e.getValue().summaryLine());
+        }
+        return out;
     }
 
     /**
@@ -10684,7 +10699,7 @@ private boolean reloadKeyPrev;
                     LOGGER.debug("服务端页面 {} 密钥未到，暂存待回放", sync.pageId());
                 } else {
                     LOGGER.warn("服务端页面解析失败 {}", sync.pageId());
-                    chatWarnOnce("page-parse:" + sync.pageId(),
+                    ClientChat.chatWarnOnce("page-parse:" + sync.pageId(),
                             "§c[OpenDreamCore] §f页面 " + sync.pageId() + " 解析失败，内容已忽略（详见日志）");
                 }
                 return;
@@ -10713,8 +10728,8 @@ private boolean reloadKeyPrev;
             }
         } catch (Exception e) {
             LOGGER.warn("服务端页面解析失败 {}: {}", sync.pageId(), e.toString());
-            chatWarnOnce("page-parse-exc:" + sync.pageId(),
-                    "§c[OpenDreamCore] §f页面 " + sync.pageId() + " 解析失败: " + shortReason(e));
+            ClientChat.chatWarnOnce("page-parse-exc:" + sync.pageId(),
+                    "§c[OpenDreamCore] §f页面 " + sync.pageId() + " 解析失败: " + ClientChat.shortReason(e));
         }
     }
 
@@ -10755,8 +10770,8 @@ private boolean reloadKeyPrev;
             }
         } catch (Exception e) {
             LOGGER.warn("服务端 HUD 解析失败 {}: {}", sync.pageId(), e.toString());
-            chatWarnOnce("hud-parse:" + sync.pageId(),
-                    "§c[OpenDreamCore] §fHUD " + sync.pageId() + " 解析失败: " + shortReason(e));
+            ClientChat.chatWarnOnce("hud-parse:" + sync.pageId(),
+                    "§c[OpenDreamCore] §fHUD " + sync.pageId() + " 解析失败: " + ClientChat.shortReason(e));
         }
     }
 

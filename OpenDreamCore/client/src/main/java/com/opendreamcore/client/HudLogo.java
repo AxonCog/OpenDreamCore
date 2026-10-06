@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -77,7 +78,7 @@ public final class HudLogo {
             CompatRender.poseScale(pose, l.scale(), l.scale());
             // 透明度：旧管线经 setDrawColor 生效；新管线为尽力而为（文档已注明）
             CompatRender.setDrawColor(g, 1F, 1F, 1F, (float) l.opacity());
-            CompatRender.blit(g, l.tex(), 0, 0, l.width(), l.height(),
+            GuiBlitCompat.blit(g, l.tex(), 0, 0, l.width(), l.height(),
                     0, 0, l.width(), l.height(), l.width(), l.height());
             CompatRender.setDrawColor(g, 1F, 1F, 1F, 1F);
             CompatRender.posePop(pose);

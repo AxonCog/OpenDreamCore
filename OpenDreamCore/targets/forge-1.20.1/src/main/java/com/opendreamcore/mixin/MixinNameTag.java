@@ -30,7 +30,7 @@ public abstract class MixinNameTag {
     private void opendreamcore$replaceNameTag(Entity entity, Component displayName,
                                               PoseStack pose, MultiBufferSource buffer,
                                               int light, CallbackInfo ci) {
-        VisualNameTags.Hit hit = VisualNameTags.hitFor(entity);
+        VisualNameTags.Hit hit = VisualNameTags.pendingHit(entity); // 匹配已前置到 dispatcher（见 MixinEntityDispatcher）
         if (hit == null) {
             return; // 没规则命中，原版名牌照旧
         }

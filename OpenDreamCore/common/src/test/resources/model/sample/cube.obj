@@ -1,0 +1,20 @@
+# 手写最小 obj 样例（单立方体：v/vt/vn/f 齐备，供 ObjCodec 单测）
+mtllib cube.mtl
+o cube
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+v 0 0 1
+v 1 0 1
+v 1 1 1
+v 0 1 1
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+vn 0 0 1
+vn 0 0 -1
+usemtl main
+f 1/1/1 2/2/1 3/3/1 4/4/1
+f 5/4/2 6/3/2 7/2/2 8/1/2

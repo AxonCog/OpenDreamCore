@@ -1,7 +1,7 @@
 package com.opendreamcore.plugin.server.visual;
 
-import com.opendreamcore.script.DreamLang;
-import com.opendreamcore.script.Scope;
+import com.opendreamcore.script.engine.DreamLang;
+import com.opendreamcore.script.engine.Scope;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 

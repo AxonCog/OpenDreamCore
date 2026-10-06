@@ -43,6 +43,9 @@ public final class OdcLegacy {
             } catch (Throwable t) {
                 LOGGER.warn("[ODC] 散装贴图扫描失败: {}", t.toString());
             }
+            // 实体模型替换：贴图注册回调 + 资产扫描 + 本地规则
+            com.opendreamcore.model1165.ModelRenderer1165.init(
+                    net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath());
         });
         LOGGER.info("OpenDreamCore-Legacy 1.16.5 初始化完成（协议 v{}）", Protocol.VERSION);
     }

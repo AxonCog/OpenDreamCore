@@ -166,7 +166,7 @@ public final class OdcScreen extends Screen implements UiRenderer.State {
         if (newNodes == this.nodes) {
             return; // 同一引用（布局缓存命中），无需操作
         }
-        // newNodes 可能是 layoutCache 共享的不可变列表，绝不能 clear/addAll 就地改——整体换私有副本
+        // newNodes 可能是 layoutCache 共享的不可变列表，不能就地改，整体换私有副本
         this.nodes = new ArrayList<>(newNodes);
     }
 

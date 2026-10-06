@@ -871,7 +871,7 @@ public final class FullGapLegacy {
         if (fn == null) { return null; }
         String code = String.valueOf(fn).trim();
         if (!code.isEmpty() && !code.contains("(")) { code = code + "()"; }
-        try { com.opendreamcore.script.DreamLang.execute(code, null); } catch (Throwable ignored) { /* 脚本执行失败：静默（脚本自身容错） */ }
+        try { com.opendreamcore.script.engine.DreamLang.execute(code, null); } catch (Throwable ignored) { /* 脚本执行失败：静默（脚本自身容错） */ }
         return null;
     }
     private static Object IF_STMT(Object[] a) {
@@ -959,7 +959,7 @@ public final class FullGapLegacy {
         final String c = code;
         J8.delayedExecutor((long) num(a, 0),
                         java.util.concurrent.TimeUnit.MILLISECONDS)
-                .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
+                .execute(() -> { try { com.opendreamcore.script.engine.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
         return null;
     }
 
@@ -974,7 +974,7 @@ public final class FullGapLegacy {
             final long d = interval * k;
             J8.delayedExecutor(d,
                             java.util.concurrent.TimeUnit.MILLISECONDS)
-                    .execute(() -> { try { com.opendreamcore.script.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
+                    .execute(() -> { try { com.opendreamcore.script.engine.DreamLang.execute(c, null); } catch (Throwable ignored) { /* 脚本执行失败：静默 */ } });
         }
         return null;
     }

@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.render.GuiBlitCompat;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.opendreamcore.ui.TtfFont;
 import net.minecraft.client.renderer.texture.DynamicTexture;
@@ -169,11 +170,11 @@ public final class TtfRenderer {
             int gy = (int) (cy - font.ascent() * scale);
             if (shadow) {
                 CompatRender.setDrawColor(g, 0.0F, 0.0F, 0.0F, (float) alpha);
-                CompatRender.blit(g, glyph.page.id, gx + 1, gy + 1, gw, gh,
+                GuiBlitCompat.blit(g, glyph.page.id, gx + 1, gy + 1, gw, gh,
                         glyph.x, glyph.y, glyph.w, glyph.h, PAGE_SIZE, PAGE_SIZE);
             }
             CompatRender.setDrawColor(g, r, gr, b, (float) alpha);
-            CompatRender.blit(g, glyph.page.id, gx, gy, gw, gh,
+            GuiBlitCompat.blit(g, glyph.page.id, gx, gy, gw, gh,
                     glyph.x, glyph.y, glyph.w, glyph.h, PAGE_SIZE, PAGE_SIZE);
             cx += glyph.advance * scale;
         }

@@ -1,18 +1,30 @@
-name: ODC Matrix CI
+name: ODC CI
 
 on:
   push:
     branches: [main, master]
   pull_request:
 
-# 结构门禁：sync_check.ps1 全绿才允许合并（逐 target 断言「契约实现」齐不齐 + mixin 注册一致）。
-# 编译矩阵在 .github/workflows/release.yml —— 12 个现代目标 + 插件都能在通用 Runner 上编：
-# 每个目标用自带的 ./gradlew，并用 -Dorg.gradle.java.home="$JAVA_HOME" 压过
-# gradle.properties 里写死的开发机 JDK 路径（已本机实测该 -D 覆盖确实生效）。
+# 两道门禁，都只做「静态检查」，不编译（编译矩阵在 release.yml，12 个现代目标全部能在通用 Runner 上编）：
+#
+#   ① 结构门禁 sync_check.ps1 —— 逐 target 断言「契约实现」齐不齐 + mixin 注册一致
+#   ② 反臃肿门禁 check_bloat.py —— 《0.2.x规划-新架构设计与扩展规范》§10 的 12 条规则机检
+#
+# 反臃肿门禁的语义：规则是给**新代码**立的规矩，存量违规记在 .github/scripts/bloat-baseline.txt，
+# 所以门禁只对「新增违规」失败。基线键是「规则+路径+说明+条数」，不含行号 —— 存量文件被编辑后
+# 行号位移不会误报（这条是实测过的，见 .github/scripts/README.md）。
+#
+# 本地等价命令：
+#   python .github/scripts/gen_index.py --check
+#   python .github/scripts/check_bloat.py --selftest
+#   python .github/scripts/check_bloat.py                 # 全仓体检（报告模式，永不失败）
+#   python .github/scripts/check_bloat.py --gate <目录>    # 只看该目录的新增违规，非 0 即退出码 1
+#
 # 4 个 Legacy 目标（forge-1.6.4/1.7.10/1.12.2/1.16.5）仍只在开发机编：它们的
 # OpenDreamCore-Legacy/libs 与 tools（mcp/srg/SpecialSource/本地 forge 产物）不入库。
+
 jobs:
-  gate:
+  sync-check:
     name: 结构门禁（sync_check）
     runs-on: windows-latest
     steps:
@@ -20,5 +32,34 @@ jobs:
 
       - name: 结构门禁 sync_check
         shell: pwsh
+        run: pwsh .github/scripts/sync_check.ps1
+
+  bloat-gate:
+    name: 反臃肿门禁（规范 §10）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # R10（新增目标文件数）要用 git 历史比对
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 生成期索引新鲜度
+        shell: pwsh
+        run: python .github/scripts/gen_index.py --check
+
+      - name: 机检自检（证明规则真会抓，不是空转）
+        shell: pwsh
+        run: python .github/scripts/check_bloat.py --selftest
+
+      - name: 反臃肿门禁（新增违规 = 0）
+        shell: pwsh
         run: |
-          pwsh .github/scripts/sync_check.ps1
+          $since = "${{ github.event.pull_request.base.sha }}"
+          if (-not $since) { $since = "${{ github.event.before }}" }
+          if (-not $since -or $since -match '^0+$') { $since = "HEAD~1" }
+          Write-Host "比对基准：$since"
+          python .github/scripts/check_bloat.py --since $since --gate `
+            "OpenDreamCore" "OpenDreamCore-Legacy" "OpenDreamCore-Plugin"

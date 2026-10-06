@@ -54,6 +54,9 @@ sourceSets {
         java.srcDir "$buildDir/generated/common-main"
         java.srcDir "$buildDir/generated/client-main"
         java.srcDir "$buildDir/generated/glyph-1.20-1.21.4"
+        java.srcDir "$buildDir/generated/camera-1.20-1.21.8"
+        java.srcDir "$buildDir/generated/camera-fov-1.20-1.21.1"
+        java.srcDir "$buildDir/generated/model-1.20-1.21.1"
         resources.srcDir '../../common/src/main/resources'
     }
 }
@@ -71,7 +74,26 @@ tasks.register('prepareGlyph120To1214', Sync) {
     from('../../gensrc/glyph-1.20-1.21.4/src/main/java')
     into "$buildDir/generated/glyph-1.20-1.21.4"
 }
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214' }
+// camera-1.20-1.21.8/ 是 1.20.1/1.21.1/1.21.4/1.21.8 四代共用的相机接管混入
+// （这四代 Camera.setup 的首个形参都是 BlockGetter，签名同形）。
+tasks.register('prepareCamera120To1218', Sync) {
+    from('../../gensrc/camera-1.20-1.21.8/src/main/java')
+    into "$buildDir/generated/camera-1.20-1.21.8"
+}
+
+// camera-fov-1.20-1.21.1/ 是 M1.5 的 FOV 混入（gen1：1.20.1/1.21.1，GameRenderer.getFov 返回 double）
+tasks.register('prepareCameraFov1201211', Sync) {
+    from('../../gensrc/camera-fov-1.20-1.21.1/src/main/java')
+    into "$buildDir/generated/camera-fov-1.20-1.21.1"
+}
+
+// model-1.20-1.21.1/ 实体模型替换（1.20.1/1.21.1：旧顶点链 vertex/color/uv + endVertex）
+tasks.register('prepareModel1201211', Sync) {
+    from('../../gensrc/model-1.20-1.21.1/src/main/java')
+    into "$buildDir/generated/model-1.20-1.21.1"
+}
+
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214', 'prepareCamera120To1218', 'prepareCameraFov1201211', 'prepareModel1201211' }
 tasks.named('prepareGlyph120To1214') { outputs.upToDateWhen { false } }
 
 // 中文源码/注释：javac 显式 UTF-8

@@ -1,5 +1,6 @@
 package com.opendreamcore.client;
 
+import com.opendreamcore.client.util.ClientChat;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.opendreamcore.remote.RemoteMedia;
 import net.minecraft.client.Minecraft;
@@ -54,7 +55,7 @@ public final class RemoteImageStore {
         }
         if (!RemoteMedia.isSafeUrl(url)) {
             // SSRF 防护拒掉的（内网/非 http 协议）也吱一声，玩家知道自己写错了
-            ClientController.chatWarnOnce("unsafe-url:" + url,
+            ClientChat.chatWarnOnce("unsafe-url:" + url,
                     "§e[OpenDreamCore] §f已拒绝不安全的图片地址（仅公网 http/https）: " + url);
             return null;
         }
@@ -72,11 +73,11 @@ public final class RemoteImageStore {
         }).exceptionally(t -> {
             LOADING.remove(url);
             // 下载失败别哑巴：聊天栏说一声 + 日志留痕（去重，同一 URL 只提醒一次）+ 10秒后自动重试
-            LOGGER.warn("[ODC-font] url 图片下载失败: {} 原因={}", url, ClientController.shortReason(t));
-            Minecraft.getInstance().execute(() -> ClientController.chatWarnOnce(
+            LOGGER.warn("[ODC-font] url 图片下载失败: {} 原因={}", url, ClientChat.shortReason(t));
+            Minecraft.getInstance().execute(() -> ClientChat.chatWarnOnce(
                     "remote-img:" + url,
                     "§e[OpenDreamCore] §f远程图片加载失败: " + url
-                            + "（" + ClientController.shortReason(t) + "）"));
+                            + "（" + ClientChat.shortReason(t) + "）"));
             com.opendreamcore.client.remote.RemotePrefetch.retryAfter(url, 10_000L);
             return null;
         });

@@ -43,6 +43,9 @@ public final class OdcLegacy1710 {
                 new com.opendreamcore.client.TextureRegistrar1710());
         com.opendreamcore.client.LooseTextureLoader.scan(
                 net.minecraft.client.Minecraft.getMinecraft().mcDataDir.toPath());
+        // 实体模型替换：贴图注册回调 + 资产扫描 + 本地规则
+        com.opendreamcore.model1710.ModelRenderer1710.init(
+                net.minecraft.client.Minecraft.getMinecraft().mcDataDir);
         MinecraftForge.EVENT_BUS.register(ClientHooks1710.class);
         // codc 本地诊断命令：不走事件总线（那代 ClientChatEvent 根本没有），
         // 直接塞 ClientCommandHandler，参数从 split args 拼回
