@@ -10,9 +10,9 @@ public final class ScreenOpsLegacy {
     }
 
     public static void install() {
-        // 组件创建/删除/查询
-        LegacyMethods.register("create_component", a -> sc("创建元素", arg(a, 0), arg(a, 1)));
-        LegacyMethods.register("create_element", a -> sc("创建元素", arg(a, 0), arg(a, 1)));
+        // 标准 Screen.创建元素 仍由客户端命名空间实现；兼容别名必须透传完整参数(id,type,x,y,w,h)。
+        LegacyMethods.register("create_component", a -> sc("创建元素", args(a)));
+        LegacyMethods.register("create_element", a -> sc("创建元素", args(a)));
         LegacyMethods.register("delete_component", a -> sc("删除元素", arg(a, 0)));
         LegacyMethods.register("remove_component", a -> sc("删除元素", arg(a, 0)));
         LegacyMethods.register("component_exists", a -> sc("元素存在", arg(a, 0)));
@@ -199,9 +199,8 @@ public final class ScreenOpsLegacy {
 
     private static long openTime = System.currentTimeMillis();
 
-    private static Object[] args() {
-        return new Object[0];
-    }
+    private static Object[] args() { return new Object[0]; }
+    private static Object[] args(Object[] values) { return values == null ? new Object[0] : values; }
 
     private static double num(Object[] a, int i) {
         return a != null && i < a.length && a[i] instanceof Number n ? n.doubleValue() : 0;

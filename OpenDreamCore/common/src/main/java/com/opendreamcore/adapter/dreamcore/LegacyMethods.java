@@ -25,17 +25,20 @@ public final class LegacyMethods {
     /** 客户端运行时宿主：由 client 模块安装；未安装时用 NOOP 安全降级。 */
     public interface Host {
         void runFunctionAsync(String name);
+        default void runFunctionAsync(String name, Object... args) { runFunctionAsync(name); }
+        default Object runFunction(String name, Object... args) { return null; }
+        default Object createComponent(Object... args) { return null; }
+        default Object addComponent(Object... args) { return null; }
+        default Object simulateSlot(Object... args) { return null; }
         double screenHeight();
         double wheelDelta();
         String pressedKey();
+        /** 当前物理键状态；common 只定义语义，客户端宿主提供真实输入。 */
+        default boolean keyDown(String key) { return false; }
         String slotItem(String identifier);
         int slotItemCount(Object item);
         void refreshVariables(String name);
-
-        /** 当前页面存活毫秒（旧版 取界面存活时间，做淡入等逐帧效果用）。 */
         long pageAliveMs();
-
-        /** 物品 lore 文本（旧版 取物品lore；缺省空串）。 */
         default String slotItemLore(Object item) { return ""; }
     }
 
@@ -98,21 +101,23 @@ public final class LegacyMethods {
         });
         reg("取当前时间格式化", args -> java.time.LocalDateTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")));
-        reg("延时", args -> {
-            long ms = args.length > 0 && args[0] instanceof Number n ? n.longValue() : 0;
-            try {
-                Thread.sleep(Math.max(0, Math.min(ms, 200))); // 渲染线程安全上限 200ms
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            return null;
-        });
+        // 延时由客户端脚本调度器/异步引擎接管；common 不能阻塞渲染线程。
+        // 未安装具备暂停语义的宿主时明确返回，不伪造同步等待。
+        reg("延时", args -> com.opendreamcore.script.engine.DreamLang.pause(
+                args.length > 0 && args[0] instanceof Number n ? n.longValue() : 0));
 
         // —— Host 组：需要运行时上下文 ——
         reg("异步执行方法", args -> {
-            host.runFunctionAsync(str(args, 0));
+            host.runFunctionAsync(str(args, 0), tail(args, 1));
             return null;
         });
+        reg("执行方法", args -> host.runFunction(str(args, 0), tail(args, 1)));
+        reg("新建组件", args -> host.createComponent(args));
+        reg("添加组件", args -> host.addComponent(args));
+        reg("添加组件前", args -> host.addComponent(prepend("before", args)));
+        reg("添加组件后", args -> host.addComponent(prepend("after", args)));
+        reg("删除组件", args -> host.addComponent(prepend("delete", args)));
+        reg("模拟点击槽位", args -> host.simulateSlot(args));
         reg("取屏幕高度", args -> host.screenHeight());
         reg("取屏幕宽度", args -> host.screenHeight() > 0 ? host.screenHeight() * 16 / 9.0 : 1920);
         reg("取滚轮值", args -> host.wheelDelta());
@@ -158,6 +163,8 @@ public final class LegacyMethods {
         com.opendreamcore.adapter.dreamcore.methods.ItemLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.TimeDelayLegacy.install();
         com.opendreamcore.adapter.dreamcore.methods.ChatLegacy.install();
+        // 兼容清单可能为同名方法安装占位；真实运行时能力最后绑定，避免静默 null。
+        installHostMethods();
     }
 
     // 工具
@@ -193,6 +200,29 @@ public final class LegacyMethods {
         } catch (Exception ignored) {
             return null;
         }
+    }
+    private static void installHostMethods() {
+        reg("异步执行方法", args -> { host.runFunctionAsync(str(args, 0), tail(args, 1)); return null; });
+        reg("执行方法", args -> host.runFunction(str(args, 0), tail(args, 1)));
+        reg("新建组件", args -> host.createComponent(args));
+        reg("添加组件", args -> host.addComponent(args));
+        reg("添加组件前", args -> host.addComponent(prepend("before", args)));
+        reg("添加组件后", args -> host.addComponent(prepend("after", args)));
+        reg("删除组件", args -> host.addComponent(prepend("delete", args)));
+        reg("模拟点击槽位", args -> host.simulateSlot(args));
+    }
+    /** 当前宿主，可供客户端桥接检查。 */
+    public static Host host() { return host; }
+    private static Object[] tail(Object[] args, int from) {
+        if (args == null || from >= args.length) return new Object[0];
+        return java.util.Arrays.copyOfRange(args, from, args.length);
+    }
+
+    private static Object[] prepend(String marker, Object[] args) {
+        Object[] out = new Object[(args == null ? 0 : args.length) + 1];
+        out[0] = marker;
+        if (args != null) System.arraycopy(args, 0, out, 1, args.length);
+        return out;
     }
 
     /** 参数取值：子包模块共用。 */

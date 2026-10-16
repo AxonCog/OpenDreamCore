@@ -23,13 +23,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * JDK8 兜底工具。
  *
- * 共享树（common/）要一路喂到 1.6.4 的真 JDK8 运行时，Jabel 只能把语法降回来，
- * JDK9+ 新增的 API 它是没办法凭空变出来的——isBlank、List.of、Files.readString
- * 这些在 8 上就是不存在。所以统一走这里，一行封装换全版本能跑。
- *
- * 语义逐条对着 JDK9+ 原版抠的：isBlank 空串返回 true、null 照抛 NPE，
- * list/set/map 是不可变视图且允许 null 元素（原版 of 拒 null，我们放宽了，
- * 全树没有依赖那个拒绝行为的地方），delayedExecutor 到点就把活丢给共享定时器。
+ * 共享层需要运行在 JDK8 环境；Jabel 只能转换语法，JDK9+ 新增 API 仍需通过此类提供兼容实现。
+ * 这些方法尽量保持对应 JDK API 的语义；集合包装保留插入顺序并允许 null，区别于原版 of 方法对 null 的限制。
+ * 延迟执行器在到期后将任务提交给共享定时器。
  */
 public final class J8 {
 

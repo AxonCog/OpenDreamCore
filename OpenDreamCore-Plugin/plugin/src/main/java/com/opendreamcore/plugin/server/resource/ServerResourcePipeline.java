@@ -2,6 +2,9 @@ package com.opendreamcore.plugin.server.resource;
 
 import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import com.opendreamcore.plugin.network.CustomPacketRegistry;
+import com.opendreamcore.protocol.CloudCacheValidator;
+import com.opendreamcore.protocol.LegacyFraming;
+import com.opendreamcore.protocol.OdcByteArrayBuf;
 import com.opendreamcore.protocol.Protocol;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -22,41 +25,24 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
 
 /**
- * 服务端资源云——把资源文件夹变成玩家眼里的贴图/音效，顺手给附属插件开了整扇门。
- *
- * 服主视角：往 plugins/OpenDreamCoreResource/ 丢贴图音频（随便套文件夹），
- * 玩家进服自动拿到、本地加密缓存、下次进服只比 MD5，缺啥补啥多啥删啥。
- *
- * 附属插件视角（这是 API，比丢文件夹更硬核）：
- *   OpenDreamCorePlugin.get().resourcePipeline().putResource("icon.png", bytes) // 内存注入
- *   resourcePipeline().putResourceFile("bgm.ogg", file)                        // 塞磁盘文件
- *   resourcePipeline().removeResource("icon.png")                             // 撤下
- *   resourcePipeline().resourceNames() / getResource(name)                     // 随手翻
- *   put 之后在线玩家立刻进对账，缺这文件的当场补上；收工还会亮 {@link ResourceCloudEvent}。
- *
- * 干活的流程：
- *   1. 建文件夹：没有就建（资源夹直接放进来就进云）；
- *   2. 扫文件夹：摊成 相对路径 → MD5 清单（字节懒读，不占内存）；
- *   3. 发钥匙：玩家 ready 或资源变化后，把加密密码当"开始对账"信号丢过去；
- *   4. 收清单：玩家把本地缓存 (名字,MD5) 发上来（GZIP 压过）；
- *   5. 对账：缺的/变了的补发，多的让删，最后一声"收工"让客户端把资源挂上。
- *
- * 大实话：传输走 custom_packet 的保留通道（Protocol.CUSTOM_RESOURCE_*），分片是怕把
- * Bukkit 单报文撑死；密码从 config.yml 读（resource-password），只是给本机缓存上把锁。
+ * 服务端资源云：扫描资源目录，按清单向客户端补发、删除和确认资源。
  */
 public final class ServerResourcePipeline {
 
     private static final int CHUNK_BYTES = 48 * 1024;
+    private static final int MAX_REPORT_BASE64_CHARS = OdcByteArrayBuf.MAX_STRING_LEN;
+    private static final int MAX_REPORT_COMPRESSED_BYTES = MAX_REPORT_BASE64_CHARS / 4 * 3;
+    private static final int MAX_REPORT_BYTES = LegacyFraming.MAX_ASSEMBLED_PAYLOAD;
+    private static final int MAX_REPORT_FILES = Protocol.MAX_PACKET_BYTES / (1 + 1 + 32 + 1);
+    private static final int MAX_REPORT_NAME_CHARS = Protocol.MAX_PACKET_BYTES / 256;
 
     private final OpenDreamCorePlugin plugin;
     private Path root;
     private String password;
     private volatile boolean enabled = true;
-
     private Map<String, Entry> disk = java.util.Collections.emptyMap();
     private final Map<String, Entry> injected = new ConcurrentHashMap<>();
     private volatile Map<String, Entry> files = java.util.Collections.emptyMap();
-
     private final ConcurrentMap<String, Player> syncing = new ConcurrentHashMap<>();
 
     private static final class Entry {
@@ -90,9 +76,7 @@ public final class ServerResourcePipeline {
 
     public int size() {
         return files.size();
-    }    //
-    // 附属插件公开 API：塞进来就能被全网玩家拿到
-    //
+    }
 
     public void putResource(String name, byte[] data) {
         if (name == null || data == null || data.length == 0) {
@@ -173,15 +157,13 @@ public final class ServerResourcePipeline {
                     }
                     scanned.put(rel, new Entry(md5(p), p, null));
                 }
-            } catch (IOException e) {
-                plugin.getLogger().warning("资源文件夹扫描翻车: " + e);
             }
             disk = scanned;
             rebuild();
-            plugin.getLogger().info("资源云已扫: " + size() + " 个文件 (" + root + ")");
+            plugin.getLogger().info("资源云已扫描: " + size() + " 个文件 (" + root + ")");
             resyncAll();
-        } catch (IOException e) {
-            plugin.getLogger().warning("资源根目录建不起来: " + e);
+        } catch (IOException | java.io.UncheckedIOException e) {
+            plugin.getLogger().warning("资源目录扫描失败，保留上一份清单: " + e.getClass().getSimpleName());
         }
     }
 
@@ -190,7 +172,10 @@ public final class ServerResourcePipeline {
             return;
         }
         send(player, Protocol.CUSTOM_RESOURCE_KEY, password);
-    }    public void handleReport(Player player, String gzipped) {
+    }
+
+    /** 完整校验有界客户端清单后才对账；非法报告不发补丁、删除或完成信号。 */
+    public void handleReport(Player player, String gzipped) {
         if (player == null || gzipped == null || gzipped.isEmpty()) {
             return;
         }
@@ -199,7 +184,15 @@ public final class ServerResourcePipeline {
             return;
         }
         try {
-            byte[] raw = Base64.getDecoder().decode(gzipped);
+            if (gzipped.length() > MAX_REPORT_BASE64_CHARS) {
+                throw new IOException("Base64输入超过协议上限");
+            }
+            byte[] raw;
+            try {
+                raw = Base64.getDecoder().decode(gzipped);
+            } catch (IllegalArgumentException e) {
+                throw new IOException("Base64输入无效");
+            }
             Map<String, String> clientMap = parseReport(decompress(raw));
             List<String> needPush = new ArrayList<>();
             for (Map.Entry<String, Entry> e : files.entrySet()) {
@@ -214,9 +207,12 @@ public final class ServerResourcePipeline {
                     needClear.add(clientName);
                 }
             }
+            if (!needClear.isEmpty()) {
+                buildClearBatches(needClear);
+            }
             pushFiles(player, needPush);
             if (!needClear.isEmpty()) {
-                send(player, Protocol.CUSTOM_RESOURCE_CLEAR, String.join(",", needClear));
+                sendClearBatches(player, needClear);
             }
             send(player, Protocol.CUSTOM_RESOURCE_DONE, "");
             Bukkit.getPluginManager().callEvent(new ResourceCloudEvent(
@@ -225,10 +221,51 @@ public final class ServerResourcePipeline {
                 plugin.getLogger().info("资源同步 " + player.getName()
                         + ": 补 " + needPush.size() + " 删 " + needClear.size());
             }
+        } catch (IOException e) {
+            plugin.getLogger().warning("资源清单已拒绝 (" + player.getUniqueId() + "): " + e.getMessage());
         } catch (Exception e) {
-            plugin.getLogger().warning("资源清单解析失败 (" + player.getName() + "): " + e);
+            plugin.getLogger().warning("资源同步失败 (" + player.getUniqueId() + "): "
+                    + e.getClass().getSimpleName());
         } finally {
             syncing.remove(player.getUniqueId().toString());
+        }
+    }
+
+    private List<String> buildClearBatches(List<String> names) throws IOException {
+        List<String> batches = new ArrayList<>();
+        StringBuilder batch = new StringBuilder();
+        int batchBytes = 0;
+        for (String name : names) {
+            if (!CloudCacheValidator.isSafeRelativePath(name)) {
+                throw new IOException("资源清理路径非法");
+            }
+            int nameBytes = name.getBytes(StandardCharsets.UTF_8).length;
+            if (nameBytes > OdcByteArrayBuf.MAX_STRING_LEN) {
+                throw new IOException("资源清理路径超过协议上限");
+            }
+            int separatorBytes = batchBytes == 0 ? 0 : 1;
+            if (batchBytes > 0 && batchBytes + separatorBytes + nameBytes
+                    > OdcByteArrayBuf.MAX_STRING_LEN) {
+                batches.add(batch.toString());
+                batch.setLength(0);
+                batchBytes = 0;
+                separatorBytes = 0;
+            }
+            if (batchBytes > 0) {
+                batch.append(',');
+            }
+            batch.append(name);
+            batchBytes += separatorBytes + nameBytes;
+        }
+        if (batchBytes > 0) {
+            batches.add(batch.toString());
+        }
+        return batches;
+    }
+
+    private void sendClearBatches(Player player, List<String> names) throws IOException {
+        for (String payload : buildClearBatches(names)) {
+            send(player, Protocol.CUSTOM_RESOURCE_CLEAR, payload);
         }
     }
 
@@ -269,33 +306,75 @@ public final class ServerResourcePipeline {
         }
     }
 
-    private static Map<String, String> parseReport(String report) {
+    private static Map<String, String> parseReport(String report) throws IOException {
         Map<String, String> out = new LinkedHashMap<>();
         if (report == null || report.isEmpty()) {
             return out;
         }
-        for (String pair : report.split(";")) {
-            if (pair.isEmpty()) {
-                continue;
+        int entries = 0;
+        int offset = 0;
+        while (offset < report.length()) {
+            int end = report.indexOf(';', offset);
+            if (end < 0) {
+                end = report.length();
             }
-            String[] kv = pair.split(",", 2);
-            if (kv.length == 2) {
-                out.put(kv[0], kv[1]);
+            if (end > offset) {
+                if (++entries > MAX_REPORT_FILES) {
+                    throw new IOException("资源清单文件数超过协议上限");
+                }
+                int comma = report.indexOf(',', offset);
+                if (comma <= offset || comma >= end) {
+                    throw new IOException("资源清单条目格式无效");
+                }
+                if (comma - offset > MAX_REPORT_NAME_CHARS || end - comma - 1 != 32) {
+                    throw new IOException("资源清单条目长度超过上限");
+                }
+                String name = report.substring(offset, comma);
+                String md5 = report.substring(comma + 1, end);
+                if (!CloudCacheValidator.isSafeRelativePath(name) || !isMd5(md5)) {
+                    throw new IOException("资源清单条目校验失败");
+                }
+                out.put(name, md5);
             }
+            if (end == report.length()) {
+                break;
+            }
+            offset = end + 1;
         }
         return out;
     }
 
+    private static boolean isMd5(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')
+                    && !(c >= 'A' && c <= 'F')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static String decompress(byte[] data) throws IOException {
+        if (data.length > MAX_REPORT_COMPRESSED_BYTES) {
+            throw new IOException("GZIP压缩输入超过协议上限");
+        }
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         try (var in = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(data))) {
             byte[] buf = new byte[8192];
             int n;
-            while ((n = in.read(buf)) != -1) {
+            while ((n = in.read(buf, 0, Math.min(buf.length, MAX_REPORT_BYTES - bos.size() + 1))) != -1) {
+                if (n > MAX_REPORT_BYTES - bos.size()) {
+                    throw new IOException("GZIP解压输出超过协议上限");
+                }
                 bos.write(buf, 0, n);
             }
+        } catch (java.util.zip.ZipException e) {
+            throw new IOException("GZIP输入无效");
+        } catch (java.io.EOFException e) {
+            throw new IOException("GZIP输入不完整");
         }
-        return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        return bos.toString("UTF-8");
     }
 
     private static String md5(Path file) {
@@ -311,10 +390,10 @@ public final class ServerResourcePipeline {
     private static String md5Hex(byte[] data) {
         try {
             var d = java.security.MessageDigest.getInstance("MD5");
-            byte[] hash = d.digest(data);
+            byte[] h = d.digest(data);
             StringBuilder sb = new StringBuilder(32);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
+            for (byte b : h) {
+                sb.append(String.format("%02x", b & 0xff));
             }
             return sb.toString();
         } catch (Exception e) {

@@ -27,6 +27,47 @@ public final class ClientHooks1165 {
 
     private ClientHooks1165() { }
 
+    private static boolean glfwInputDown(long window, String name) {
+        String n = com.opendreamcore.visual.KeyCombo.canonical(name);
+        int button = ("左键".equals(n) || "LEFT_MOUSE".equals(n) || "MOUSE_LEFT".equals(n)) ? 0
+                : ("右键".equals(n) || "RIGHT_MOUSE".equals(n) || "MOUSE_RIGHT".equals(n)) ? 1
+                : ("中键".equals(n) || "MIDDLE_MOUSE".equals(n) || "MOUSE_MIDDLE".equals(n)) ? 2 : -1;
+        if (button >= 0) return org.lwjgl.glfw.GLFW.glfwGetMouseButton(window, button) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+        int key = glfwKeyCode(n);
+        return key >= 0 && org.lwjgl.glfw.GLFW.glfwGetKey(window, key) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+    }
+    private static java.util.Set<String> glfwModifiers(long window) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (glfwDown(window, 341) || glfwDown(window, 345)) out.add(com.opendreamcore.visual.KeyCombo.modifierGroup("CTRL"));
+        if (glfwDown(window, 340) || glfwDown(window, 344)) out.add(com.opendreamcore.visual.KeyCombo.modifierGroup("SHIFT"));
+        if (glfwDown(window, 342) || glfwDown(window, 346)) out.add(com.opendreamcore.visual.KeyCombo.modifierGroup("ALT"));
+        return out;
+    }
+
+    private static boolean glfwDown(long window, int key) {
+        return org.lwjgl.glfw.GLFW.glfwGetKey(window, key) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+    }
+
+    private static int glfwKeyCode(String n) {
+        if (n == null || n.length() == 0) return -1;
+        if (n.length() == 1) {
+            char c = n.charAt(0);
+            if (c >= 'A' && c <= 'Z') return 65 + c - 'A';
+            if (c >= '0' && c <= '9') return 48 + c - '0';
+        }
+        if ("SPACE".equals(n)) return 32;
+        if ("ENTER".equals(n)) return 257;
+        if ("TAB".equals(n)) return 258;
+        if ("ESC".equals(n) || "ESCAPE".equals(n)) return 256;
+        if ("LEFT_SHIFT".equals(n)) return 340;
+        if ("RIGHT_SHIFT".equals(n)) return 344;
+        if ("LEFT_CTRL".equals(n) || "LEFT_CONTROL".equals(n)) return 341;
+        if ("RIGHT_CTRL".equals(n) || "RIGHT_CONTROL".equals(n)) return 345;
+        if ("LEFT_ALT".equals(n)) return 342;
+        if ("RIGHT_ALT".equals(n)) return 346;
+        return -1;
+    }
+
     /** 握手 + 每 tick 推进一次窗口标题。 */
     @SubscribeEvent
     // register(ClientHooks1165.class) 按类注册只认静态方法，实例方法订阅静默失效
@@ -36,6 +77,10 @@ public final class ClientHooks1165 {
         }
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         boolean connected = mc.getConnection() != null;
+        com.opendreamcore.client.visual.LegacyVisualSkins.keyTickPoll(
+                mc.screen == null && mc.isWindowActive(),
+                key -> glfwInputDown(mc.getWindow().getWindow(), key),
+                glfwModifiers(mc.getWindow().getWindow()));
         if (connected && !sentReady) {
             // 连接刚建立：先把解码钩子挂进 Netty 管线，再声明下行通道
             // （Bukkit 只给声明过的通道发包），都齐了才发 ready。
@@ -43,14 +88,17 @@ public final class ClientHooks1165 {
             VanillaBridge165.install();
             VanillaBridge165.registerChannels();
             sentReady = true;
+            com.opendreamcore.client.LocalOdc.loadLocalPagesOnce(DISPATCHER);
             com.opendreamcore.client.render.RenderSupport.markJoined();
             ClientControllerLegacy.sendReady(OdcLegacy.VERSION,
                     Protocol.CAPABILITY_LOCAL_UI | Protocol.CAPABILITY_CLOUD);
         } else if (!connected && sentReady) {
             sentReady = false;
+            com.opendreamcore.client.LocalOdc.resetLocalPagesLoaded();
+            VanillaBridge165.onDisconnect();
             WindowBranding.reset();
             // 视觉规则跟着会话走，断线清仓
-            com.opendreamcore.client.visual.LegacyVisualSkins.clear();
+            com.opendreamcore.client.visual.LegacyVisualSkins.clear(DISPATCHER);
             com.opendreamcore.client.VanillaHud.clear();
         }
         WindowBranding.tick();
@@ -180,7 +228,7 @@ public final class ClientHooks1165 {
     }
 
     /**
-     * 世界相位：世界页/世界类视觉页住在这层，錨到玩家面前、billboard 朝镜头。
+     * 世界相位：世界页/世界类视觉页在这一层，锚到玩家面前、billboard 朝镜头。
      * 矩阵已扣相机（事件栈是相机相对系），这里把渲染视点和玩家插值位、
      * 朝向一并递给 PageDirector，它自己算錨点。
      */
@@ -213,7 +261,7 @@ public final class ClientHooks1165 {
                 ResourcePackInjector.Host.register(ClientHooks1165::packHint);
         // 聊天栏通知：页面解析失败/材质包异常这些要跟玩家说的事全走这
         com.opendreamcore.client.spi.ChatNotifier.Host.register(ClientHooks1165::chat);
-        // 实体真身画笔：entity 元素从占位框升级成村民/盔甲架本尊
+        // 实体渲染：entity 元素从占位框升级为村民/盔甲架实体
         com.opendreamcore.client.spi.EntityPainter.Host.register(new EntityPainter1165());
         com.opendreamcore.client.spi.LegacyEntityRenderBridge.Host.register(
                 new com.opendreamcore.client.spi.LegacyEntityRenderBridgeImpl());
@@ -231,8 +279,21 @@ public final class ClientHooks1165 {
         // 所以目录必须由各代自己送进去：不送的话 OpenDreamCore/fonts 与云缓存两级都问不到，
         // 配置里写了 ttf 也只会登记不生效。跟上面云缓存同一个目录，一次说清。
         com.opendreamcore.client.visual.LegacyTtfSource.setGameDir(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
-        // 物品真身画笔：item_slot/hot_slot 从格底占位升级成本尊图标
+        // 本地页面目录固定绑定当前游戏目录；扫描在每次连接建立时触发一次。
+        com.opendreamcore.client.MessageDispatcher.setUiDir(
+                () -> net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
+        // 物品渲染：item_slot/hot_slot 从格底占位升级为物品图标
         com.opendreamcore.client.spi.ItemPainter.Host.register(new ItemPainter1165());
+        // 渲染错误聊天桥：1.16.5 的 sendMessage(text, null)
+        com.opendreamcore.client.spi.ErrorChatBridge.Host.register(msg -> {
+            try {
+                net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+                if (mc != null && mc.player != null) {
+                    mc.player.sendMessage(new net.minecraft.util.text.StringTextComponent(msg), null);
+                }
+            } catch (Throwable ignored) {
+            }
+        });
         // 世界相位状态守卫：把"按原值还原 GL 状态 + 先收原版待传批次"交给本代实现
         com.opendreamcore.client.render.LegacyRenderBridge.Host.register(new RenderBridge1165());
 // click/hover 音效：直接走 SoundHandler（自管，不需要 mixin）

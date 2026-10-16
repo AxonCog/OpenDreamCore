@@ -26,17 +26,19 @@ public final class WorldTemplates {
 
     /** 写入 UI/<页面>.yaml（已存在不覆盖），返回是否成功。 */
     public static boolean write(Path uiDir, String pageId, String type) {
-        String yaml = build(pageId, type);
-        if (yaml == null) {
-            return false;
-        }
         try {
-            Path file = uiDir.resolve(pageId + ".yaml");
-            if (Files.isRegularFile(file)) {
+            String id = ServerPageManager.normalizePageId(pageId);
+            Path file = ServerPageManager.safePagePath(uiDir, id, ".yaml");
+            String yaml = build(id, type);
+            if (yaml == null) return false;
+            if (Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                 return false;
             }
             Files.createDirectories(file.getParent());
-            java.nio.file.Files.write(file, (yaml).getBytes(StandardCharsets.UTF_8));
+            ServerPageManager.safePagePath(uiDir, id, ".yaml");
+            Files.write(file, yaml.getBytes(StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE_NEW,
+                    java.nio.file.StandardOpenOption.WRITE);
             return true;
         } catch (Exception e) {
             return false;

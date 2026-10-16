@@ -3,6 +3,7 @@ package com.opendreamcore.script;
 import com.opendreamcore.script.engine.DreamLang;
 import com.opendreamcore.script.engine.Scope;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,6 +17,11 @@ class CommonMethodsTest {
 
     static {
         CommonMethods.registerAll();
+    }
+
+    @AfterEach
+    void clearEventSubscriptions() {
+        EventBus.clearAll();
     }
 
     @Test
@@ -135,9 +141,9 @@ class CommonMethodsTest {
         assertEquals(0, EventBus.handlerCount("once"));
 
         // 跨脚本（不同 execute 调用）订阅仍可被触发
-        DreamLang.execute("Event.订阅(" + "\"cross\"" + ", () => { 变量 got = 42 })", scope);
-        Object result = DreamLang.evaluate("Event.发布(" + "\"cross\"" + ")", scope);
-        assertEquals(null, result);
+        DreamLang.execute("Event.订阅(\"cross\", () => { 返回 42 })", scope);
+        Object result = DreamLang.evaluate("Event.发布(\"cross\")", scope);
+        assertEquals(42L, result);
         EventBus.clearAll();
         assertEquals(0, EventBus.handlerCount("cross"));
     }

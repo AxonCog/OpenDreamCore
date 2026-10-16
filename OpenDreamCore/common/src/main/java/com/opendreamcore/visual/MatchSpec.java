@@ -65,7 +65,7 @@ public record MatchSpec(String anyText, String name, String lore,
         if (!ids.isEmpty()) {
             boolean hit = false;
             for (String id : ids) {
-                if (item.type().equalsIgnoreCase(id.trim())) {
+                if (sameItemId(item.type(), id)) {
                     hit = true;
                     break;
                 }
@@ -76,7 +76,7 @@ public record MatchSpec(String anyText, String name, String lore,
         }
         for (Map.Entry<String, Object> e : nbt.entrySet()) {
             Object v = item.nbt().get(e.getKey());
-            if (v == null || !String.valueOf(v).equals(String.valueOf(e.getValue()))) {
+            if (v == null || !valueEquals(v, e.getValue())) {
                 return false;
             }
         }
@@ -92,34 +92,76 @@ public record MatchSpec(String anyText, String name, String lore,
         return true;
     }
 
+    /** ID 比较保留完整 namespace，同时兼容既有的 minecraft:item 简写配置。 */
+    private static boolean sameItemId(String actual, String expected) {
+        String a = normalizeId(actual);
+        String e = normalizeId(expected);
+        if (a.equals(e)) {
+            return true;
+        }
+        int ac = a.indexOf(':');
+        int ec = e.indexOf(':');
+        if (ac < 0 && ec >= 0) {
+            return a.equals(e.substring(ec + 1)) && "minecraft".equals(e.substring(0, ec));
+        }
+        if (ec < 0 && ac >= 0) {
+            return e.equals(a.substring(ac + 1)) && "minecraft".equals(a.substring(0, ac));
+        }
+        return false;
+    }
+
+    private static String normalizeId(String id) {
+        return id == null ? "" : id.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean valueEquals(Object actual, Object expected) {
+        if (actual instanceof Map<?, ?> am && expected instanceof Map<?, ?> em) {
+            if (am.size() != em.size()) return false;
+            for (Map.Entry<?, ?> e : em.entrySet()) {
+                if (!am.containsKey(e.getKey()) || !valueEquals(am.get(e.getKey()), e.getValue())) return false;
+            }
+            return true;
+        }
+        if (actual instanceof List<?> al && expected instanceof List<?> el) {
+            if (al.size() != el.size()) return false;
+            for (int i = 0; i < al.size(); i++) if (!valueEquals(al.get(i), el.get(i))) return false;
+            return true;
+        }
+        return String.valueOf(actual).equals(String.valueOf(expected));
+    }
+
     /**
      * 从规则 IR 解析 MatchSpec。
      * 约定键：match / name / lore / id / nbt / regex；
      * 另兼容 lore_contains 与 name_contains 作为显式长名写法。
      */
     public static MatchSpec parse(Map<String, Object> ir) {
-        Object match = firstOf(ir, "match");
-        Object name = firstOf(ir, "name", "name_contains");
-        Object lore = firstOf(ir, "lore", "lore_contains");
-        Object id = ir.get("id");
-        Object nbtRaw = ir.get("nbt");
-        Object regex = ir.get("regex");
-
-        // id 支持逗号分隔多值
+        if (ir == null) {
+            return new MatchSpec(null, null, null, J8.list(), J8.map(), null);
+        }
+        Map<String, Object> source = ir;
+        Object nested = ir.get("match");
+        if (nested instanceof Map<?, ?> nm) {
+            @SuppressWarnings("unchecked") Map<String, Object> merged = new java.util.LinkedHashMap<>((Map<String, Object>) nm);
+            merged.putAll(ir);
+            source = merged;
+        }
+        Object match = source.get("match") instanceof Map<?, ?> ? null : firstOf(source, "match");
+        Object name = firstOf(source, "name", "name_contains");
+        Object lore = firstOf(source, "lore", "lore_contains");
+        Object id = source.get("id");
+        Object nbtRaw = source.get("nbt");
+        Object regex = source.get("regex");
         List<String> ids = new ArrayList<>();
         if (id != null) {
             for (String part : String.valueOf(id).split(",")) {
-                if (!J8.isBlank(part)) {
-                    ids.add(part.trim());
-                }
+                if (!J8.isBlank(part)) ids.add(part.trim());
             }
         }
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> nbt = nbtRaw instanceof Map<?, ?> m ? (Map<String, Object>) m : J8.map();
-
-        return new MatchSpec(
-                str(match), str(name), str(lore), ids, nbt, str(regex));
+        @SuppressWarnings("unchecked") Map<String, Object> nbt = nbtRaw instanceof Map<?, ?> m
+                ? (Map<String, Object>) m : J8.map();
+        return new MatchSpec(str(match), str(name), str(lore), ids, nbt, str(regex));
     }
 
     private static Object firstOf(Map<String, Object> ir, String... keys) {

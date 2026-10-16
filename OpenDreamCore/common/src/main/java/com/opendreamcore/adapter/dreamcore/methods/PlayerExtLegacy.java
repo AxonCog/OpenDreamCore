@@ -9,6 +9,7 @@ public final class PlayerExtLegacy {
         return LegacyMethods.delegate("Player", m, a);
     }
 
+
     private static Object e(String m, Object... a) {
         return LegacyMethods.delegate("Entity", m, a);
     }
@@ -21,29 +22,29 @@ public final class PlayerExtLegacy {
 
     private static void installPlayer() {
         LegacyMethods.register("get_player_name", a -> p("获取名字"));
-        LegacyMethods.register("get_player_uuid", a -> p("获取UUID"));
+        LegacyMethods.register("get_player_uuid", a -> "");
         LegacyMethods.register("get_player_health", a -> p("获取血量"));
         LegacyMethods.register("get_player_max_health", a -> p("获取最大血量"));
-        LegacyMethods.register("get_player_food", a -> p("获取饥饿"));
+        LegacyMethods.register("get_player_food", a -> p("获取饥饿值"));
         LegacyMethods.register("get_player_saturation", a -> 20.0);
         LegacyMethods.register("get_player_air", a -> 300.0);
         LegacyMethods.register("get_player_max_air", a -> 300.0);
-        LegacyMethods.register("get_player_exp", a -> p("获取经验"));
-        LegacyMethods.register("get_player_experience", a -> p("获取经验"));
+        LegacyMethods.register("get_player_exp", a -> p("获取经验值"));
+        LegacyMethods.register("get_player_experience", a -> p("获取经验值"));
         LegacyMethods.register("get_player_level", a -> p("获取等级"));
-        LegacyMethods.register("get_player_total_experience", a -> p("获取经验"));
+        LegacyMethods.register("get_player_total_experience", a -> p("获取经验值"));
         LegacyMethods.register("get_player_gamemode", a -> p("获取游戏模式"));
-        LegacyMethods.register("get_player_ping", a -> p("获取延迟"));
-        LegacyMethods.register("get_player_x", a -> p("获取X"));
-        LegacyMethods.register("get_player_y", a -> p("获取Y"));
-        LegacyMethods.register("get_player_z", a -> p("获取Z"));
-        LegacyMethods.register("get_player_pos_x", a -> p("获取X"));
-        LegacyMethods.register("get_player_pos_y", a -> p("获取Y"));
-        LegacyMethods.register("get_player_pos_z", a -> p("获取Z"));
-        LegacyMethods.register("get_player_yaw", a -> p("获取视角"));
-        LegacyMethods.register("get_player_pitch", a -> p("获取俯仰"));
-        LegacyMethods.register("get_player_rotation_yaw", a -> p("获取视角"));
-        LegacyMethods.register("get_player_rotation_pitch", a -> p("获取俯仰"));
+        LegacyMethods.register("get_player_ping", a -> p("延迟"));
+        LegacyMethods.register("get_player_x", a -> p("getX"));
+        LegacyMethods.register("get_player_y", a -> p("getY"));
+        LegacyMethods.register("get_player_z", a -> p("getZ"));
+        LegacyMethods.register("get_player_pos_x", a -> p("getX"));
+        LegacyMethods.register("get_player_pos_y", a -> p("getY"));
+        LegacyMethods.register("get_player_pos_z", a -> p("getZ"));
+        LegacyMethods.register("get_player_yaw", a -> p("getYaw"));
+        LegacyMethods.register("get_player_pitch", a -> p("getPitch"));
+        LegacyMethods.register("get_player_rotation_yaw", a -> p("getYaw"));
+        LegacyMethods.register("get_player_rotation_pitch", a -> p("getPitch"));
         LegacyMethods.register("get_player_dimension", a -> "");
         LegacyMethods.register("get_player_biome", a -> p("获取生物群系"));
         LegacyMethods.register("get_player_armor", a -> p("获取护甲"));

@@ -28,6 +28,12 @@ public final class RenderNode {
     private final boolean enabled;
     private final List<RenderNode> children;
     private final Map<String, Object> props;
+    // 元素级绝对裁剪矩形；四个 limit 字段齐全时才启用。
+    private final boolean hasLimit;
+    private final double limitX;
+    private final double limitY;
+    private final double limitWidth;
+    private final double limitHeight;
 
     // 元素属性（来自 props，布局时解析）
     private final int z;
@@ -51,6 +57,12 @@ public final class RenderNode {
         this.enabled = enabled;
         this.children = sortByZ(children == null ? new ArrayList<>() : J8.listCopy(children));
         this.props = props == null ? new LinkedHashMap<>() : props;
+        this.limitX = numberProp(props, "limitX");
+        this.limitY = numberProp(props, "limitY");
+        this.limitWidth = numberProp(props, "limitWidth");
+        this.limitHeight = numberProp(props, "limitHeight");
+        this.hasLimit = Double.isFinite(limitX) && Double.isFinite(limitY)
+                && Double.isFinite(limitWidth) && Double.isFinite(limitHeight);
         this.z = intProp(props, "z", 0);
         this.opacity = doubleProp(props, "opacity", 1);
         this.scale = doubleProp(props, "scale", 1);
@@ -118,6 +130,17 @@ public final class RenderNode {
     public String pointerEvents() {
         return pointerEvents;
     }
+    public boolean hasLimit() { return hasLimit; }
+    public double limitX() { return limitX; }
+    public double limitY() { return limitY; }
+    public double limitWidth() { return limitWidth; }
+    public double limitHeight() { return limitHeight; }
+    /** 点位是否通过本节点的显式 limit；未声明完整 limit 时不裁剪。 */
+    public boolean containsLimit(double px, double py) {
+        return !hasLimit || inClip(px, py, limitX, limitY,
+                limitX + Math.max(limitWidth, 0), limitY + Math.max(limitHeight, 0));
+    }
+
 
     /** 命中测试：点是否在节点矩形内（含自动尺寸节点，尺寸未知按 0 处理）。 */
     public boolean contains(double px, double py) {
@@ -141,39 +164,94 @@ public final class RenderNode {
         return props;
     }
 
-    /** 递归找最深命中（子优先，便于子元素盖在父上面时点中子；pointerEvents 影响命中）。 */
     public RenderNode hitTest(double px, double py) {
-        if (!visible || "none".equals(pointerEvents) || !contains(px, py)) {
-            return null;
-        }
-        for (int i = children.size() - 1; i >= 0; i--) {
-            RenderNode hit = children.get(i).hitTest(px, py);
-            if (hit != null) {
-                return hit;
-            }
-        }
-        // children 模式：自己不算命中目标
-        return "children".equals(pointerEvents) ? null : this;
+        return hitTest(px, py, 0, 0, 0, 0, false, false);
     }
 
-    /**
-     * 交互命中：禁用元素视为穿透（点击/滚轮落到下层可用元素）。
-     * hover/tooltip 仍用 hitTest（禁用元素也可以看提示）。
-     */
+    /** 交互命中：禁用元素视为穿透。 */
     public RenderNode hitTestInteractive(double px, double py) {
-        if (!visible || "none".equals(pointerEvents) || !contains(px, py)) {
+        return hitTest(px, py, 0, 0, 0, 0, false, true);
+    }
+
+    /** 显式裁剪矩形内命中；供宿主已有视口约束时复用，调用期间不分配临时矩形。 */
+    public RenderNode hitTest(double px, double py, double clipLeft, double clipTop,
+                              double clipRight, double clipBottom, boolean interactive) {
+        return hitTest(px, py, clipLeft, clipTop, clipRight, clipBottom, true, interactive);
+    }
+
+    private RenderNode hitTest(double px, double py, double clipLeft, double clipTop,
+                               double clipRight, double clipBottom, boolean hasClip,
+                               boolean interactive) {
+        if (!visible || "none".equals(pointerEvents)) return null;
+        if (hasLimit) {
+            double left = limitX;
+            double top = limitY;
+            double right = left + Math.max(limitWidth, 0);
+            double bottom = top + Math.max(limitHeight, 0);
+            if (right <= left || bottom <= top) return null;
+            if (!hasClip) {
+                clipLeft = left;
+                clipTop = top;
+                clipRight = right;
+                clipBottom = bottom;
+                hasClip = true;
+            } else {
+                clipLeft = Math.max(clipLeft, left);
+                clipTop = Math.max(clipTop, top);
+                clipRight = Math.min(clipRight, right);
+                clipBottom = Math.min(clipBottom, bottom);
+                if (clipRight <= clipLeft || clipBottom <= clipTop) return null;
+            }
+        }
+        // Ordinary parents do not clip overflowing children; scroll viewports do.
+        double childLeft = clipLeft;
+        double childTop = clipTop;
+        double childRight = clipRight;
+        double childBottom = clipBottom;
+        boolean childHasClip = hasClip;
+        if ("scroll".equals(type)) {
+            double left = x;
+            double top = y;
+            double right = left + Math.max(width, 0);
+            double bottom = top + Math.max(height, 0);
+            if (right <= left || bottom <= top) return null;
+            if (!childHasClip) {
+                childLeft = left;
+                childTop = top;
+                childRight = right;
+                childBottom = bottom;
+                childHasClip = true;
+            } else {
+                childLeft = Math.max(childLeft, left);
+                childTop = Math.max(childTop, top);
+                childRight = Math.min(childRight, right);
+                childBottom = Math.min(childBottom, bottom);
+                if (childRight <= childLeft || childBottom <= childTop) return null;
+            }
+        }
+        if (childHasClip && !inClip(px, py, childLeft, childTop, childRight, childBottom)) {
             return null;
         }
         for (int i = children.size() - 1; i >= 0; i--) {
-            RenderNode hit = children.get(i).hitTestInteractive(px, py);
-            if (hit != null) {
-                return hit;
-            }
+            RenderNode hit = children.get(i).hitTest(px, py, childLeft, childTop,
+                    childRight, childBottom, childHasClip, interactive);
+            if (hit != null) return hit;
         }
-        if ("children".equals(pointerEvents) || !enabled) {
-            return null; // 禁用 = 穿透
-        }
+        if (!contains(px, py)) return null;
+        if ("children".equals(pointerEvents) || (interactive && !enabled)) return null;
         return this;
+    }
+
+    private static boolean inClip(double px, double py, double left, double top,
+                                  double right, double bottom) {
+        // Scissors are half-open rectangles; a zero-width/height intersection is empty.
+        return px >= left && px < right && py >= top && py < bottom;
+    }
+
+
+    private static double numberProp(Map<String, Object> props, String key) {
+        Object v = props == null ? null : props.get(key);
+        return v instanceof Number n ? n.doubleValue() : Double.NaN;
     }
 
     private static int intProp(Map<String, Object> props, String key, int fallback) {

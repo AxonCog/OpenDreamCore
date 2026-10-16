@@ -3,6 +3,8 @@
 // 平台壳：@Mod 入口 + Mixin 拦截 custom payload（收）+ ServerboundCustomPayloadPacket 直发（发）
 buildscript {
     repositories {
+        maven { url = 'https://maven.aliyun.com/repository/public' }
+        mavenCentral()
         maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
         maven { url = 'https://maven.minecraftforge.net' }
     }
@@ -93,7 +95,7 @@ tasks.register('prepareModel1201211', Sync) {
     into "$buildDir/generated/model-1.20-1.21.1"
 }
 
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214', 'prepareCamera120To1218', 'prepareCameraFov1201211', 'prepareModel1201211' }
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214', 'prepareCamera120To1218', 'prepareCameraFov1201211', 'prepareModel1201211' , 'preparePlayerAnim'}
 tasks.named('prepareGlyph120To1214') { outputs.upToDateWhen { false } }
 
 // 中文源码/注释：javac 显式 UTF-8
@@ -103,6 +105,8 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
+    mavenCentral()
     maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
 }
 
@@ -113,6 +117,7 @@ dependencies {
     // common 源码的运行时依赖：antlr4-runtime 需随 mod 打包（shadow relocate）；
     // gson/snakeyaml MC 运行时自带，编译期声明即可。
     implementation 'org.antlr:antlr4-runtime:4.13.1'
+    implementation 'org.tukaani:xz:1.9'
     compileOnly 'org.yaml:snakeyaml:2.2'
     compileOnly 'com.google.code.gson:gson:2.10.1'
 }
@@ -122,6 +127,7 @@ configurations {
 }
 dependencies {
     shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.tukaani:xz:1.9'
     shadeOnly 'org.yaml:snakeyaml:2.2'
     // 加密材质包支持（AES zip）：PackInstaller 反射调用
     shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
@@ -205,3 +211,10 @@ tasks.register('collectOutput') {
     }
 }
 tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
+
+// playeranim/playeranim-1.20-1.21.8/ 玩家动画（setupAnim TAIL 叠加六部件姿态）
+tasks.register('preparePlayerAnim', Sync) {
+    from('../../gensrc/playeranim-1.20-1.21.8/src/main/java')
+    into "$buildDir/generated/playeranim-playeranim-1.20-1.21.8"
+}
+sourceSets.main.java.srcDir "$buildDir/generated/playeranim-playeranim-1.20-1.21.8"

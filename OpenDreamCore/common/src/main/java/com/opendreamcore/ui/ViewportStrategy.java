@@ -1,7 +1,7 @@
 package com.opendreamcore.ui;
 
 /**
- * 视口策略（坐标系热拔插的插头）——"design 画布怎么映射到屏幕"由谁说了算。
+ * 视口策略——决定 design 画布到屏幕的映射方式。
  *
  * 页面声明 design:{width,height,fit:名字} 时，按 fit 名查注册表拿到策略：
  *   letterbox            等比缩放 + 居中留边（全屏页面默认）

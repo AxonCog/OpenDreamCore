@@ -12,8 +12,8 @@ import java.util.Map;
  * 对应 visual/Camera.yml 的一个顶层键（一条运镜）。字段缺省即安全：
  * 不写 lock_input 就是不锁、不写 player 就是 keep——绝不能让一个字段漏写
  * 就把玩家锁死（规范 §4.1 的硬要求）。表达式值（position/rotation 写成字符串）
- * 本期原样保留在 {@code positionExpr}/{@code rotationExpr}，M1.3 接脚本求值后
- * 编译成闭包缓存；关键帧里的表达式本期直接丢弃（记 bad 规则，宁缺毋错）。
+ * {@code positionExpr}/{@code rotationExpr} 由后续脚本求值层处理并编译成闭包缓存；
+ * 关键帧里的表达式本期直接丢弃（记 bad 规则，宁缺毋错）。
  *
  * 本包禁止 import net.minecraft / com.mojang（机检 R5/R6 管辖）。
  */
@@ -28,7 +28,7 @@ public final class CameraRule {
         public final double[] rot;
         public final Double fov;
         public final String look;
-        /** 本帧到下一帧的过渡方式（M1.9）：null/"smooth"=跟随全局 smooth，"linear"=直线，"held"=定格到下一帧。 */
+        /** 本帧到下一帧的过渡方式：null/"smooth"=跟随全局 smooth，"linear"=直线，"held"=定格到下一帧。 */
         public final String ease;
 
         Keyframe(double t, double[] pos, double[] rot, Double fov, String look, String ease) {
@@ -63,7 +63,7 @@ public final class CameraRule {
     public final int shakeTicks;
     public final double stretch;
     public final List<String> interrupt;
-    /** 目标玩家选择器（原样保留，M1.2 服务端裁决时解析）。 */
+    /** 目标玩家选择器（原样保留，服务端裁决时解析）。 */
     public final String players;
     public final boolean smoke;
     public final double duration;
@@ -71,9 +71,9 @@ public final class CameraRule {
     public final double speed;
     public final boolean smooth;
     public final List<Keyframe> keyframes;
-    /** 触发器（M1.6）：按键/区域/事件自动发起；null = 无自动触发。 */
+    /** 触发器：按键/区域/事件自动发起；null = 无自动触发。 */
     public final CameraTrigger trigger;
-    /** 时间轴事件点（M1.6）：按演出时刻触发 sound/particle/script。 */
+    /** 时间轴事件点：按演出时刻触发 sound/particle/script。 */
     public final List<CameraEvent> events;
 
     private CameraRule(String id, Type type, double[] position, double[] rotation,

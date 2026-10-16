@@ -46,9 +46,7 @@ public final class WorldLayout implements Message {
 
     public WorldLayout(String pageId, List<Entry> entries, Map<String, String> optionsProps, String pageTitle,
                        Map<String, String> variablesProps) {
-        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
-            throw new IllegalArgumentException("页面 id 非法: " + pageId);
-        }
+        EditorLease.requireSafePageId(pageId);
         this.pageId = pageId;
         this.entries = entries == null ? new ArrayList<>() : J8.listCopy(entries);
         this.optionsProps = optionsProps == null ? J8.map() : J8.mapCopy(optionsProps);

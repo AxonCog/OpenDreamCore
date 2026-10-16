@@ -52,8 +52,7 @@ class DragonCoreGuiSamplesTest {
         String open = String.valueOf(((Map<?, ?>) ir.get("Functions")).get("open"));
         assertTrue(open.contains("方法.发包('DragonAuthMe', 'prelogin')"),
                 "带参调用 方法.发包 原样保留");
-        assertTrue(open.contains("Screen.设置变量(\"odc_ui_"),
-                "界面变量.执行操作 赋值被改写");
+        assertTrue(open.contains("vars[\"odc_ui_"), "界面变量.执行操作 赋值写入页面vars");
         assertFalse(open.contains("界面变量."), "旧作用域记号不残留");
     }
 

@@ -7,6 +7,7 @@ import com.opendreamcore.script.engine.Scope;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,6 +37,21 @@ class DreamLangTest {
         assertEquals(false, DreamLang.evaluate("10 != 10", scope));
         assertEquals(true, DreamLang.evaluate("!(10 < 5)", scope));
         assertEquals(true, DreamLang.evaluate("0 || 1", scope) instanceof Number);
+    }
+
+    @Test
+    void logicalOperatorsShortCircuitSideEffects() {
+        Scope scope = new Scope();
+        AtomicReference<String> called = new AtomicReference<>();
+        scope.declare("sideEffect", (DreamLangExecutor.Callable) args -> {
+            called.set(String.valueOf(args[0]));
+            return true;
+        });
+        assertEquals(false, DreamLang.evaluate("false && sideEffect('and')", scope));
+        assertEquals(true, DreamLang.evaluate("true || sideEffect('or')", scope));
+        assertNull(called.get(), "短路右值不得执行");
+        assertEquals(true, DreamLang.evaluate("true && sideEffect('and-run')", scope));
+        assertEquals("and-run", called.get());
     }
 
     @Test
@@ -285,6 +301,67 @@ class DreamLangTest {
         assertEquals(99L, l.get(1));
         assertEquals(88L, l.get(2), "负索引赋值 -1 = 最后一个");
         assertEquals(3, l.size());
+    }
+
+
+    @Test
+    void localVariableNamespaceUsesStrictLocals() {
+        Scope scope = new Scope();
+        scope.declare("计数", 3L);
+        scope.assignVar("计数", 99L);
+        assertEquals(3L, DreamLang.evaluate("局部变量[\"计数\"]", scope));
+        assertEquals(99L, DreamLang.evaluate("vars.计数", scope));
+        assertEquals(null, scope.resolve("局部变量", "不存在"));
+    }
+
+    @Test
+    void deepPathStartsAtUnknownHeadAndIsNullSafe() {
+        Scope scope = new Scope();
+        scope.assignVar("nested", Map.of("value", 7L));
+        assertEquals(7L, scope.resolve("nested", "value"));
+        assertEquals(null, scope.resolve("missing", "value"));
+        assertEquals(null, scope.resolve((String[]) null));
+    }
+    @Test
+    void localMapMemberReadAndWrite() {
+        Scope scope = new Scope();
+        Map<String, Object> item = new java.util.LinkedHashMap<>();
+        item.put("序号", 2L);
+        scope.declare("商品", item);
+
+        assertEquals(2L, DreamLang.evaluate("局部变量.商品.序号", scope));
+        DreamLang.execute("局部变量.商品.序号 = 7", scope);
+        assertEquals(7L, item.get("序号"));
+        DreamLang.execute("局部变量[\"商品\"].序号 = 9", scope);
+        assertEquals(9L, item.get("序号"));
+    }
+
+    @Test
+    void ordinaryMapMemberReadAndWrite() {
+        Scope scope = new Scope();
+        Map<String, Object> map = new java.util.LinkedHashMap<>();
+        scope.assign("map", map);
+        DreamLang.execute("map.value = 11", scope);
+        assertEquals(11L, map.get("value"));
+        assertEquals(11L, DreamLang.evaluate("map.value", scope));
+    }
+
+    @Test
+    void memberAssignmentRejectsUnknownAndReadOnlyTargets() {
+        Scope scope = new Scope();
+        scope.assign("text", "value");
+        assertThrows(DreamLangExecutor.ScriptException.class,
+                () -> DreamLang.execute("text.member = 1", scope));
+
+        scope.assign("readOnly", new DreamLangExecutor.MapLike() {
+            @Override
+            public Object get(String key) {
+                return null;
+            }
+        });
+        DreamLangExecutor.ScriptException error = assertThrows(DreamLangExecutor.ScriptException.class,
+                () -> DreamLang.execute("readOnly.member = 1", scope));
+        assertTrue(error.getMessage().contains("不可写"));
     }
 
     private static double num(Object v) {

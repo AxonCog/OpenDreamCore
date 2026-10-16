@@ -49,7 +49,9 @@ public final class LayoutEngine {
         stateLayoutResolver = resolver;
     }
 
-    private LayoutEngine() {
+    private LayoutEngine(Page page, Viewport viewport) {
+        this.page = page;
+        this.viewport = viewport == null ? Viewport.IDENTITY : viewport;
     }
 
     /** 计算整页布局。windowWidth/windowHeight 是渲染窗口尺寸（像素）。 */
@@ -60,7 +62,7 @@ public final class LayoutEngine {
     /**
      * 页面声明了 design:{width,height,fit?} 就按 fit 策略建视口（默认 letterbox 居中），
      * 没声明/写坏一律 IDENTITY——老包一帧都不挪。
-     * fit 可热拔插：ViewportStrategies 注册的自定义坐标系名直接可用。
+     * fit 可扩展：ViewportStrategies 注册的自定义坐标系名直接可用。
      */
     public static Viewport viewportFor(Page page, double screenW, double screenH) {
         Object design = page == null || page.options() == null ? null : page.options().get("design");
@@ -78,21 +80,16 @@ public final class LayoutEngine {
         }
     }
 
-    /** 本轮布局使用的视口（eval 里 px 折算、锚点入向判定都要）：布局全在渲染线程串行跑。 */
-    private static volatile Viewport CURRENT = Viewport.IDENTITY;
+    /** 每调用一个引擎上下文，私有递归通过实例接收者显式共享，不依赖线程状态。 */
+    private final Viewport viewport;
+    private final Page page;
+    private final Map<String, Map<String, Object>> computedFrames = new LinkedHashMap<>();
 
-    /**
-     * 长度字面量→设计值（尺寸口径）：px 尺寸 = v/s 个设计单位，投影后恰好还原成 v 个像素。
-     * IDENTITY 视口（老包）下 s=1，一切照旧。
-     */
-    private static double evalLayout(Layout l, int which, Map<String, Object> env, double fallback) {
-        if (l == null) {
-            return fallback;
-        }
+    /** px 尺寸按本轮视口折算为设计单位。 */
+    private double evalLayout(Layout l, int which, Map<String, Object> env, double fallback) {
+        if (l == null) return fallback;
         Length len = l.length(which);
-        if (len != null) {
-            return CURRENT.layoutLength(len);
-        }
+        if (len != null) return viewport.layoutLength(len);
         String expr;
         switch (which) {
             case Layout.X: expr = l.x(); break;
@@ -109,17 +106,15 @@ public final class LayoutEngine {
      * 子元素里 px = 相对父原点的画布像素偏移（v/s 个设计单位）；
      * 无单位与表达式一律照设计单位走。IDENTITY 下三个分支全部退化为 v，逐帧照旧。
      */
-    private static double evalPosition(Layout l, int which, Map<String, Object> env,
-                                       double fallback, boolean rootLevel) {
-        if (l == null) {
-            return fallback;
-        }
-        Length len = l.length(which);
-        if (len != null && len.abs() && rootLevel) {
-            return which == Layout.X ? CURRENT.pxToDesignX(len.v()) : CURRENT.pxToDesignY(len.v());
-        }
-        return evalLayout(l, which, env, fallback);
+    private double evalPosition(Layout l, int which, Map<String, Object> env,
+                                       double fallback, boolean rootLevel) { if (l == null) {
+        return fallback;
     }
+    Length len = l.length(which);
+    if (len != null && len.abs() && rootLevel) {
+        return which == Layout.X ? viewport.pxToDesignX(len.v()) : viewport.pxToDesignY(len.v());
+    }
+    return evalLayout(l, which, env, fallback); }
 
     /**
      * 设计坐标节点树 → 屏幕坐标（ClientController.layoutPage 里接好一步到位，
@@ -140,16 +135,24 @@ public final class LayoutEngine {
     private static RenderNode projectOne(RenderNode n, Viewport vp) {
         List<RenderNode> kids = n.children().isEmpty()
                 ? n.children() : projectTree(n.children(), vp);
-        double w = Double.isNaN(n.width()) ? 0 : n.width();
-        double h = Double.isNaN(n.height()) ? 0 : n.height();
+        Map<String, Object> props = n.props();
+        // limit 是绝对设计坐标；投影后必须与节点矩形处在同一屏幕坐标系。
+        // 未启用裁剪时共享原 props；启用时只改副本，不能污染设计节点或页面模型。
+        if (n.hasLimit()) {
+            props = new LinkedHashMap<>(props);
+            props.put("limitX", vp.edgeX(n.limitX()));
+            props.put("limitY", vp.edgeY(n.limitY()));
+            props.put("limitWidth", vp.spanW(n.limitX(), Math.max(n.limitWidth(), 0)));
+            props.put("limitHeight", vp.spanH(n.limitY(), Math.max(n.limitHeight(), 0)));
+        }
+        // spanW/spanH 保留 NaN：自动尺寸仍由渲染器按内容撑开，不能变成显式零尺寸。
+        double projectedW = vp.spanW(n.x(), n.width());
+        double projectedH = vp.spanH(n.y(), n.height());
         return new RenderNode(n.id(), n.type(), n.source(),
-                vp.edgeX(n.x()), vp.edgeY(n.y()),
-                vp.spanW(n.x(), w), vp.spanH(n.y(), h),
-                n.visible(), n.enabled(), kids, n.props());
+                vp.edgeX(n.x()), vp.edgeY(n.y()), projectedW, projectedH,
+                n.visible(), n.enabled(), kids, props);
     }
 
-    /** 已计算元素的框架缓存（元素 id → {x,y,width,height}），供交叉引用。 */
-    private static final Map<String, Map<String, Object>> COMPUTED_FRAMES = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 计算整页布局；positionOverrides 非空时按元素 id 覆盖最终坐标（编辑模式用，
@@ -163,248 +166,226 @@ public final class LayoutEngine {
 
     /**
      * 带真视口的布局入口（页面画布用）：windowWidth/Height 允许传设计尺寸，
-     * 但 CURRENT 必须拿真屏幕算出的 vp——否则 px 尺寸会先除 s=1 再由投影乘一遍，多吃一次缩放。
+     * vp 必须由真屏幕算出，否则 px 尺寸会多吃一次缩放。
      */
     public static List<RenderNode> layout(Page page, double windowWidth, double windowHeight,
                                           Map<String, double[]> positionOverrides, Viewport vp) {
-        COMPUTED_FRAMES.clear(); // 每次布局前清空，防止旧数据残留
-        CURRENT = vp == null ? Viewport.IDENTITY : vp;
-        return layout(page.elements(), null, null, windowWidth, windowHeight, page.variables(), positionOverrides);
+        return new LayoutEngine(page, vp).layout(page.elements(), null, null,
+                windowWidth, windowHeight, page.variables(), positionOverrides);
     }
 
-    private static List<RenderNode> layout(List<Element> elements, RenderNode parent,
+    private List<RenderNode> layout(List<Element> elements, RenderNode parent,
                                            Map<String, Object> parentFrame,
                                            double windowWidth, double windowHeight,
-                                           Map<String, Object> variables) {
-        return layout(elements, parent, parentFrame, windowWidth, windowHeight, variables, null);
-    }
+                                           Map<String, Object> variables) { return layout(elements, parent, parentFrame, windowWidth, windowHeight, variables, null); }
 
-    private static List<RenderNode> layout(List<Element> elements, RenderNode parent,
+    private List<RenderNode> layout(List<Element> elements, RenderNode parent,
                                            Map<String, Object> parentFrame,
                                            double windowWidth, double windowHeight,
                                            Map<String, Object> variables,
-                                           Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        if (elements == null) {
-            return nodes;
-        }
-        for (Element element : elements) {
-            nodes.add(layoutOne(element, parent, parentFrame, windowWidth, windowHeight, variables, positionOverrides));
-        }
+                                           Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    if (elements == null) {
         return nodes;
     }
+    for (Element element : elements) {
+        nodes.add(layoutOne(element, parent, parentFrame, windowWidth, windowHeight, variables, positionOverrides));
+    }
+    return nodes; }
 
-    private static RenderNode layoutOne(Element element, RenderNode parent,
+    private RenderNode layoutOne(Element element, RenderNode parent,
                                         Map<String, Object> parentFrame,
                                         double windowWidth, double windowHeight,
-                                        Map<String, Object> variables) {
-        return layoutOne(element, parent, parentFrame, windowWidth, windowHeight, variables, null);
-    }
+                                        Map<String, Object> variables) { return layoutOne(element, parent, parentFrame, windowWidth, windowHeight, variables, null); }
 
-    private static RenderNode layoutOne(Element element, RenderNode parent,
+    private RenderNode layoutOne(Element element, RenderNode parent,
                                         Map<String, Object> parentFrame,
                                         double windowWidth, double windowHeight,
                                         Map<String, Object> variables,
                                         Map<String, double[]> positionOverrides) {
-        Map<String, Object> env = new LinkedHashMap<>();
-        Map<String, Object> window = new LinkedHashMap<>();
-        window.put("width", windowWidth);
-        window.put("height", windowHeight);
-        env.put("window", window);
-        // 旧版（DreamCore/龙核）表达式简写：w = 窗口宽，h = 窗口高（菜单.yml 全篇使用）
-        env.put("w", windowWidth);
-        env.put("h", windowHeight);
-        if (parentFrame != null) {
-            env.put("parent", parentFrame);
-        }
-        env.putAll(variables);
-
-        // 注入已计算元素框架，供交叉引用（如 `背景.width`）
-        for (var entry : COMPUTED_FRAMES.entrySet()) {
-            Map<String, Object> frameCopy = new LinkedHashMap<>();
-            for (var fe : entry.getValue().entrySet()) {
-                frameCopy.put(fe.getKey(), fe.getValue());
+    Map<String, Object> env = envOf(element, parentFrame, windowWidth, windowHeight, variables);
+    // Publish this element before dimensions: 背景.height may call a page function
+    // which reads 背景.width in the same pass. No stale client layout is consulted.
+    Map<String, Object> self = new LinkedHashMap<>(element.props());
+    self.put("id", element.id());
+    env.put("this", self);
+    env.put(element.id(), self);
+    env.put("_odc_current_component", new ComponentContext(element, self));
+    
+    Layout layout = element.layout();
+    // 状态覆盖层的布局属性实时化：hover/focus 等改 x/y/宽高时本轮立即生效
+    // （解析器由客户端注册；无注册或无命中时原 Layout 原样使用）
+    StateLayoutResolver slr = stateLayoutResolver;
+    if (slr != null && layout != null) {
+        try {
+            java.util.Map<String, Object> ov = slr.resolve(element.id());
+            if (ov != null && !ov.isEmpty()) {
+                layout = mergeLayout(layout, ov);
             }
-            env.put(entry.getKey(), frameCopy);
+        } catch (Exception ignored) {
+            // 样式层异常不阻断布局
         }
-        // 自身框架先求尺寸（this 引用：先宽后高，先算的有值）
-        Map<String, Object> self = new LinkedHashMap<>();
-        env.put("this", self);
-
-        Layout layout = element.layout();
-        // 状态覆盖层的布局属性实时化：hover/focus 等改 x/y/宽高时本轮立即生效
-        // （解析器由客户端注册；无注册或无命中时原 Layout 原样使用）
-        StateLayoutResolver slr = stateLayoutResolver;
-        if (slr != null && layout != null) {
-            try {
-                java.util.Map<String, Object> ov = slr.resolve(element.id());
-                if (ov != null && !ov.isEmpty()) {
-                    layout = mergeLayout(layout, ov);
-                }
-            } catch (Exception ignored) {
-                // 样式层异常不阻断布局
-            }
-        }
-        double x = evalPosition(layout, Layout.X, env, 0, parentFrame == null);
-        double y = evalPosition(layout, Layout.Y, env, 0, parentFrame == null);
-        double width = evalLayout(layout, Layout.WIDTH, env, Double.NaN);
-        self.put("width", width);
-        double height = evalLayout(layout, Layout.HEIGHT, env, Double.NaN);
-        self.put("height", height);
-        self.put("x", x);
-        self.put("y", y);
-
-        // 文本自动高度：text.autoHeight: true 或 高度未写 + text.wrap 设置 →
-        // 客户端字体钩子按内容折行测量高度（命中区域/布局随内容自适应）
-        if (Double.isNaN(height) && "text".equals(element.type()) && textAutoHeight != null) {
-            Object spec = element.props().get("text");
-            if (spec instanceof Map<?, ?> tm) {
-                Object content = tm.get("content");
-                Object wrap = tm.get("wrap");
-                boolean auto = Boolean.parseBoolean(String.valueOf(tm.get("autoHeight")))
-                        || (wrap != null && !Double.isNaN(width));
-                if (auto && content != null) {
-                    double lh = tm.get("lineHeight") instanceof Number n ? n.doubleValue() : 9;
-                    double maxW = wrap instanceof Number n ? n.doubleValue()
-                            : (Double.isNaN(width) ? 1e9 : width);
-                    try {
-                        height = textAutoHeight.measure(String.valueOf(content), maxW, variables, lh, 9);
-                        self.put("height", height);
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-        }
-
-        // 相对父坐标 → 绝对坐标
-        double absX = parentFrame == null ? x : ((Number) parentFrame.get("x")).doubleValue() + x;
-        double absY = parentFrame == null ? y : ((Number) parentFrame.get("y")).doubleValue() + y;
-
-        // 元素锚点定位（anchor: center/bottom_left/top_right 等，相对画布或父容器）。
-        // 距离方按「入向为正」：非 IDENTITY（声明了 design 的页）下，贴边锚点的偏移
-        // 以指向画布内部为正（bottom_* 的 y 向上、*_right 的 x 向左）；
-        // 老包（IDENTITY）保持旧符号（从角点往右下为正），一帧都不挪。
-        // 锚点本体走注册表（LayoutAnchors 内置九宫格 + 附属自定义）——热拔插。
-        String anchorVal = element.props().get("anchor") != null
-                ? String.valueOf(element.props().get("anchor")).trim().toLowerCase(java.util.Locale.ROOT)
-                : null;
-        if (anchorVal != null && !anchorVal.isEmpty()) {
-            double anchorW = Double.isNaN(width) ? 0 : width;
-            double anchorH = Double.isNaN(height) ? 0 : height;
-            double baseX = parentFrame == null ? 0 : ((Number) parentFrame.get("x")).doubleValue();
-            double baseY = parentFrame == null ? 0 : ((Number) parentFrame.get("y")).doubleValue();
-            boolean inward = !CURRENT.isIdentity();
-            var anchor = LayoutAnchors.get(anchorVal);
-            if (anchor != null) {
-                double[] p = anchor.point(windowWidth, windowHeight, anchorW, anchorH);
-                absX = baseX + p[0] + anchor.offsetX(x, inward);
-                absY = baseY + p[1] + anchor.offsetY(y, inward);
-            }
-        }
-
-        // 编辑模式位置覆盖（元素 id → 绝对坐标）
-        if (positionOverrides != null) {
-            double[] override = positionOverrides.get(element.id());
-            if (override != null) {
-                absX = override[0];
-                absY = override[1];
-            }
-        }
-
-        boolean visible = evalBool(element.visibleWhen(), env, true);
-        boolean enabled = evalBool(element.enabledWhen(), env, true);
-
-        Map<String, Object> frame = new LinkedHashMap<>();
-        frame.put("x", absX);
-        frame.put("y", absY);
-        frame.put("width", width);
-        frame.put("height", height);
-
-        // 缓存元素框架，供后续元素交叉引用（如 `背景.width`）
-        COMPUTED_FRAMES.put(element.id(), frame);
-
-        // 数据绑定：bind 映射（路径 → 表达式）求值后覆盖元素属性（{{vars}} 之外的显式绑定语法）
-        Map<String, Object> nodeProps = applyBindings(element, env);
-
-        // @媒体块在这里兑现：每轮重算都拿当前窗口尺寸重新判定，
-        // 所以拖窗口大小是即时响应的。z/opacity/scale 这些 RenderNode 构造时
-        // 才从 props 读，天然吃到合并结果，不用额外处理。
-        // 注意必须先拷贝再合——applyBindings 无绑定时返回的是元素活引用，
-        // 直接往里写会把响应值永久烧进页面模型（探针抓过的现行）。
-        com.opendreamcore.ui.theme.ElementStyle es = element.style();
-        if (es != null && !es.mediaOverrides().isEmpty()) {
-            nodeProps = new LinkedHashMap<>(nodeProps);
-            com.opendreamcore.ui.theme.MediaResolver.mergeActive(
-                    es.mediaOverrides(), windowWidth, windowHeight, nodeProps);
-        }
-
-        // 数值属性归一化：opacity/scale/rotation 支持数字或表达式（vars.x、Math.正弦(45) 等）
-        normalizeNumericProps(nodeProps, env, "opacity", 1);
-        normalizeNumericProps(nodeProps, env, "scale", 1);
-        normalizeNumericProps(nodeProps, env, "rotation", 0);
-
-        // 布局模式：grid/h_stack/v_stack 自动排子元素；scroll 内容可超界；foreach 列表展开
-        List<RenderNode> children;
-        String type = element.type();
-        if ("grid".equals(type)) {
-            children = layoutGrid(element, frame, windowWidth, windowHeight, variables, positionOverrides);
-        } else if ("h_stack".equals(type)) {
-            children = layoutStack(element, frame, true, windowWidth, windowHeight, variables, positionOverrides);
-        } else if ("v_stack".equals(type)) {
-            children = layoutStack(element, frame, false, windowWidth, windowHeight, variables, positionOverrides);
-        } else if ("adaptive".equals(type)) {
-            children = layoutAdaptive(element, frame, windowWidth, windowHeight, variables, positionOverrides);
-            // 自适应：容器尺寸未写时按子元素内容回填（宽 = 最宽子元素右缘，高 = 子元素总高）
-            if (Double.isNaN(width) && children != null) {
-                width = adaptiveWidth(children, frame);
-                frame.put("width", width);
-            }
-            if (Double.isNaN(height) && children != null) {
-                height = adaptiveHeight(children, frame);
-                frame.put("height", height);
-            }
-        } else if ("foreach".equals(type)) {
-            children = layoutForeach(element, frame, windowWidth, windowHeight, variables, positionOverrides);
-        } else if ("container".equals(type)) {
-            children = layoutContainer(element, frame, windowWidth, windowHeight, variables, positionOverrides);
-        } else {
-            children = layout(element.children(), null, frame,
-                    windowWidth, windowHeight, variables, positionOverrides);
-        }
-
-        return new RenderNode(element.id(), element.type(), element,
-                absX, absY, width, height, visible, enabled, children, nodeProps);
     }
+    double width = evalLayout(layout, Layout.WIDTH, env, Double.NaN);
+    self.put("width", width);
+    double height = evalLayout(layout, Layout.HEIGHT, env, Double.NaN);
+    self.put("height", height);
+    double x = evalPosition(layout, Layout.X, env, 0, parentFrame == null);
+    self.put("x", x);
+    double y = evalPosition(layout, Layout.Y, env, 0, parentFrame == null);
+    self.put("y", y);
+    
+    // 文本自动高度：text.autoHeight: true 或 高度未写 + text.wrap 设置 →
+    // 客户端字体钩子按内容折行测量高度（命中区域/布局随内容自适应）
+    if (Double.isNaN(height) && "text".equals(element.type()) && textAutoHeight != null) {
+        Object spec = expressionProp(element.props().get("text"), env);
+        if (spec instanceof Map<?, ?> tm) {
+            Object content = tm.get("content");
+            Object wrap = tm.get("wrap");
+            boolean auto = Boolean.parseBoolean(String.valueOf(tm.get("autoHeight")))
+                    || (wrap != null && !Double.isNaN(width));
+            if (auto && content != null) {
+                double lh = tm.get("lineHeight") instanceof Number n ? n.doubleValue() : 9;
+                double maxW = wrap instanceof Number n ? n.doubleValue()
+                        : (Double.isNaN(width) ? 1e9 : width);
+                try {
+                    height = textAutoHeight.measure(String.valueOf(content), maxW, variables, lh, 9);
+                    self.put("height", height);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+    
+    // 相对父坐标 → 绝对坐标
+    double absX = parentFrame == null ? x : ((Number) parentFrame.get("x")).doubleValue() + x;
+    double absY = parentFrame == null ? y : ((Number) parentFrame.get("y")).doubleValue() + y;
+    
+    // 元素锚点定位（anchor: center/bottom_left/top_right 等，相对画布或父容器）。
+    // 距离方按「入向为正」：非 IDENTITY（声明了 design 的页）下，贴边锚点的偏移
+    // 以指向画布内部为正（bottom_* 的 y 向上、*_right 的 x 向左）；
+    // 老包（IDENTITY）保持旧符号（从角点往右下为正），一帧都不挪。
+    // 锚点走注册表（LayoutAnchors 内置九宫格 + 附属自定义）。
+    String anchorVal = element.props().get("anchor") != null
+            ? String.valueOf(element.props().get("anchor")).trim().toLowerCase(java.util.Locale.ROOT)
+            : null;
+    if (anchorVal != null && !anchorVal.isEmpty()) {
+        double anchorW = Double.isNaN(width) ? 0 : width;
+        double anchorH = Double.isNaN(height) ? 0 : height;
+        double baseX = parentFrame == null ? 0 : ((Number) parentFrame.get("x")).doubleValue();
+        double baseY = parentFrame == null ? 0 : ((Number) parentFrame.get("y")).doubleValue();
+        boolean inward = !viewport.isIdentity();
+        var anchor = LayoutAnchors.get(anchorVal);
+        if (anchor != null) {
+            double[] p = anchor.point(windowWidth, windowHeight, anchorW, anchorH);
+            absX = baseX + p[0] + anchor.offsetX(x, inward);
+            absY = baseY + p[1] + anchor.offsetY(y, inward);
+        }
+    }
+    
+    // 编辑模式位置覆盖（元素 id → 绝对坐标）
+    if (positionOverrides != null) {
+        double[] override = positionOverrides.get(element.id());
+        if (override != null) {
+            absX = override[0];
+            absY = override[1];
+        }
+    }
+    
+    boolean visible = evalBool(element.visibleWhen(), env, true);
+    boolean enabled = evalBool(element.enabledWhen(), env, true);
+    
+    Map<String, Object> frame = self;
+    frame.put("x", absX);
+    frame.put("y", absY);
+    frame.put("width", width);
+    frame.put("height", height);
+    
+    // 缓存元素框架，供后续元素交叉引用（如 `背景.width`）
+        computedFrames.put(element.id(), frame);
+    
+    // 数据绑定：bind 映射（路径 → 表达式）求值后覆盖元素属性（{{vars}} 之外的显式绑定语法）
+    Map<String, Object> nodeProps = new LinkedHashMap<>(applyBindings(element, env));
+    normalizeExpressionProps(nodeProps, env);
+    // @媒体块在这里兑现：每轮重算都拿当前窗口尺寸重新判定，
+    // 所以拖窗口大小是即时响应的。z/opacity/scale 这些 RenderNode 构造时
+    // 才从 props 读，天然吃到合并结果，不用额外处理。
+    // 注意必须先拷贝再合——applyBindings 无绑定时返回的是元素活引用，
+    // 直接往里写会把响应值永久烧进页面模型（探针抓过的现行）。
+    com.opendreamcore.ui.theme.ElementStyle es = element.style();
+    if (es != null && !es.mediaOverrides().isEmpty()) {
+        nodeProps = new LinkedHashMap<>(nodeProps);
+        com.opendreamcore.ui.theme.MediaResolver.mergeActive(
+                es.mediaOverrides(), windowWidth, windowHeight, nodeProps);
+    }
+    
+    // 数值属性归一化：opacity/scale/rotation 支持数字或表达式（vars.x、Math.正弦(45) 等）
+    normalizeNumericProps(nodeProps, env, "opacity", 1);
+    normalizeNumericProps(nodeProps, env, "scale", 1);
+    normalizeNumericProps(nodeProps, env, "rotation", 0);
+    normalizeNumericProps(nodeProps, env, "limitX", Double.NaN);
+    normalizeNumericProps(nodeProps, env, "limitY", Double.NaN);
+    normalizeNumericProps(nodeProps, env, "limitWidth", Double.NaN);
+    normalizeNumericProps(nodeProps, env, "limitHeight", Double.NaN);
+    
+    // 布局模式：grid/h_stack/v_stack 自动排子元素；scroll 内容可超界；foreach 列表展开
+    List<RenderNode> children;
+    String type = element.type();
+    if ("grid".equals(type)) {
+        children = layoutGrid(element, frame, windowWidth, windowHeight, variables, positionOverrides);
+    } else if ("h_stack".equals(type)) {
+        children = layoutStack(element, frame, true, windowWidth, windowHeight, variables, positionOverrides);
+    } else if ("v_stack".equals(type)) {
+        children = layoutStack(element, frame, false, windowWidth, windowHeight, variables, positionOverrides);
+    } else if ("adaptive".equals(type)) {
+        children = layoutAdaptive(element, frame, windowWidth, windowHeight, variables, positionOverrides);
+        // 自适应：容器尺寸未写时按子元素内容回填（宽 = 最宽子元素右缘，高 = 子元素总高）
+        if (Double.isNaN(width) && children != null) {
+            width = adaptiveWidth(children, frame);
+            frame.put("width", width);
+        }
+        if (Double.isNaN(height) && children != null) {
+            height = adaptiveHeight(children, frame);
+            frame.put("height", height);
+        }
+    } else if ("foreach".equals(type)) {
+        children = layoutForeach(element, frame, windowWidth, windowHeight, variables, positionOverrides);
+    } else if ("container".equals(type)) {
+        children = layoutContainer(element, frame, windowWidth, windowHeight, variables, positionOverrides);
+    } else {
+        children = layout(element.children(), null, frame,
+                windowWidth, windowHeight, variables, positionOverrides);
+    }
+    
+    return new RenderNode(element.id(), element.type(), element,
+            absX, absY, width, height, visible, enabled, children, nodeProps); }
 
     /**
      * 自适应布局：子元素依次纵向排布（同 v_stack），容器尺寸由内容决定。
      * 子元素相对容器定位（x/y 不写 = 0），spacing 控制间距。
      */
-    private static List<RenderNode> layoutAdaptive(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutAdaptive(Element element, Map<String, Object> frame,
                                                    double windowWidth, double windowHeight,
                                                    Map<String, Object> variables,
-                                                   Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        if (element.children() == null || element.children().isEmpty()) {
-            return nodes;
-        }
-        Map<String, Object> props = element.props() == null ? J8.map() : element.props();
-        Object specRaw = props.get("adaptive");
-        Map<String, Object> spec = specRaw instanceof Map<?, ?> m ? asMap(m) : props;
-        double spacing = doubleProp(spec, "spacing", 4);
-        double cursor = 0;
-        for (Element child : element.children()) {
-            Layout cl = child.layout();
-            double h = cl == null || cl.height() == null
-                    ? 20 : evalLayout(cl, Layout.HEIGHT, envOf(element, frame, windowWidth, windowHeight, variables), 20);
-            Map<String, Object> childFrame = new LinkedHashMap<>(frame);
-            childFrame.put("y", (double) frame.get("y") + cursor);
-            childFrame.put("x", (double) frame.get("x"));
-            nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
-            cursor += h + spacing;
-        }
+                                                   Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    if (element.children() == null || element.children().isEmpty()) {
         return nodes;
     }
+    Map<String, Object> props = element.props() == null ? J8.map() : element.props();
+    Object specRaw = props.get("adaptive");
+    Map<String, Object> spec = specRaw instanceof Map<?, ?> m ? asMap(m) : props;
+    double spacing = doubleProp(spec, "spacing", 4);
+    double cursor = 0;
+    for (Element child : element.children()) {
+        Layout cl = child.layout();
+        double h = cl == null || cl.height() == null
+                ? 20 : evalLayout(cl, Layout.HEIGHT, envOf(child, frame, windowWidth, windowHeight, variables), 20);
+        Map<String, Object> childFrame = new LinkedHashMap<>(frame);
+        childFrame.put("y", (double) frame.get("y") + cursor);
+        childFrame.put("x", (double) frame.get("x"));
+        nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
+        cursor += h + spacing;
+    }
+    return nodes; }
 
     /** 自适应宽：最宽子元素的右缘（相对容器原点）。 */
     private static double adaptiveWidth(List<RenderNode> children, Map<String, Object> frame) {
@@ -432,7 +413,7 @@ public final class LayoutEngine {
      * 支持点路径（"button.background" → button 下的 background）；页面变量一变，
      * state_patch 刷新布局时自动重新求值（元素属性 ← 变量自动更新）。
      */
-    private static Map<String, Object> applyBindings(Element element, Map<String, Object> env) {
+    private Map<String, Object> applyBindings(Element element, Map<String, Object> env) {
         Map<String, Object> props = element.props();
         Object bindRaw = props.get("bind");
         if (!(bindRaw instanceof Map<?, ?> bind) || bind.isEmpty()) {
@@ -456,96 +437,93 @@ public final class LayoutEngine {
         return out;
     }
 
-    /** 点路径写入（中间 map 自动创建）。 */
+    /** 仅复制写路径上的 map；未触及的子树继续共享，源属性与旧渲染节点保持不变。 */
     private static void putPath(Map<String, Object> map, String path, Object value) {
         String[] parts = path.split("\\.");
+        if (parts.length == 0) return;
         Map<String, Object> cur = map;
         for (int i = 0; i < parts.length - 1; i++) {
             Object next = cur.get(parts[i]);
-            if (!(next instanceof Map<?, ?>)) {
-                Map<String, Object> fresh = new LinkedHashMap<>();
-                cur.put(parts[i], fresh);
-                next = fresh;
+            Map<String, Object> copy = new LinkedHashMap<>();
+            if (next instanceof Map<?, ?> existing) {
+                for (Map.Entry<?, ?> e : existing.entrySet()) {
+                    copy.put(String.valueOf(e.getKey()), e.getValue());
+                }
             }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> m = (Map<String, Object>) next;
-            cur = m;
+            cur.put(parts[i], copy);
+            cur = copy;
         }
         cur.put(parts[parts.length - 1], value);
     }
 
     /** 网格布局：cols 列 + spacing 间距，子元素依次填格。 */
-    private static List<RenderNode> layoutGrid(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutGrid(Element element, Map<String, Object> frame,
                                                double windowWidth, double windowHeight,
                                                Map<String, Object> variables,
-                                               Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        if (element.children() == null || element.children().isEmpty()) {
-            return nodes;
-        }
-        int cols = Math.max(1, intProp(element.props(), "cols", 1));
-        double spacing = doubleProp(element.props(), "spacing", 0);
-        double parentW = doubleOf(frame.get("width"), 0);
-        double cellW = cols > 0 ? Math.max(0, (parentW - spacing * (cols - 1)) / cols) : 0;
-        for (int i = 0; i < element.children().size(); i++) {
-            Element child = element.children().get(i);
-            int row = i / cols;
-            int col = i % cols;
-            Layout cl = child.layout();
-            // 子元素 x/y 未写时按格子排
-            double cellH = cl == null || cl.height() == null
-                    ? 40 : evalLayout(cl, Layout.HEIGHT, envOf(element, frame, windowWidth, windowHeight, variables), 40);
-            double x = cl == null || cl.x() == null ? col * (cellW + spacing) : 0;
-            double y = cl == null || cl.y() == null ? row * (cellH + spacing) : 0;
-            Map<String, Object> childFrame = new LinkedHashMap<>(frame);
-            childFrame.put("x", (double) frame.get("x") + x);
-            childFrame.put("y", (double) frame.get("y") + y);
-            nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
-        }
+                                               Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    if (element.children() == null || element.children().isEmpty()) {
         return nodes;
     }
+    int cols = Math.max(1, intProp(element.props(), "cols", 1));
+    double spacing = doubleProp(element.props(), "spacing", 0);
+    double parentW = doubleOf(frame.get("width"), 0);
+    double cellW = cols > 0 ? Math.max(0, (parentW - spacing * (cols - 1)) / cols) : 0;
+    for (int i = 0; i < element.children().size(); i++) {
+        Element child = element.children().get(i);
+        int row = i / cols;
+        int col = i % cols;
+        Layout cl = child.layout();
+        // 子元素 x/y 未写时按格子排
+        double cellH = cl == null || cl.height() == null
+                ? 40 : evalLayout(cl, Layout.HEIGHT, envOf(child, frame, windowWidth, windowHeight, variables), 40);
+        double x = cl == null || cl.x() == null ? col * (cellW + spacing) : 0;
+        double y = cl == null || cl.y() == null ? row * (cellH + spacing) : 0;
+        Map<String, Object> childFrame = new LinkedHashMap<>(frame);
+        childFrame.put("x", (double) frame.get("x") + x);
+        childFrame.put("y", (double) frame.get("y") + y);
+        nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
+    }
+    return nodes; }
 
     /** foreach 列表展开：按 vars 列表复制 children 模板，{{item}} 预替换，逐项下移。 */
-    private static List<RenderNode> layoutForeach(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutForeach(Element element, Map<String, Object> frame,
                                                   double windowWidth, double windowHeight,
                                                   Map<String, Object> variables,
-                                                  Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        Object foreachRaw = element.props() == null ? null : element.props().get("foreach");
-        if (!(foreachRaw instanceof Map<?, ?> spec)) {
-            return nodes;
-        }
-        String listRef = strOf(spec.get("list"));
-        String as = strOf(spec.get("as"));
-        if (as == null) {
-            as = "item";
-        }
-        Object listValue = null;
-        if (listRef != null) {
-            String varName = listRef.startsWith("vars.") ? listRef.substring(5) : listRef;
-            listValue = variables == null ? null : variables.get(varName);
-        }
-        if (!(listValue instanceof List<?> items)) {
-            return nodes;
-        }
-        double spacing = doubleProp(element.props(), "spacing", 0);
-        // 模板布局一次，量出单行高度
-        Map<String, Object> zeroFrame = new LinkedHashMap<>(frame);
-        List<RenderNode> template = layout(element.children(), null, zeroFrame,
-                windowWidth, windowHeight, variables, positionOverrides);
-        double rowH = 0;
-        for (RenderNode t : template) {
-            rowH = Math.max(rowH, t.y() + Math.max(t.height(), 0));
-        }
-        for (int i = 0; i < items.size(); i++) {
-            Object item = items.get(i);
-            double dy = i * (rowH + spacing);
-            for (RenderNode t : template) {
-                nodes.add(copyWith(t, as, item, dy));
-            }
-        }
+                                                  Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    Object foreachRaw = element.props() == null ? null : element.props().get("foreach");
+    if (!(foreachRaw instanceof Map<?, ?> spec)) {
         return nodes;
     }
+    String listRef = strOf(spec.get("list"));
+    String as = strOf(spec.get("as"));
+    if (as == null) {
+        as = "item";
+    }
+    Object listValue = null;
+    if (listRef != null) {
+        String varName = listRef.startsWith("vars.") ? listRef.substring(5) : listRef;
+        listValue = variables == null ? null : variables.get(varName);
+    }
+    if (!(listValue instanceof List<?> items)) {
+        return nodes;
+    }
+    double spacing = doubleProp(element.props(), "spacing", 0);
+    // 模板布局一次，量出单行高度
+    Map<String, Object> zeroFrame = new LinkedHashMap<>(frame);
+    List<RenderNode> template = layout(element.children(), null, zeroFrame,
+            windowWidth, windowHeight, variables, positionOverrides);
+    double rowH = 0;
+    for (RenderNode t : template) {
+        rowH = Math.max(rowH, t.y() + Math.max(t.height(), 0));
+    }
+    for (int i = 0; i < items.size(); i++) {
+        Object item = items.get(i);
+        double dy = i * (rowH + spacing);
+        for (RenderNode t : template) {
+            nodes.add(copyWith(t, as, item, dy));
+        }
+    }
+    return nodes; }
 
     /** 复制模板节点：替换 {{item}} 引用 + y 偏移。 */
     private static RenderNode copyWith(RenderNode template, String as, Object item, double dy) {
@@ -591,75 +569,73 @@ public final class LayoutEngine {
      * 容器网格展开：按 rows/cols/slotStart 生成 chest_slot 子元素（真实容器槽位）。
      * 生成的槽位继承容器的 actions（点击脚本里用 vars.slot / vars.container 区分槽位）。
      */
-    private static List<RenderNode> layoutContainer(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutContainer(Element element, Map<String, Object> frame,
                                                     double windowWidth, double windowHeight,
                                                     Map<String, Object> variables,
-                                                    Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        Map<String, Object> props = element.props() == null ? J8.map() : element.props();
-        Object specRaw = props.get("container");
-        Map<String, Object> spec = specRaw instanceof Map<?, ?> m ? asMap(m) : props;
-        int rows = Math.max(1, intProp(spec, "rows", 3));
-        int cols = Math.max(1, intProp(spec, "cols", 9));
-        int slotStart = Math.max(0, intProp(spec, "slotStart", 0));
-        double spacing = doubleProp(spec, "spacing", 2);
-        double cell = Math.max(8, doubleProp(spec, "cellSize", 18));
-        boolean playerInv = boolProp(spec, "playerInventory", false);
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                int slot = slotStart + r * cols + c;
+                                                    Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    Map<String, Object> props = element.props() == null ? J8.map() : element.props();
+    Object specRaw = props.get("container");
+    Map<String, Object> spec = specRaw instanceof Map<?, ?> m ? asMap(m) : props;
+    int rows = Math.max(1, intProp(spec, "rows", 3));
+    int cols = Math.max(1, intProp(spec, "cols", 9));
+    int slotStart = Math.max(0, intProp(spec, "slotStart", 0));
+    double spacing = doubleProp(spec, "spacing", 2);
+    double cell = Math.max(8, doubleProp(spec, "cellSize", 18));
+    boolean playerInv = boolProp(spec, "playerInventory", false);
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            int slot = slotStart + r * cols + c;
+            Map<String, Object> childProps = new LinkedHashMap<>();
+            childProps.put("slot", slot);
+            childProps.put("cellSize", cell);
+            childProps.put("showSlot", spec.get("showSlot"));
+            String cellStr = String.valueOf(cell);
+            Layout layout = new Layout(String.valueOf(c * (cell + spacing)),
+                    String.valueOf(r * (cell + spacing)), cellStr, cellStr);
+            Element child = new Element(element.id() + "_" + slot, "chest_slot", layout, childProps,
+                    element.visibleWhen(), element.enabledWhen(), element.actions(),
+                    J8.list(), element.id());
+            nodes.add(layoutOne(child, null, frame, windowWidth, windowHeight, variables, positionOverrides));
+        }
+    }
+    // 玩家背包区（playerInventory: true）：主背包 27 格（槽位 9..35）+ 快捷栏 9 格（槽位 0..8），
+    // 类型 hot_slot → 服务端路由到玩家背包；原版箱子 UI 的完整体验
+    if (playerInv) {
+        String cellStr = String.valueOf(cell);
+        int gridBottom = (int) (rows * (cell + spacing));
+        double invGap = cell * 0.75;
+        // 主背包 3×9（槽位 9..35）
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 9; c++) {
+                int slot = 9 + r * 9 + c;
                 Map<String, Object> childProps = new LinkedHashMap<>();
                 childProps.put("slot", slot);
                 childProps.put("cellSize", cell);
                 childProps.put("showSlot", spec.get("showSlot"));
-                String cellStr = String.valueOf(cell);
                 Layout layout = new Layout(String.valueOf(c * (cell + spacing)),
-                        String.valueOf(r * (cell + spacing)), cellStr, cellStr);
-                Element child = new Element(element.id() + "_" + slot, "chest_slot", layout, childProps,
+                        String.valueOf((int) (gridBottom + invGap + r * (cell + spacing))), cellStr, cellStr);
+                Element child = new Element(element.id() + "_inv" + slot, "hot_slot", layout, childProps,
                         element.visibleWhen(), element.enabledWhen(), element.actions(),
                         J8.list(), element.id());
                 nodes.add(layoutOne(child, null, frame, windowWidth, windowHeight, variables, positionOverrides));
             }
         }
-        // 玩家背包区（playerInventory: true）：主背包 27 格（槽位 9..35）+ 快捷栏 9 格（槽位 0..8），
-        // 类型 hot_slot → 服务端路由到玩家背包；原版箱子 UI 的完整体验
-        if (playerInv) {
-            String cellStr = String.valueOf(cell);
-            int gridBottom = (int) (rows * (cell + spacing));
-            double invGap = cell * 0.75;
-            // 主背包 3×9（槽位 9..35）
-            for (int r = 0; r < 3; r++) {
-                for (int c = 0; c < 9; c++) {
-                    int slot = 9 + r * 9 + c;
-                    Map<String, Object> childProps = new LinkedHashMap<>();
-                    childProps.put("slot", slot);
-                    childProps.put("cellSize", cell);
-                    childProps.put("showSlot", spec.get("showSlot"));
-                    Layout layout = new Layout(String.valueOf(c * (cell + spacing)),
-                            String.valueOf((int) (gridBottom + invGap + r * (cell + spacing))), cellStr, cellStr);
-                    Element child = new Element(element.id() + "_inv" + slot, "hot_slot", layout, childProps,
-                            element.visibleWhen(), element.enabledWhen(), element.actions(),
-                            J8.list(), element.id());
-                    nodes.add(layoutOne(child, null, frame, windowWidth, windowHeight, variables, positionOverrides));
-                }
-            }
-            // 快捷栏 1×9（槽位 0..8）
-            int hotY = (int) (gridBottom + invGap + 3 * (cell + spacing) + invGap * 0.5);
-            for (int c = 0; c < 9; c++) {
-                Map<String, Object> childProps = new LinkedHashMap<>();
-                childProps.put("slot", c);
-                childProps.put("cellSize", cell);
-                childProps.put("showSlot", spec.get("showSlot"));
-                Layout layout = new Layout(String.valueOf(c * (cell + spacing)),
-                        String.valueOf(hotY), cellStr, cellStr);
-                Element child = new Element(element.id() + "_hot" + c, "hot_slot", layout, childProps,
-                        element.visibleWhen(), element.enabledWhen(), element.actions(),
-                        J8.list(), element.id());
-                nodes.add(layoutOne(child, null, frame, windowWidth, windowHeight, variables, positionOverrides));
-            }
+        // 快捷栏 1×9（槽位 0..8）
+        int hotY = (int) (gridBottom + invGap + 3 * (cell + spacing) + invGap * 0.5);
+        for (int c = 0; c < 9; c++) {
+            Map<String, Object> childProps = new LinkedHashMap<>();
+            childProps.put("slot", c);
+            childProps.put("cellSize", cell);
+            childProps.put("showSlot", spec.get("showSlot"));
+            Layout layout = new Layout(String.valueOf(c * (cell + spacing)),
+                    String.valueOf(hotY), cellStr, cellStr);
+            Element child = new Element(element.id() + "_hot" + c, "hot_slot", layout, childProps,
+                    element.visibleWhen(), element.enabledWhen(), element.actions(),
+                    J8.list(), element.id());
+            nodes.add(layoutOne(child, null, frame, windowWidth, windowHeight, variables, positionOverrides));
         }
-        return nodes;
     }
+    return nodes; }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object v) {
@@ -680,21 +656,19 @@ public final class LayoutEngine {
      * 兼容红线：一个弹性属性都没出现就走老的游标累加，行为逐字节不变；
      * 出现任意一个才进两遍式解算（先锁主轴测交叉尺寸，再回写对齐）。
      */
-    private static List<RenderNode> layoutStack(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutStack(Element element, Map<String, Object> frame,
                                                 boolean horizontal, double windowWidth, double windowHeight,
                                                 Map<String, Object> variables,
-                                                Map<String, double[]> positionOverrides) {
-        List<Element> kids = element.children();
-        if (kids == null) {
-            return new ArrayList<>();
-        }
-        if (!stackUsesFlex(element, kids)) {
-            return layoutStackLegacy(element, frame, horizontal, windowWidth, windowHeight,
-                    variables, positionOverrides);
-        }
-        return layoutStackFlex(element, frame, horizontal, windowWidth, windowHeight,
+                                                Map<String, double[]> positionOverrides) { List<Element> kids = element.children();
+    if (kids == null) {
+        return new ArrayList<>();
+    }
+    if (!stackUsesFlex(element, kids)) {
+        return layoutStackLegacy(element, frame, horizontal, windowWidth, windowHeight,
                 variables, positionOverrides);
     }
+    return layoutStackFlex(element, frame, horizontal, windowWidth, windowHeight,
+            variables, positionOverrides); }
 
     /** 容器或任一子元素声明了弹性属性即启用流式解算。 */
     private static boolean stackUsesFlex(Element element, List<Element> kids) {
@@ -715,29 +689,27 @@ public final class LayoutEngine {
     }
 
     /** 原始游标累加排布（无弹性属性时的兼容路径，逻辑保持不变）。 */
-    private static List<RenderNode> layoutStackLegacy(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutStackLegacy(Element element, Map<String, Object> frame,
                                                       boolean horizontal, double windowWidth, double windowHeight,
                                                       Map<String, Object> variables,
-                                                      Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        double spacing = doubleProp(element.props(), "spacing", 0);
-        double cursor = 0;
-        for (Element child : element.children()) {
-            Layout cl = child.layout();
-            double size = horizontal
-                    ? (cl == null || cl.width() == null ? 50 : evalLayout(cl, Layout.WIDTH, envOf(element, frame, windowWidth, windowHeight, variables), 50))
-                    : (cl == null || cl.height() == null ? 20 : evalLayout(cl, Layout.HEIGHT, envOf(element, frame, windowWidth, windowHeight, variables), 20));
-            Map<String, Object> childFrame = new LinkedHashMap<>(frame);
-            if (horizontal) {
-                childFrame.put("x", (double) frame.get("x") + cursor);
-            } else {
-                childFrame.put("y", (double) frame.get("y") + cursor);
-            }
-            nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
-            cursor += size + spacing;
+                                                      Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    double spacing = doubleProp(element.props(), "spacing", 0);
+    double cursor = 0;
+    for (Element child : element.children()) {
+        Layout cl = child.layout();
+        double size = horizontal
+                ? (cl == null || cl.width() == null ? 50 : evalLayout(cl, Layout.WIDTH, envOf(child, frame, windowWidth, windowHeight, variables), 50))
+                : (cl == null || cl.height() == null ? 20 : evalLayout(cl, Layout.HEIGHT, envOf(child, frame, windowWidth, windowHeight, variables), 20));
+        Map<String, Object> childFrame = new LinkedHashMap<>(frame);
+        if (horizontal) {
+            childFrame.put("x", (double) frame.get("x") + cursor);
+        } else {
+            childFrame.put("y", (double) frame.get("y") + cursor);
         }
-        return nodes;
+        nodes.add(layoutOne(child, null, childFrame, windowWidth, windowHeight, variables, positionOverrides));
+        cursor += size + spacing;
     }
+    return nodes; }
 
     /** 流式解算上下文：单个流内子元素的弹性参数与解析结果。 */
     private static final class FlexChild {
@@ -765,208 +737,204 @@ public final class LayoutEngine {
     }
 
     /** 两遍式流式解算：分配 → 测量 → 对齐回写。 */
-    private static List<RenderNode> layoutStackFlex(Element element, Map<String, Object> frame,
+    private List<RenderNode> layoutStackFlex(Element element, Map<String, Object> frame,
                                                     boolean horizontal, double windowWidth, double windowHeight,
                                                     Map<String, Object> variables,
-                                                    Map<String, double[]> positionOverrides) {
-        List<RenderNode> nodes = new ArrayList<>();
-        Map<String, Object> props = element.props() == null ? J8.map() : element.props();
-        double spacing = doubleProp(props, "spacing", 0);
-        boolean reverse = boolProp(props, "reverse", false);
-        boolean wrap = boolProp(props, "wrap", false);
-        String justify = normalizeAlign(strOrNull(props.get("justify")), "start");
-        String align = normalizeAlign(strOrNull(props.get("align")), "start");
-
-        double availMain = horizontal ? doubleOf(frame.get("width"), Double.NaN)
-                : doubleOf(frame.get("height"), Double.NaN);
-        double crossSize = horizontal ? doubleOf(frame.get("height"), Double.NaN)
-                : doubleOf(frame.get("width"), Double.NaN);
-
-        // 分组：绝对定位子元素脱离流；其余按声明序（reverse 反转）
-        List<FlexChild> flow = new ArrayList<>();
-        List<FlexChild> absolutes = new ArrayList<>();
-        for (Element child : kids(element)) {
-            FlexChild fc = new FlexChild(child);
-            resolveMainSize(fc, element, frame, horizontal, windowWidth, windowHeight, variables);
-            if (fc.absolute) {
-                absolutes.add(fc);
-            } else {
-                flow.add(fc);
-            }
+                                                    Map<String, double[]> positionOverrides) { List<RenderNode> nodes = new ArrayList<>();
+    Map<String, Object> props = element.props() == null ? J8.map() : element.props();
+    double spacing = doubleProp(props, "spacing", 0);
+    boolean reverse = boolProp(props, "reverse", false);
+    boolean wrap = boolProp(props, "wrap", false);
+    String justify = normalizeAlign(strOrNull(props.get("justify")), "start");
+    String align = normalizeAlign(strOrNull(props.get("align")), "start");
+    
+    double availMain = horizontal ? doubleOf(frame.get("width"), Double.NaN)
+            : doubleOf(frame.get("height"), Double.NaN);
+    double crossSize = horizontal ? doubleOf(frame.get("height"), Double.NaN)
+            : doubleOf(frame.get("width"), Double.NaN);
+    
+    // 分组：绝对定位子元素脱离流；其余按声明序（reverse 反转）
+    List<FlexChild> flow = new ArrayList<>();
+    List<FlexChild> absolutes = new ArrayList<>();
+    for (Element child : kids(element)) {
+        FlexChild fc = new FlexChild(child);
+        resolveMainSize(fc, element, frame, horizontal, windowWidth, windowHeight, variables);
+        if (fc.absolute) {
+            absolutes.add(fc);
+        } else {
+            flow.add(fc);
         }
-        if (reverse) {
-            java.util.Collections.reverse(flow);
-        }
-
-        // 换行分组（不可换行或容器尺寸未知时单行）
-        List<List<FlexChild>> lines = new ArrayList<>();
-        if (wrap && !Double.isNaN(availMain) && !flow.isEmpty()) {
-            List<FlexChild> cur = new ArrayList<>();
-            double used = 0;
-            for (FlexChild fc : flow) {
-                double need = fc.mainSize;
-                if (!cur.isEmpty() && used + spacing + need > availMain) {
-                    lines.add(cur);
-                    cur = new ArrayList<>();
-                    used = 0;
-                }
-                if (!cur.isEmpty()) {
-                    used += spacing;
-                }
-                used += need;
-                cur.add(fc);
+    }
+    if (reverse) {
+        java.util.Collections.reverse(flow);
+    }
+    
+    // 换行分组（不可换行或容器尺寸未知时单行）
+    List<List<FlexChild>> lines = new ArrayList<>();
+    if (wrap && !Double.isNaN(availMain) && !flow.isEmpty()) {
+        List<FlexChild> cur = new ArrayList<>();
+        double used = 0;
+        for (FlexChild fc : flow) {
+            double need = fc.mainSize;
+            if (!cur.isEmpty() && used + spacing + need > availMain) {
+                lines.add(cur);
+                cur = new ArrayList<>();
+                used = 0;
             }
             if (!cur.isEmpty()) {
-                lines.add(cur);
+                used += spacing;
             }
-        } else if (!flow.isEmpty()) {
-            lines.add(new ArrayList<>(flow));
+            used += need;
+            cur.add(fc);
         }
-
-        double baseX = doubleOf(frame.get("x"), 0);
-        double baseY = doubleOf(frame.get("y"), 0);
-        double lineCursor = 0; // 行在交叉轴上的起点
-
-        for (List<FlexChild> line : lines) {
-            int n = line.size();
-            double natural = 0;
-            double sumGrow = 0;
-            double totalShrinkWeighted = 0;
+        if (!cur.isEmpty()) {
+            lines.add(cur);
+        }
+    } else if (!flow.isEmpty()) {
+        lines.add(new ArrayList<>(flow));
+    }
+    
+    double baseX = doubleOf(frame.get("x"), 0);
+    double baseY = doubleOf(frame.get("y"), 0);
+    double lineCursor = 0; // 行在交叉轴上的起点
+    
+    for (List<FlexChild> line : lines) {
+        int n = line.size();
+        double natural = 0;
+        double sumGrow = 0;
+        double totalShrinkWeighted = 0;
+        for (FlexChild fc : line) {
+            natural += fc.mainSize;
+            sumGrow += fc.grow;
+            totalShrinkWeighted += fc.shrink * fc.mainSize;
+        }
+        double gaps = spacing * Math.max(0, n - 1);
+        double free = (Double.isNaN(availMain) ? natural + gaps : availMain) - natural - gaps;
+    
+        // 收缩优先于扩张（空间不足时按 shrink 加权压缩）
+        if (free < 0 && totalShrinkWeighted > 0) {
             for (FlexChild fc : line) {
-                natural += fc.mainSize;
-                sumGrow += fc.grow;
-                totalShrinkWeighted += fc.shrink * fc.mainSize;
-            }
-            double gaps = spacing * Math.max(0, n - 1);
-            double free = (Double.isNaN(availMain) ? natural + gaps : availMain) - natural - gaps;
-
-            // 收缩优先于扩张（空间不足时按 shrink 加权压缩）
-            if (free < 0 && totalShrinkWeighted > 0) {
-                for (FlexChild fc : line) {
-                    if (fc.shrink > 0) {
-                        fc.mainSize = Math.max(0, fc.mainSize + free * (fc.shrink * fc.mainSize) / totalShrinkWeighted);
-                    }
+                if (fc.shrink > 0) {
+                    fc.mainSize = Math.max(0, fc.mainSize + free * (fc.shrink * fc.mainSize) / totalShrinkWeighted);
                 }
-                free = 0;
-            } else if (free > 0 && sumGrow > 0) {
-                for (FlexChild fc : line) {
-                    if (fc.grow > 0) {
-                        fc.mainSize += free * fc.grow / sumGrow;
-                    }
-                }
-                free = 0;
             }
-
-            // justify 分配行内剩余空间 → 每项主轴起点
-            double lead = switch (justify) {
-                case "center" -> free / 2;
-                case "end" -> free;
-                case "around" -> n > 0 ? free / (n * 2) : 0;
-                default -> 0; // start / between：首项贴行首
+            free = 0;
+        } else if (free > 0 && sumGrow > 0) {
+            for (FlexChild fc : line) {
+                if (fc.grow > 0) {
+                    fc.mainSize += free * fc.grow / sumGrow;
+                }
+            }
+            free = 0;
+        }
+    
+        // justify 分配行内剩余空间 → 每项主轴起点
+        double lead = switch (justify) {
+            case "center" -> free / 2;
+            case "end" -> free;
+            case "around" -> n > 0 ? free / (n * 2) : 0;
+            default -> 0; // start / between：首项贴行首
+        };
+        double step = switch (justify) {
+            case "between" -> n > 1 ? spacing + free / (n - 1) : spacing;
+            case "around" -> spacing + free / (double) Math.max(1, n);
+            default -> spacing;
+        };
+        double pos = lead;
+        for (FlexChild fc : line) {
+            fc.mainOffset = pos;
+            pos += fc.mainSize + step;
+        }
+    
+        // 第一遍：锁定主轴尺寸，测真实交叉尺寸（对齐需要）；NaN 视为 0 防污染
+        double lineCross = 0;
+        for (FlexChild fc : line) {
+            fc.locked = lockMain(fc.source, horizontal, fc.mainSize);
+            RenderNode probe = layoutOne(fc.locked, null, offsetFrame(frame, horizontal, fc.mainOffset),
+                    windowWidth, windowHeight, variables, positionOverrides);
+            double measured = horizontal ? probe.height() : probe.width();
+            // 未声明交叉尺寸时按缺省高度参与行高推进（与兼容路径缺省一致）
+            if (!Double.isNaN(measured)) {
+                lineCross = Math.max(lineCross, measured);
+            }
+            double declaredCross = declaredCrossOf(fc.source, horizontal);
+            if (!Double.isNaN(declaredCross)) {
+                lineCross = Math.max(lineCross, declaredCross);
+            } else {
+                lineCross = Math.max(lineCross, 20);
+            }
+        }
+    
+        // 第二遍：交叉轴对齐偏移 + 最终渲染
+        double lineLead = 0;
+        if (!Double.isNaN(crossSize)) {
+            lineLead = switch (align) {
+                case "center" -> Math.max(0, (crossSize - lineCross) / 2);
+                case "end" -> Math.max(0, crossSize - lineCross);
+                default -> 0;
             };
-            double step = switch (justify) {
-                case "between" -> n > 1 ? spacing + free / (n - 1) : spacing;
-                case "around" -> spacing + free / (double) Math.max(1, n);
-                default -> spacing;
-            };
-            double pos = lead;
-            for (FlexChild fc : line) {
-                fc.mainOffset = pos;
-                pos += fc.mainSize + step;
+        }
+        for (FlexChild fc : line) {
+            RenderNode probe = layoutOne(fc.locked, null, offsetFrame(frame, horizontal, fc.mainOffset),
+                    windowWidth, windowHeight, variables, positionOverrides);
+            double measuredCross = horizontal ? probe.height() : probe.width();
+            if (Double.isNaN(measuredCross)) {
+                measuredCross = 0;
             }
-
-            // 第一遍：锁定主轴尺寸，测真实交叉尺寸（对齐需要）；NaN 视为 0 防污染
-            double lineCross = 0;
-            for (FlexChild fc : line) {
-                fc.locked = lockMain(fc.source, horizontal, fc.mainSize);
-                RenderNode probe = layoutOne(fc.locked, null, offsetFrame(frame, horizontal, fc.mainOffset),
-                        windowWidth, windowHeight, variables, positionOverrides);
-                double measured = horizontal ? probe.height() : probe.width();
-                // 未声明交叉尺寸时按缺省高度参与行高推进（与兼容路径缺省一致）
-                if (!Double.isNaN(measured)) {
-                    lineCross = Math.max(lineCross, measured);
-                }
-                double declaredCross = declaredCrossOf(fc.source, horizontal);
-                if (!Double.isNaN(declaredCross)) {
-                    lineCross = Math.max(lineCross, declaredCross);
-                } else {
-                    lineCross = Math.max(lineCross, 20);
-                }
-            }
-
-            // 第二遍：交叉轴对齐偏移 + 最终渲染
-            double lineLead = 0;
+            String effAlign = fc.alignSelf != null ? normalizeAlign(fc.alignSelf, align) : align;
+            double off = 0;
             if (!Double.isNaN(crossSize)) {
-                lineLead = switch (align) {
-                    case "center" -> Math.max(0, (crossSize - lineCross) / 2);
-                    case "end" -> Math.max(0, crossSize - lineCross);
-                    default -> 0;
+                off = switch (effAlign) {
+                    case "center" -> Math.max(0, (crossSize - measuredCross) / 2);
+                    case "end" -> Math.max(0, crossSize - measuredCross);
+                    default -> 0; // start / stretch：stretch 由锁定交叉尺寸承担（下方）
                 };
             }
-            for (FlexChild fc : line) {
-                RenderNode probe = layoutOne(fc.locked, null, offsetFrame(frame, horizontal, fc.mainOffset),
-                        windowWidth, windowHeight, variables, positionOverrides);
-                double measuredCross = horizontal ? probe.height() : probe.width();
-                if (Double.isNaN(measuredCross)) {
-                    measuredCross = 0;
-                }
-                String effAlign = fc.alignSelf != null ? normalizeAlign(fc.alignSelf, align) : align;
-                double off = 0;
-                if (!Double.isNaN(crossSize)) {
-                    off = switch (effAlign) {
-                        case "center" -> Math.max(0, (crossSize - measuredCross) / 2);
-                        case "end" -> Math.max(0, crossSize - measuredCross);
-                        default -> 0; // start / stretch：stretch 由锁定交叉尺寸承担（下方）
-                    };
-                }
-                Map<String, Object> finalFrame = offsetFrame(frame, horizontal, fc.mainOffset);
-                if (horizontal) {
-                    finalFrame.put("y", baseY + lineCursor + off);
-                } else {
-                    finalFrame.put("x", baseX + lineCursor + off);
-                }
-                // stretch：子元素未声明交叉尺寸时拉伸至行交叉尺寸
-                Element renderTarget = fc.locked;
-                if ("stretch".equals(effAlign) && !Double.isNaN(crossSize) && !declaresCross(fc.source, horizontal)) {
-                    renderTarget = lockCross(renderTarget, horizontal, crossSize);
-                }
-                nodes.add(layoutOne(renderTarget, null, finalFrame, windowWidth, windowHeight, variables, positionOverrides));
+            Map<String, Object> finalFrame = offsetFrame(frame, horizontal, fc.mainOffset);
+            if (horizontal) {
+                finalFrame.put("y", baseY + lineCursor + off);
+            } else {
+                finalFrame.put("x", baseX + lineCursor + off);
             }
-            // 行推进（第二行起点 = 当前行交叉尺寸 + 行间距）
-            lineCursor += lineCross + spacing;
+            // stretch：子元素未声明交叉尺寸时拉伸至行交叉尺寸
+            Element renderTarget = fc.locked;
+            if ("stretch".equals(effAlign) && !Double.isNaN(crossSize) && !declaresCross(fc.source, horizontal)) {
+                renderTarget = lockCross(renderTarget, horizontal, crossSize);
+            }
+            nodes.add(layoutOne(renderTarget, null, finalFrame, windowWidth, windowHeight, variables, positionOverrides));
         }
-
-        // 绝对定位子元素：以容器帧为父帧，恢复自身 x/y 表达式定位
-        for (FlexChild fc : absolutes) {
-            nodes.add(layoutOne(fc.source, null, new LinkedHashMap<>(frame),
-                    windowWidth, windowHeight, variables, positionOverrides));
-        }
-        return nodes;
+        // 行推进（第二行起点 = 当前行交叉尺寸 + 行间距）
+        lineCursor += lineCross + spacing;
     }
+    
+    // 绝对定位子元素：以容器帧为父帧，恢复自身 x/y 表达式定位
+    for (FlexChild fc : absolutes) {
+        nodes.add(layoutOne(fc.source, null, new LinkedHashMap<>(frame),
+                windowWidth, windowHeight, variables, positionOverrides));
+    }
+    return nodes; }
 
     private static List<Element> kids(Element e) {
         return e.children() == null ? J8.list() : e.children();
     }
 
-    private static void resolveMainSize(FlexChild fc, Element parent, Map<String, Object> frame,
+    private void resolveMainSize(FlexChild fc, Element parent, Map<String, Object> frame,
                                         boolean horizontal, double windowWidth, double windowHeight,
-                                        Map<String, Object> variables) {
-        if (!Double.isNaN(fc.basis)) {
-            fc.mainSize = fc.basis;
-            return;
-        }
-        Layout cl = fc.source.layout();
-        String expr = cl == null ? null : (horizontal ? cl.width() : cl.height());
-        if (expr != null) {
-            fc.mainSize = evalLayout(cl, horizontal ? Layout.WIDTH : Layout.HEIGHT,
-                    envOf(parent, frame, windowWidth, windowHeight, variables),
-                    horizontal ? 50 : 20);
-            return;
-        }
-        // 未声明尺寸：有扩张权重的子项从 0 起参与分配（CSS flex-basis:auto 语义的近似）；
-        // 无权重时回退兼容缺省尺寸，保证纯 justify 布局仍有可见盒子
-        fc.mainSize = fc.grow > 0 ? 0 : (horizontal ? 50 : 20);
+                                        Map<String, Object> variables) { if (!Double.isNaN(fc.basis)) {
+        fc.mainSize = fc.basis;
+        return;
     }
+    Layout cl = fc.source.layout();
+    String expr = cl == null ? null : (horizontal ? cl.width() : cl.height());
+    if (expr != null) {
+        fc.mainSize = evalLayout(cl, horizontal ? Layout.WIDTH : Layout.HEIGHT,
+                envOf(fc.source, frame, windowWidth, windowHeight, variables),
+                horizontal ? 50 : 20);
+        return;
+    }
+    // 未声明尺寸：有扩张权重的子项从 0 起参与分配（CSS flex-basis:auto 语义的近似）；
+    // 无权重时回退兼容缺省尺寸，保证纯 justify 布局仍有可见盒子
+    fc.mainSize = fc.grow > 0 ? 0 : (horizontal ? 50 : 20); }
 
     /** 合成替身元素：锁定主轴尺寸（数值直写布局表达式），其余原样。 */
     private static Element lockMain(Element src, boolean horizontal, double size) {
@@ -999,8 +967,18 @@ public final class LayoutEngine {
     private static double declaredCrossOf(Element src, boolean horizontal) {
         Layout l = src.layout();
         String expr = l == null ? null : (horizontal ? l.height() : l.width());
-        return expr == null ? Double.NaN : Double.parseDouble(expr.matches("\\\s*-?\\d+(\\.\\d+)?\\s*$")
-                ? expr.trim() : "NaN");
+        if (expr == null) {
+            return Double.NaN;
+        }
+        String value = expr.trim();
+        if (!value.matches("[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?")) {
+            return Double.NaN;
+        }
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException ignored) {
+            return Double.NaN;
+        }
     }
 
     private static Map<String, Object> offsetFrame(Map<String, Object> frame, boolean horizontal, double mainOffset) {
@@ -1056,7 +1034,69 @@ public final class LayoutEngine {
         return String.valueOf(Math.round(d * 100.0) / 100.0);
     }
 
-    private static Map<String, Object> envOf(Element element, Map<String, Object> frame,
+    /** Writable props plus this pass's live geometry, never a client-screen snapshot. */
+    private static final class ComponentContext implements com.opendreamcore.script.engine.DreamLangExecutor.MapLike {
+        private final Element element;
+        private final Map<String, Object> frame;
+
+        private ComponentContext(Element element, Map<String, Object> frame) {
+            this.element = element;
+            this.frame = frame;
+        }
+
+        @Override
+        public Object get(String key) {
+            if ("id".equals(key) || "name".equals(key)) return element.id();
+            if (frame != null && frame.containsKey(key)) return frame.get(key);
+            return element.props().get(key);
+        }
+
+        @Override
+        public void put(String key, Object value) {
+            element.props().put(key, value);
+            if (frame != null) frame.put(key, value);
+        }
+    }
+
+    /** Legacy expression-valued props may live inside text/image/slot specs. */
+    private void normalizeExpressionProps(Map<String, Object> props, Map<String, Object> env) {
+        for (Map.Entry<String, Object> entry : props.entrySet()) {
+            if ("bind".equals(entry.getKey()) || "style".equals(entry.getKey())) continue;
+            entry.setValue(expressionProp(entry.getValue(), env));
+        }
+    }
+
+    private Object expressionProp(Object value, Map<String, Object> env) {
+        if (value instanceof String text) {
+            // Plain content/resource names stay literal; legacy context marks an expression.
+            if (!text.contains("方法.") && !text.contains("局部变量")
+                    && !text.contains("当前组件") && !text.contains("odc_ui_")
+                    && !text.contains("odc_user_") && !text.contains("odc_dyn_")) {
+                int paren = text.indexOf('(');
+                if (paren < 1 || !com.opendreamcore.script.MethodRegistry.contains(text.substring(0, paren).trim())) return value;
+            }
+            try {
+                return DreamLang.evaluate(text, scopeOf(env));
+            } catch (RuntimeException ignored) {
+                return value;
+            }
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                copy.put(String.valueOf(entry.getKey()), expressionProp(entry.getValue(), env));
+            }
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            for (Object entry : list) copy.add(expressionProp(entry, env));
+            return copy;
+        }
+        return value;
+    }
+
+    private Map<String, Object> envOf(Element element, Map<String, Object> frame,
                                              double windowWidth, double windowHeight,
                                              Map<String, Object> variables) {
         Map<String, Object> env = new LinkedHashMap<>();
@@ -1073,6 +1113,8 @@ public final class LayoutEngine {
         if (variables != null) {
             env.putAll(variables);
         }
+        env.putAll(computedFrames);
+        env.put("_odc_current_component", new ComponentContext(element, null));
         return env;
     }
 
@@ -1100,7 +1142,7 @@ public final class LayoutEngine {
     }
 
     /** 表达式求值：裸数字直接解析，其他走 DreamLang。失败按默认值（布局表达式不该抛错拖垮整页）。 */
-    private static double eval(String expr, Map<String, Object> env, double fallback) {
+    private double eval(String expr, Map<String, Object> env, double fallback) {
         if (expr == null || J8.isBlank(expr)) {
             return fallback;
         }
@@ -1123,7 +1165,7 @@ public final class LayoutEngine {
      * 数值属性归一化：属性值若是字符串表达式（opacity: "vars.alpha"），求值后写回数字。
      * 已是数字（或 null/缺失）则不动。失败时写默认值（不拖垮整页）。
      */
-    private static void normalizeNumericProps(Map<String, Object> props, Map<String, Object> env,
+    private void normalizeNumericProps(Map<String, Object> props, Map<String, Object> env,
                                               String key, double fallback) {
         Object v = props == null ? null : props.get(key);
         if (v instanceof Number) {
@@ -1148,7 +1190,7 @@ public final class LayoutEngine {
         props.put(key, value);
     }
 
-    private static boolean evalBool(String expr, Map<String, Object> env, boolean fallback) {
+    private boolean evalBool(String expr, Map<String, Object> env, boolean fallback) {
         if (expr == null || J8.isBlank(expr)) {
             return fallback;
         }
@@ -1164,16 +1206,18 @@ public final class LayoutEngine {
     }
 
     /** window/parent/this 走局部变量，其余走 vars 命名空间（对应文档的 vars.xxx / 裸变量引用）。 */
-    private static Scope scopeOf(Map<String, Object> env) {
+    private Scope scopeOf(Map<String, Object> env) {
         Scope scope = new Scope();
         for (Map.Entry<String, Object> e : env.entrySet()) {
             String key = e.getKey();
+            if ("_odc_current_component".equals(key)) continue;
             if ("window".equals(key) || "parent".equals(key) || "this".equals(key)) {
                 scope.assign(key, e.getValue());
             } else {
                 scope.assignVar(key, e.getValue());
             }
         }
+        PageFunctions.bind(page, scope, env.get("_odc_current_component"));
         return scope;
     }
 }

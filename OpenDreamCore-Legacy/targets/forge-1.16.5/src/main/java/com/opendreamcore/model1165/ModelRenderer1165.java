@@ -2,7 +2,6 @@ package com.opendreamcore.model1165;
 
 import com.mojang.blaze3d.matrix.MatrixStack;
 import com.mojang.blaze3d.vertex.IVertexBuilder;
-import net.minecraft.util.math.vector.Vector3f;
 import com.opendreamcore.client.model.LegacyModelRuleStore;
 import com.opendreamcore.model.bake.BakedModel;
 import com.opendreamcore.model.bake.ModelAssetStore;
@@ -29,9 +28,6 @@ import java.util.Map;
  */
 public final class ModelRenderer1165 {
 
-    /** 朝向基准：与原版 setupRotations 一致的 180-yaw（bbmodel 正面朝 -Z 时的经验值，实机可调）。 */
-    public static float bodyYawOffset = 180.0F;
-
     private ModelRenderer1165() {
     }
 
@@ -48,16 +44,23 @@ public final class ModelRenderer1165 {
                     DynamicTexture tex = new DynamicTexture(img);
                     TextureManager tm = Minecraft.getInstance().getTextureManager();
                     ResourceLocation rl = tm.register("opendreamcore_model_" + safe(label), tex);
-                    RLS.put(label, rl);
+                    ResourceLocation old = RLS.put(label, rl);
+                    if (old != null && !old.equals(rl)) {
+                        tm.release(old);
+                    }
                 } catch (Exception e) {
                     ModelLog.warn("贴图注册失败 " + label + ": " + e);
                 }
             }
         });
-        ModelAssetStore.get().load(gameDir.resolve("OpenDreamCore").resolve("assets").resolve("model"));
-        LegacyModelRuleStore.get().applyLocalFile(
-                gameDir.resolve("OpenDreamCore").resolve("visual").resolve("Model.yml"));
-        ModelLog.info("1.16.5 模型 glue 就绪");
+        java.nio.file.Path config = gameDir.resolve("OpenDreamCore");
+        ModelAssetStore.get().load(config.resolve("assets").resolve("model"));
+        LegacyModelRuleStore.get().applyLocalFile(config.resolve("visual").resolve("Model.yml"));
+        java.nio.file.Path itemFile = config.resolve("ItemModel.yml");
+        if (!java.nio.file.Files.isRegularFile(itemFile)) {
+            itemFile = config.resolve("visual").resolve("ItemModel.yml");
+        }
+        LegacyModelRuleStore.get().applyLocalItemFile(itemFile);
     }
 
     /** 服务端规则入库（MessageDispatcher visual_rules 调）。 */
@@ -65,57 +68,122 @@ public final class ModelRenderer1165 {
         LegacyModelRuleStore.get().applyBundle(bundle);
     }
 
-    /** 实体替换入口：命中返回 true（调用方取消原版绘制）。 */
-    public static boolean tryRender(Entity entity, float entityYaw, float partialTicks,
-                                    MatrixStack stack,
-                                    net.minecraft.client.renderer.IRenderTypeBuffer buffer,
-                                    int packedLight) {
+    /** Render replacement body only; caller owns world transform and all later layers. */
+    public static boolean renderBody(Entity entity, float partialTicks,
+                                     MatrixStack stack,
+                                     net.minecraft.client.renderer.IRenderTypeBuffer buffer,
+                                     int packedLight) {
         LegacyModelRuleStore.Hit hit = LegacyModelRuleStore.get().hit(lookup(entity));
-        if (hit == null) {
+        if (hit == null || !bodyTexturesReady(hit)) {
             return false;
         }
-        float s = hit.scale;
-        if (s != 1.0F) {
-            stack.scale(s, s, s);
+        if (hit.scale != 1.0F) {
+            stack.pushPose();
+            stack.scale(hit.scale, hit.scale, hit.scale);
         }
-        stack.mulPose(Vector3f.YP.rotationDegrees(bodyYawOffset - entityYaw));
+        try {
+            if (hit.rig != null) {
+                renderRigBody(entity, partialTicks, hit, stack, buffer, packedLight);
+            } else {
+                renderStaticBody(hit, stack, buffer, packedLight);
+            }
+        } finally {
+            if (hit.scale != 1.0F) {
+                stack.popPose();
+            }
+        }
+        return true;
+    }
+
+    private static void renderStaticBody(LegacyModelRuleStore.Hit hit, MatrixStack stack,
+                                         net.minecraft.client.renderer.IRenderTypeBuffer buffer,
+                                         int packedLight) {
         net.minecraft.util.math.vector.Matrix4f mat = stack.last().pose();
         net.minecraft.util.math.vector.Matrix3f nrm = stack.last().normal();
-
         for (BakedModel bm : hit.baked) {
-            ResourceLocation rl = hit.textureOverride != null ? RLS.get(hit.textureOverride) : RLS.get(bm.texture);
+            ResourceLocation rl = RLS.get(hit.textureOverride != null ? hit.textureOverride : bm.texture);
             if (rl == null) {
-                continue; // 缺贴图整条跳过（缺省即安全）
+                continue;
             }
             IVertexBuilder b = buffer.getBuffer(RenderType.entityCutout(rl));
-            float[] q = bm.quads;
-            for (int off = 0; off + 31 < q.length; off += 32) {
-                for (int v = 0; v < 4; v++) {
-                    int o = off + v * 8;
-                    b.vertex(mat, q[o], q[o + 1], q[o + 2]);
-                    b.color(255, 255, 255, 255);
-                    b.uv(q[o + 3], q[o + 4]);
-                    b.overlayCoords(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
-                    b.uv2(packedLight);
-                    b.normal(nrm, q[o + 5], q[o + 6], q[o + 7]);
-                    b.endVertex();
+            emit(b, mat, nrm, bm.quads, 4, packedLight);
+            emit(b, mat, nrm, bm.tris, 3, packedLight);
+        }
+    }
+
+    private static void emit(IVertexBuilder b, net.minecraft.util.math.vector.Matrix4f mat,
+                             net.minecraft.util.math.vector.Matrix3f nrm, float[] data,
+                             int sourceCount, int packedLight) {
+        for (int off = 0; off + sourceCount * 8 <= data.length; off += sourceCount * 8) {
+            for (int v = 0; v < 4; v++) {
+                int o = off + (v == 3 && sourceCount == 3 ? 2 : v) * 8;
+                b.vertex(mat, data[o], data[o + 1], data[o + 2]);
+                b.color(255, 255, 255, 255);
+                b.uv(data[o + 3], data[o + 4]);
+                b.overlayCoords(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
+                b.uv2(packedLight);
+                b.normal(nrm, data[o + 5], data[o + 6], data[o + 7]);
+                b.endVertex();
+            }
+        }
+    }
+
+    private static void renderRigBody(Entity entity, float partialTicks,
+                                       LegacyModelRuleStore.Hit hit, MatrixStack stack,
+                                       net.minecraft.client.renderer.IRenderTypeBuffer buffer,
+                                       int packedLight) {
+        net.minecraft.util.math.vector.Matrix4f mat = stack.last().pose();
+        net.minecraft.util.math.vector.Matrix3f nrm = stack.last().normal();
+        boolean moving = entity.getDeltaMovement().x * entity.getDeltaMovement().x
+                + entity.getDeltaMovement().z * entity.getDeltaMovement().z > 1.0e-6;
+        boolean hurting = entity instanceof net.minecraft.entity.LivingEntity
+                && ((net.minecraft.entity.LivingEntity) entity).hurtTime > 0;
+        com.opendreamcore.client.model.LegacyRigRenderer.render(
+                entity.getUUID(), hit.rig, hit.ruleAnims(),
+                hurting ? "hurt" : (moving ? "walk" : "idle"), moving, hurting,
+                entity.tickCount + partialTicks,
+                texture -> {
+                    ResourceLocation rl = RLS.get(hit.textureOverride != null ? hit.textureOverride : texture);
+                    if (rl == null) {
+                        return null;
+                    }
+                    IVertexBuilder b = buffer.getBuffer(RenderType.entityCutout(rl));
+                    return (x, y, z, u, v, nx, ny, nz) -> {
+                        b.vertex(mat, x, y, z).color(255, 255, 255, 255).uv(u, v)
+                                .overlayCoords(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY)
+                                .uv2(packedLight).normal(nrm, nx, ny, nz).endVertex();
+                    };
+                });
+    }
+
+    public static ResourceLocation texture(String label) {
+        return label == null ? null : RLS.get(label);
+    }
+
+    public static boolean texturesReady(LegacyModelRuleStore.Hit hit) {
+        if (hit.textureOverride != null) {
+            return RLS.get(hit.textureOverride) != null;
+        }
+        if (hit.rig != null) {
+            for (com.opendreamcore.model.bake.BakedRig.Bone bone : hit.rig.bones) {
+                for (com.opendreamcore.model.bake.BakedRig.Part part : bone.parts) {
+                    if (RLS.get(part.texture) == null) {
+                        return false;
+                    }
                 }
             }
-            float[] t = bm.tris;
-            for (int off = 0; off + 23 < t.length; off += 24) {
-                for (int v = 0; v < 3; v++) {
-                    int o = off + v * 8;
-                    b.vertex(mat, t[o], t[o + 1], t[o + 2]);
-                    b.color(255, 255, 255, 255);
-                    b.uv(t[o + 3], t[o + 4]);
-                    b.overlayCoords(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
-                    b.uv2(packedLight);
-                    b.normal(nrm, t[o + 5], t[o + 6], t[o + 7]);
-                    b.endVertex();
+        } else {
+            for (BakedModel bm : hit.baked) {
+                if (RLS.get(bm.texture) == null) {
+                    return false;
                 }
             }
         }
         return true;
+    }
+
+    private static boolean bodyTexturesReady(LegacyModelRuleStore.Hit hit) {
+        return texturesReady(hit);
     }
 
     /** 实体侧匹配条件：type=注册名，name=自定义名。 */

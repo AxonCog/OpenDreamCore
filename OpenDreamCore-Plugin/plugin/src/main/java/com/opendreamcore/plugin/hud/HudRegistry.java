@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * HUD 三型注册表（P3-15）：
+ * HUD 三种注册模式：
  * 个人 HUD：显式挂载给指定玩家，进服自动重挂
  * GHUD（全局常驻）：全体广播 + 新进服玩家自动挂载
  * HUDStatic（静态广播）：同 GHUD，内容为纯公告（页面不用变量/占位符）

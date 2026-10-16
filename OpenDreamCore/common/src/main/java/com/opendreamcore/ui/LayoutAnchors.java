@@ -7,10 +7,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 布局锚点注册表（锚点热拔插的排插）。
+ * 布局锚点注册表。
  *
  * 内置九宫格 9 个；附属 register 自定义锚点，页面 anchor:名字 直接用。
- * 查不到的名字 = 无锚点（元素按普通相对坐标摆），不拦布局——写错就变普通摆，安全。
+ * 查不到的名字 = 无锚点（元素按普通相对坐标摆放），不拦布局——写错退化为普通相对坐标，安全。
  */
 public final class LayoutAnchors {
 

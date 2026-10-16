@@ -1,5 +1,6 @@
 package com.opendreamcore.mixin;
 
+import com.opendreamcore.client.model.GenItemModelRenderer;
 import com.opendreamcore.client.resources.LooseResourceLoader;
 import com.opendreamcore.client.visual.VisualItemSkins;
 import net.minecraft.client.gui.GuiGraphics;
@@ -25,25 +26,29 @@ public abstract class MixinItemIcon {
             return;
         }
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        String tex = VisualItemSkins.textureFor(id, stack.getHoverName().getString());
-        if (tex == null) {
+        VisualItemSkins.Selection selected = VisualItemSkins.select(id, stack);
+        if (selected == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) ci.cancel();
             return;
         }
-        var si = LooseResourceLoader.sheetOf(tex);
+        var si = LooseResourceLoader.sheetOf(selected.texture());
         if (si == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) ci.cancel();
             return;
         }
-        float u0 = 0.0F;
-        float u1 = 1.0F;
-        if (si.frames() > 1) {
-            float step = 1.0F / si.frames();
-            u0 = si.frame() * step;
-            u1 = u0 + step;
-        }
+        int size = VisualItemSkins.guiSize(selected);
+        int dx = x + (16 - size) / 2;
+        int dy = y + (16 - size) / 2;
+        int frame = VisualItemSkins.frame(selected, si);
+        float step = 1.0F / si.frames();
+        float u0 = frame * step;
+        float u1 = u0 + step;
         GuiGraphics g = (GuiGraphics) (Object) this;
-        // 整图直出：uv 全幅；gif 切当前帧区间
-        g.blit(si.rl(), x, y, 16, 16, u0, 0.0F, u1, 1.0F);
-        ci.cancel();
+        try {
+            g.blit(si.rl(), dx, dy, size, size, u0, 0.0F, u1, 1.0F);
+            ci.cancel();
+        } catch (Throwable ignored) {
+        }
     }
     // 物品展示框/实体手持经 LivingEntity 重载：一并拦截，否则展示框图标绕过替换。
     // 容器槽位三参重载（seed）：TrMenu 等菜单的图标从这条路出（1.21.1 实机实证）。

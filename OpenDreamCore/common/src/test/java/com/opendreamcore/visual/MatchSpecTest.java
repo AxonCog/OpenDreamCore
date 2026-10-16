@@ -48,6 +48,23 @@ class MatchSpecTest {
     }
 
     @Test
+    void namespacedMinecraftIdsMatchWithoutDroppingForeignNamespace() {
+        MatchSpec minecraft = MatchSpec.parse(Map.of("id", "minecraft:diamond_sword"));
+        assertTrue(minecraft.matches(item("minecraft:diamond_sword", "x")));
+        assertTrue(minecraft.matches(item("diamond_sword", "x")));
+        assertFalse(minecraft.matches(item("other:diamond_sword", "x")));
+    }
+
+    @Test
+    void nestedNbtValuesAreComparedStructurally() {
+        MatchSpec spec = MatchSpec.parse(Map.of("nbt", Map.of("display", Map.of("Custom", 7))));
+        assertTrue(spec.matches(new ItemView("stone", "x", List.of(),
+                Map.of("display", Map.of("Custom", 7)))));
+        assertFalse(spec.matches(new ItemView("stone", "x", List.of(),
+                Map.of("display", Map.of("Custom", 8)))));
+    }
+
+    @Test
     void regexAppliesToDisplayName() {
         MatchSpec spec = MatchSpec.parse(Map.of("regex", "^神剑.*"));
         assertTrue(spec.matches(item("sword", "神剑·烈焰版")));

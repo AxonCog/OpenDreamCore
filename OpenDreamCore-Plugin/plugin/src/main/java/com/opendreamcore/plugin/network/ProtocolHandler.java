@@ -34,6 +34,8 @@ public final class ProtocolHandler {
     /** 会话归属（sessionId → 玩家；多面板同屏：一个玩家可持多个世界面板会话）。 */
     private final Map<String, Player> sessionOwners = new ConcurrentHashMap<>();
 
+    /** Session maps share one lifecycle lock so disconnect cannot leave owner/player half-mappings. */
+    private final Object sessionLock = new Object();
     // 性能统计（/odc stats）
     private final java.util.concurrent.atomic.AtomicLong eventsProcessed = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong scriptsRun = new java.util.concurrent.atomic.AtomicLong();
@@ -47,18 +49,52 @@ public final class ProtocolHandler {
     /** 服务端分配会话并记录（openPage 时调用）。 */
     public String openSession(Player player, String pageId) {
         String sessionId = UUID.randomUUID().toString().substring(0, 8);
-        sessions.put(sessionId, new Session(pageId, System.currentTimeMillis()));
-        playerSessions.put(player, sessionId);
-        sessionOwners.put(sessionId, player);
+        synchronized (sessionLock) {
+            sessions.put(sessionId, new Session(pageId, System.currentTimeMillis()));
+            playerSessions.put(player, sessionId);
+            sessionOwners.put(sessionId, player);
+        }
         plugin.getLogger().info("会话开启 " + player.getName() + " -> " + pageId + " (" + sessionId + ")");
         return sessionId;
     }
 
     public void closeSession(String sessionId) {
-        sessions.remove(sessionId);
-        sessionOwners.remove(sessionId);
-        eventSequence.remove(sessionId);
-        playerSessions.entrySet().removeIf(e -> e.getValue().equals(sessionId));
+        synchronized (sessionLock) {
+            sessions.remove(sessionId);
+            sessionOwners.remove(sessionId);
+            eventSequence.remove(sessionId);
+            playerSessions.entrySet().removeIf(e -> sessionId.equals(e.getValue()));
+        }
+    }
+
+    /**
+     * Disconnect cleanup. Returns every closed session so the listener can remove
+     * matching container bindings without relying on a client page_close.
+     */
+    java.util.Set<String> removeSessions(Player player) {
+        java.util.Set<String> closed = new java.util.HashSet<>();
+        if (player == null) {
+            return closed;
+        }
+        UUID uuid = player.getUniqueId();
+        synchronized (sessionLock) {
+            for (Map.Entry<String, Player> entry : sessionOwners.entrySet()) {
+                Player owner = entry.getValue();
+                if (owner != null && uuid.equals(owner.getUniqueId())) {
+                    closed.add(entry.getKey());
+                }
+            }
+            for (String sessionId : closed) {
+                sessions.remove(sessionId);
+                sessionOwners.remove(sessionId);
+                eventSequence.remove(sessionId);
+            }
+            playerSessions.entrySet().removeIf(entry -> {
+                Player mapped = entry.getKey();
+                return mapped != null && uuid.equals(mapped.getUniqueId());
+            });
+        }
+        return closed;
     }
 
     /** 玩家当前会话 id（无则 null）。 */
@@ -83,8 +119,10 @@ public final class ProtocolHandler {
     /** 分配 HUD 会话（不占用屏幕会话；HUD 事件路由用）。 */
     public String openHudSession(Player player, String pageId) {
         String sessionId = UUID.randomUUID().toString().substring(0, 8);
-        sessions.put(sessionId, new Session(pageId, System.currentTimeMillis()));
-        sessionOwners.put(sessionId, player);
+        synchronized (sessionLock) {
+            sessions.put(sessionId, new Session(pageId, System.currentTimeMillis()));
+            sessionOwners.put(sessionId, player);
+        }
         return sessionId;
     }
 
@@ -93,28 +131,81 @@ public final class ProtocolHandler {
         return sessions.get(sessionId);
     }
 
+    /** 客户端会话入口统一校验归属；重连后 Player 对象可变，但 UUID 不变。 */
+    Session ownedSession(Player player, String sessionId, String messageType) {
+        if (player == null || sessionId == null || sessionId.isEmpty()) {
+            return null;
+        }
+        Session session = sessions.get(sessionId);
+        if (session == null) {
+            return null;
+        }
+        Player owner = sessionOwners.get(sessionId);
+        if (owner == null || (owner != player && !owner.getUniqueId().equals(player.getUniqueId()))) {
+            plugin.getLogger().warning("拒绝 " + messageType + "：发包玩家不是会话所有者 ("
+                    + player.getName() + ")");
+            return null;
+        }
+        return session;
+    }
+
     /** 客户端 UI 事件（C→S）：主线程调度后裁决。 */
     public void onUiEvent(Player player, byte[] bytes) {
+        String globalCombo = globalKeyConfigCombo(bytes);
+        if (globalCombo != null) {
+            // Keep the executor on Bukkit's main thread, but deliberately skip page/session validation.
+            plugin.getServer().getScheduler().runTask(plugin,
+                    () -> plugin.visualRules().keyExecutor().feed(player, globalCombo));
+            return;
+        }
         plugin.getServer().getScheduler().runTask(plugin, () -> handle(player, bytes));
+    }
+
+    /**
+     * The fixed keyconfig packet is a KEY skeleton with session id "keyconfig"
+     * and an empty element id. It is intentionally parsed here because older
+     * common protocol versions reject an empty element id in UiEvent.decode().
+     */
+    private static String globalKeyConfigCombo(byte[] bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        try {
+            com.opendreamcore.protocol.OdcByteArrayBuf buf =
+                    new com.opendreamcore.protocol.OdcByteArrayBuf(bytes);
+            String sessionId = buf.readString();
+            String elementId = buf.readString();
+            if (!"keyconfig".equals(sessionId) || !(elementId.isEmpty() || "keyconfig".equals(elementId))
+                    || buf.readByte() != UiEvent.Trigger.KEY.id()) {
+                return null;
+            }
+            buf.readLong();
+            int dataLength = buf.readVarInt();
+            if (dataLength <= 0 || buf.readableBytes() <= 0) {
+                return null;
+            }
+            String data = buf.readString();
+            return data != null && data.startsWith("keyconfig:")
+                    ? data.substring("keyconfig:".length()) : null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private void handle(Player player, byte[] bytes) {
         try {
             UiEvent event = UiEvent.decode(new com.opendreamcore.protocol.OdcByteArrayBuf(bytes));
             eventsProcessed.incrementAndGet();
+            Session session = ownedSession(player, event.sessionId(), "ui_event");
+            if (session == null) {
+                return;
+            }
             Long last = eventSequence.get(event.sessionId());
             if (last != null && event.sequence() <= last) {
-                plugin.getLogger().warning("重复/乱序 ui_event: " + player.getName() + " seq=" + event.sequence() + " 会话=" + event.sessionId());
+                // 重复/乱序多为页面关闭后的重发，静默丢（同上：打 WARN 必刷屏）
                 return;
             }
             eventSequence.put(event.sessionId(), event.sequence());
-
-            Session session = sessions.get(event.sessionId());
-            if (session == null) {
-                plugin.getLogger().warning("未知会话 ui_event: " + player.getName() + " " + event.sessionId()
-                        + "（当前会话数=" + sessions.size() + "，触发=" + event.trigger() + "，元素=" + event.elementId() + "）");
-                return;
-            }
             Page page = pages.get(session.pageId());
             if (page == null) {
                 plugin.getLogger().warning("会话指向的页面不存在: " + session.pageId());
@@ -154,26 +245,41 @@ public final class ProtocolHandler {
             // 世界面板拖拽落点：INPUT "drag:x,y,z" → 更新共享页面 hologram 坐标 → 同页玩家重发（多玩家同步）
             if (event.trigger() == UiEvent.Trigger.INPUT && event.data() != null
                     && event.data().startsWith("drag:")) {
-                syncWorldDrag(session.pageId(), element, event.data().substring(5));
+                if (!syncWorldDrag(player, page, element, event.data().substring(5))) {
+                    // 拖拽是写盘与广播操作，未通过服务端权威校验时不得继续触发脚本或事件。
+                    return;
+                }
             }
-            // 容器槽位物品交互：chest_slot / hot_slot 点击 "slot:action"（L 拿起/放置、R 半组/放一、Q 快捷移动）
-            // container 组件自动生成的槽位（grid_13）也走此管线；服务端权威执行，执行后重同步槽位 + 光标
+            // 容器槽位事件必须同时满足真实会话绑定、identifier 后缀与 payload 槽位一致；
+            // 否则不能让伪造的 data 进入脚本或库存操作。
             if (event.trigger() == UiEvent.Trigger.CLICK && element != null
                     && ("chest_slot".equals(element.type()) || "hot_slot".equals(element.type())
                             || ("container".equals(element.type()) && generatedSlot >= 0))
                     && event.data() != null) {
                 com.opendreamcore.plugin.container.ContainerRegistry.Binding binding =
                         plugin.containerRegistry().get(event.sessionId());
-                if (binding == null) {
-                    plugin.getLogger().warning("容器槽位点击但会话未绑定真实容器（需打开真实箱子触发替换）: "
+                if (binding == null || binding.player() == null
+                        || !binding.player().getUniqueId().equals(player.getUniqueId())
+                        || !session.pageId().equals(binding.pageId())) {
+                    plugin.getLogger().warning("容器槽位点击的会话/容器绑定不属于发包玩家，拒绝: "
                             + player.getName() + " 会话=" + event.sessionId());
-                } else if (slotConfigDenies(player, element, event.data(), binding)) {
-                    // SlotConfig 规则否决（服务端权威裁决）：不执行、不重同步，
-                    // 规则配了 fail_message 就提示，没配就静默——别让客户端绕过限制
-                } else if (handleSlotClick(player, binding, element, event.data(), generatedSlot, generatedHot)) {
-                    plugin.networkLayer().sendContainerSync(binding.player(),
-                            plugin.containerRegistry().snapshot(binding));
+                    return;
                 }
+                if (generatedSlot >= 0 && payloadSlot(event.data()) != generatedSlot) {
+                    plugin.getLogger().warning("容器槽位标识与 payload 不一致，拒绝: "
+                            + event.elementId() + " / " + event.data());
+                    return;
+                }
+                if (slotConfigDenies(player, element, event.data(), binding)) {
+                    // SlotConfig 规则否决（服务端权威裁决）：不执行、不重同步，也不执行脚本。
+                    return;
+                }
+                if (!handleSlotClick(player, binding, element, event.data(), generatedSlot, generatedHot)) {
+                    // 非法槽位/动作明确拒绝，避免借槽位事件触发任意页面脚本。
+                    return;
+                }
+                plugin.networkLayer().sendContainerSync(binding.player(),
+                        plugin.containerRegistry().snapshot(binding));
             }
             // Bukkit 事件广播（第三方插件监听）；Button 可取消（取消后不执行 actions 脚本）
             if (!fireEvent(player, page, event.sessionId(), event, element)) {
@@ -204,6 +310,20 @@ public final class ProtocolHandler {
                 + (runs > 0 ? "（平均 " + String.format("%.2f", ms / (double) runs) + " ms）" : "");
     }
 
+    /** 读取槽位事件 payload 的槽位部分；缺失、负数或附加字段异常均拒绝。 */
+    private static int payloadSlot(String data) {
+        if (data == null) return -1;
+        int colon = data.indexOf(':');
+        String raw = (colon < 0 ? data : data.substring(0, colon)).trim();
+        if (!raw.matches("(?:0|[1-9][0-9]*)")) return -1;
+        try {
+            long value = Long.parseLong(raw);
+            return value <= Integer.MAX_VALUE ? (int) value : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
     /**
      * SlotConfig 服务端裁决：
      * chest_slot 元素用 slot_name 引用槽位规则，点击时在这里做权威校验。
@@ -216,7 +336,7 @@ public final class ProtocolHandler {
         try {
             var guard = plugin.visualRules().slotGuard();
             if (guard == null || guard.size() == 0) {
-                return false; // 没配任何 SlotConfig 规则，零开销放行
+                return false; // 未配置 SlotConfig 规则时不进行额外检查
             }
             // 解析动作字符：data = "slot:action"（旧纯数字 = L 拿起/放置）
             String[] parts = data.split(":");
@@ -252,9 +372,9 @@ public final class ProtocolHandler {
             }
             return true;
         } catch (Exception e) {
-            // 裁决器自身异常不能挡住正常槽位交互——放行并记一条日志
-            plugin.getLogger().warning("SlotConfig 裁决异常（已放行）: " + e);
-            return false;
+            // 权限裁决器异常时拒绝本次交互，不能以异常绕过 SlotConfig。
+            plugin.getLogger().warning("SlotConfig 裁决异常（已拒绝）: " + e);
+            return true;
         }
     }
 
@@ -607,34 +727,57 @@ public final class ProtocolHandler {
     }
 
     /** 世界面板拖拽落点同步：坐标写回共享页面元素 hologram（持久化）→ 打开同页面的玩家重发（位置一致）。 */
-    private void syncWorldDrag(String pageId, Element element, String data) {
-        String[] parts = data.split(",");
-        if (parts.length < 3) {
-            return;
+    private boolean syncWorldDrag(Player player, Page page, Element element, String data) {
+        if (player == null || page == null || element == null
+                || page.displayMode() != com.opendreamcore.page.DisplayMode.WORLD
+                || plugin.editors() == null || !plugin.editors().hasLease(player, page.id())) {
+            return false;
         }
+        Object raw = element.props().get("hologram");
+        if (!(raw instanceof java.util.Map<?, ?> source) || source.isEmpty()
+                || Boolean.parseBoolean(String.valueOf(source.get("locked")))) {
+            return false;
+        }
+        boolean draggable = Boolean.parseBoolean(String.valueOf(source.get("draggable")));
+        Object worldRaw = page.options().get("world");
+        boolean pageDraggable = worldRaw instanceof java.util.Map<?, ?> world
+                && Boolean.parseBoolean(String.valueOf(world.get("drag")));
+        if (!draggable && !pageDraggable) {
+            return false;
+        }
+        String[] parts = data == null ? new String[0] : data.split(",", -1);
+        if (parts.length != 3) {
+            return false;
+        }
+        double x;
+        double y;
+        double z;
         try {
-            double x = Double.parseDouble(parts[0].trim());
-            double y = Double.parseDouble(parts[1].trim());
-            double z = Double.parseDouble(parts[2].trim());
-            Object raw = element.props().get("hologram");
-            java.util.Map<Object, Object> holo = new java.util.LinkedHashMap<>(
-                    raw instanceof java.util.Map<?, ?> m ? (java.util.Map<?, ?>) m : java.util.Collections.emptyMap());
-            holo.put("x", x);
-            holo.put("y", y);
-            holo.put("z", z);
-            element.props().put("hologram", holo);
-            // 持久化：world_positions.json（重启后拖拽结果仍在）
-            plugin.pageManager().saveWorldPosition(pageId, element.id(), x, y, z);
+            x = Double.parseDouble(parts[0].trim());
+            y = Double.parseDouble(parts[1].trim());
+            z = Double.parseDouble(parts[2].trim());
         } catch (NumberFormatException e) {
-            return;
+            return false;
         }
+        if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
+                || Math.abs(x) > 30000000D || Math.abs(y) > 30000000D || Math.abs(z) > 30000000D) {
+            return false;
+        }
+        java.util.Map<Object, Object> holo = new java.util.LinkedHashMap<>(source);
+        holo.put("x", x);
+        holo.put("y", y);
+        holo.put("z", z);
+        element.props().put("hologram", holo);
+        // 持久化：world_positions.json（重启后拖拽结果仍在）
+        plugin.pageManager().saveWorldPosition(page.id(), element.id(), x, y, z);
         for (java.util.Map.Entry<Player, String> e : playerSessions.entrySet()) {
             Session s = sessions.get(e.getValue());
-            if (s != null && pageId.equals(s.pageId()) && e.getKey().isOnline()) {
-                plugin.openPage(e.getKey(), pageId);
+            if (s != null && page.id().equals(s.pageId()) && e.getKey().isOnline()) {
+                plugin.openPage(e.getKey(), page.id());
             }
         }
-        plugin.getLogger().info("世界面板拖拽同步 " + pageId + " -> " + data);
+        plugin.getLogger().info("世界面板拖拽同步 " + page.id() + " -> " + data);
+        return true;
     }
 
     /** 递归找元素（按 id）。 */

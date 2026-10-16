@@ -44,7 +44,7 @@ public final class Element {
         this.visibleWhen = visibleWhen;
         this.enabledWhen = enabledWhen;
         this.actions = actions == null ? new LinkedHashMap<>() : actions;
-        this.children = children == null ? new ArrayList<>() : J8.listCopy(children);
+        this.children = children == null ? new ArrayList<>() : new ArrayList<>(children);
         this.parent = parent;
     }
 

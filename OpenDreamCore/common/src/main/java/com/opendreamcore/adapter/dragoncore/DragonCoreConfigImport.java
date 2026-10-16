@@ -8,9 +8,9 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * 龙核 config.yml 适配（住在 dragoncore 文件夹里的财产交接员）。
+ * 龙核 config.yml 适配。
  *
- * 老服主在龙核 config.yml 里配过的三样东西，跟他搬家的时候得带走：
+ * 服主在龙核 config.yml 里配过、迁移到 ODC 时需要保留的三项：
  *   - Password：资源缓存的加密密码；
  *   - ResourcePack：他在哪放资源的（默认 plugins/DragonCoreResource）；
  *   - syncResource：资源同步开没开。

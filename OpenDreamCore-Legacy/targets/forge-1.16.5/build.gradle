@@ -1,5 +1,7 @@
 buildscript {
     repositories {
+        maven { url = 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url = 'https://maven.aliyun.com/repository/public' }
         maven { url = 'https://maven.minecraftforge.net' }
         mavenCentral()
         gradlePluginPortal()
@@ -11,7 +13,7 @@ buildscript {
 apply plugin: 'net.minecraftforge.gradle'
 apply plugin: 'java'
 
-version = '0.2.0'
+version = hasProperty('mod_version') ? mod_version : '0.2.1'
 group = 'com.opendreamcore'
 archivesBaseName = 'OpenDreamCore-Legacy-forge-1.16.5'
 
@@ -36,6 +38,7 @@ dependencies {
     compileOnly 'org.spongepowered:mixin:0.8.5'
     implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'org.antlr:antlr4-runtime:4.13.1'
+    implementation 'org.tukaani:xz:1.9'
     // 共享树吃 common-j8 成品 jar，本 target 自己的编译链用不着 Jabel 了
     implementation fileTree(dir: '../../common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
 }
@@ -65,7 +68,7 @@ jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from {
         configurations.runtimeClasspath
-                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('common-j8') }
+                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('xz') || it.name.contains('common-j8') }
                 .collect { it.isDirectory() ? it : zipTree(it) }
     }
     // module-info 会摇 fml 的 asm 报 jar 损坏，随依赖揸进来的也要剔

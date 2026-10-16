@@ -21,8 +21,8 @@ public final class CoreVarLegacy {
         LegacyMethods.register("has_variable", a -> v("是否有变量", arg(a, 0)));
         LegacyMethods.register("has_delayed_variable", a -> false);
         LegacyMethods.register("clear_variable", a -> v("设置变量", arg(a, 0), null));
-        LegacyMethods.register("clear_variables", a -> null);
-        LegacyMethods.register("clear_variable_all", a -> null);
+        LegacyMethods.register("clear_variables", a -> v("清空"));
+        LegacyMethods.register("clear_variable_all", a -> v("清空"));
         LegacyMethods.register("delete_variable", a -> v("设置变量", arg(a, 0), null));
         LegacyMethods.register("increment_variable", a -> {
             String name = s(a, 0);

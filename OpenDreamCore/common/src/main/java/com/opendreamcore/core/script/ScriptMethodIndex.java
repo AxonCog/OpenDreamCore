@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  *
  * <p>索引里的 METHOD 条目在启动时被装进来：**三语名（中文 / 英文 / 下划线）指向同一个实现**，
  * 因此 {@code 相机.播放(...)}、{@code Camera.play(...)}、{@code camera.play(...)} 是同一件事
- * —— 这是「名字不再手写三遍」的落地点。
+ * —— 名字不再手写三遍的落地点。
  *
  * <p>每条方法的实现句柄在 bootstrap 时解析一次（零反射热路径）。
  */

@@ -25,17 +25,7 @@ public final class QuadBaker {
         java.util.LinkedHashMap<String, Buf> byTex = new java.util.LinkedHashMap<String, Buf>();
         for (ModelIR.BoneIR bone : flat) {
             for (ModelIR.Mesh mesh : bone.meshes) {
-                String tex = textureLabel(model, mesh);
-                Buf buf = byTex.get(tex);
-                if (buf == null) {
-                    buf = new Buf();
-                    byTex.put(tex, buf);
-                }
-                if (mesh instanceof ModelIR.BoxMesh) {
-                    bakeBox((ModelIR.BoxMesh) mesh, buf);
-                } else if (mesh instanceof ModelIR.TriMesh) {
-                    bakeTri((ModelIR.TriMesh) mesh, buf);
-                }
+                bakeMesh(model, mesh, byTex);
             }
         }
         for (java.util.Map.Entry<String, Buf> e : byTex.entrySet()) {
@@ -45,17 +35,33 @@ public final class QuadBaker {
         return out;
     }
 
-    private static String textureLabel(ModelIR model, ModelIR.Mesh mesh) {
-        int idx;
+    static void bakeMesh(ModelIR model, ModelIR.Mesh mesh, java.util.Map<String, Buf> byTex) {
         if (mesh instanceof ModelIR.BoxMesh) {
-            idx = ((ModelIR.BoxMesh) mesh).material;
+            ModelIR.BoxMesh box = (ModelIR.BoxMesh) mesh;
+            for (int face = 0; face < 6; face++) {
+                int material = boxFaceMaterial(box, face);
+                if (material >= 0) {
+                    bakeBoxFace(box, face, buffer(byTex, textureLabel(model, material)));
+                }
+            }
         } else if (mesh instanceof ModelIR.TriMesh) {
-            idx = ((ModelIR.TriMesh) mesh).material;
-        } else {
-            idx = -1;
+            ModelIR.TriMesh tri = (ModelIR.TriMesh) mesh;
+            bakeTri(tri, buffer(byTex, textureLabel(model, tri.material)));
         }
-        if (idx >= 0 && idx < model.materials.size()) {
-            String t = model.materials.get(idx).texture;
+    }
+
+    private static Buf buffer(java.util.Map<String, Buf> byTex, String texture) {
+        Buf buf = byTex.get(texture);
+        if (buf == null) {
+            buf = new Buf();
+            byTex.put(texture, buf);
+        }
+        return buf;
+    }
+
+    private static String textureLabel(ModelIR model, int material) {
+        if (material >= 0 && material < model.materials.size()) {
+            String t = model.materials.get(material).texture;
             if (t != null) {
                 return t;
             }
@@ -63,22 +69,36 @@ public final class QuadBaker {
         return "none";
     }
 
+    private static int boxFaceMaterial(ModelIR.BoxMesh box, int face) {
+        return box.faceMaterials == null || box.faceMaterials.length <= face
+                ? box.material : box.faceMaterials[face];
+    }
+
     // ---------------------------------------------------------------- 盒（6 面）
 
-    private static void bakeBox(ModelIR.BoxMesh box, Buf buf) {
+    static void bakeBox(ModelIR.BoxMesh box, Buf buf) {
+        for (int face = 0; face < 6; face++) {
+            bakeBoxFace(box, face, buf);
+        }
+    }
+
+    /** 烘焙单个盒面；面序与 IR 的 north,east,south,west,up,down 一致。 */
+    static void bakeBoxFace(ModelIR.BoxMesh box, int face, Buf buf) {
         float x1 = (float) box.from[0];
         float y1 = (float) box.from[1];
         float z1 = (float) box.from[2];
         float x2 = (float) box.to[0];
         float y2 = (float) box.to[1];
         float z2 = (float) box.to[2];
-        // 面序与 IR 约定一致：0 north(-Z) 1 east(+X) 2 south(+Z) 3 west(-X) 4 up(+Y) 5 down(-Y)
-        quad(buf, box, 0, x1, y1, z1, x2, y1, z1, x2, y2, z1, x1, y2, z1, 0, 0, -1);
-        quad(buf, box, 1, x2, y1, z2, x2, y1, z1, x2, y2, z1, x2, y2, z2, 1, 0, 0);
-        quad(buf, box, 2, x2, y1, z2, x1, y1, z2, x1, y2, z2, x2, y2, z2, 0, 0, 1);
-        quad(buf, box, 3, x1, y1, z1, x1, y1, z2, x1, y2, z2, x1, y2, z1, -1, 0, 0);
-        quad(buf, box, 4, x1, y2, z1, x2, y2, z1, x2, y2, z2, x1, y2, z2, 0, 1, 0);
-        quad(buf, box, 5, x1, y1, z2, x2, y1, z2, x2, y1, z1, x1, y1, z1, 0, -1, 0);
+        switch (face) {
+            case 0: quad(buf, box, 0, x1, y1, z1, x2, y1, z1, x2, y2, z1, x1, y2, z1, 0, 0, -1); break;
+            case 1: quad(buf, box, 1, x2, y1, z2, x2, y1, z1, x2, y2, z1, x2, y2, z2, 1, 0, 0); break;
+            case 2: quad(buf, box, 2, x2, y1, z2, x1, y1, z2, x1, y2, z2, x2, y2, z2, 0, 0, 1); break;
+            case 3: quad(buf, box, 3, x1, y1, z1, x1, y1, z2, x1, y2, z2, x1, y2, z1, -1, 0, 0); break;
+            case 4: quad(buf, box, 4, x1, y2, z1, x2, y2, z1, x2, y2, z2, x1, y2, z2, 0, 1, 0); break;
+            case 5: quad(buf, box, 5, x1, y1, z2, x2, y1, z2, x2, y1, z1, x1, y1, z1, 0, -1, 0); break;
+            default: break;
+        }
     }
 
     /** 写一个面：4 角按 (u1,v1)(u2,v1)(u2,v2)(u1,v2) 取 UV。 */
@@ -96,7 +116,7 @@ public final class QuadBaker {
 
     // ---------------------------------------------------------------- 三角（obj）
 
-    private static void bakeTri(ModelIR.TriMesh mesh, Buf buf) {
+    static void bakeTri(ModelIR.TriMesh mesh, Buf buf) {
         for (int i = 0; i + 2 < mesh.indices.length; i += 3) {
             int ia = mesh.indices[i];
             int ib = mesh.indices[i + 1];
@@ -141,7 +161,7 @@ public final class QuadBaker {
 
     // ---------------------------------------------------------------- 缓冲
 
-    private static final class Buf {
+    static final class Buf {
         private float[] quads = new float[0];
         private int quadLen = 0;
         private float[] tris = new float[0];

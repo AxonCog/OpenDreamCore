@@ -27,6 +27,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
 
     /** 视觉规则管理器。 */
     private com.opendreamcore.plugin.server.visual.VisualRuleManager visualRules;
+    private com.opendreamcore.plugin.server.visual.AnimationSync animationSync;
     private com.opendreamcore.plugin.server.EditorManager editors;
     private com.opendreamcore.plugin.container.ContainerRegistry containers;
     private com.opendreamcore.plugin.hud.HudRegistry hud;
@@ -78,6 +79,11 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         return visualRules;
     }
 
+    /** 动画文件夹同步（Animation/** 下发 + 补全名单）。 */
+    public com.opendreamcore.plugin.server.visual.AnimationSync animationSync() {
+        return animationSync;
+    }
+
     /** tooltips 管理器（文件监听自动重载用）。 */
     public com.opendreamcore.plugin.server.TooltipManager tooltipManager() {
         return tooltips;
@@ -126,6 +132,11 @@ public class OpenDreamCorePlugin extends JavaPlugin {
     /** /odc edit list。 */
     public String editorOverview() {
         return editors == null ? "编辑器未就绪" : editors.overview();
+    }
+
+    /** 编辑器租约管理器访问器（协议层拖拽权限裁决用）。 */
+    public com.opendreamcore.plugin.server.EditorManager editors() {
+        return editors;
     }
 
     /** /odc stats：页面/事件/脚本/容器/HUD 统计。 */
@@ -216,7 +227,7 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         visualRules = new com.opendreamcore.plugin.server.visual.VisualRuleManager(
                 getDataFolder().toPath());
         // 服务器装了龙核的话，plugins/DragonCore/ 下的原生配置一并翻译并入
-        // （规则 id 会带 dc/ 前缀，见 DreamCoreBridge/VisualRuleManager#mergeExternal）
+        // （统一经 AdapterChain 翻译，规则 id 带 dc/ 前缀，见 VisualRuleManager#mergeExternal）
         java.nio.file.Path dragonCoreDir = getDataFolder().toPath().getParent() == null
                 ? null
                 : getDataFolder().toPath().getParent().resolve("DragonCore");
@@ -226,6 +237,14 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         int visualCount = visualRules.reload();
         if (visualCount > 0) {
             getLogger().info("已装载 " + visualCount + " 条视觉规则（ItemIcon/ItemEffect/HeadTag 等）");
+        }
+        // 动画文件夹扫描：plugins/OpenDreamCore/Animation/** 下的动画/控制器
+        // 在玩家 ready 时逐文件下发（客户端 AnimationStore.applyRemote 落库）
+        animationSync = new com.opendreamcore.plugin.server.visual.AnimationSync(getDataFolder().toPath());
+        int animCount = animationSync.reload();
+        if (animCount > 0) {
+            getLogger().info("已装载 " + animCount + " 个动画文件（Animation/）: "
+                    + String.join(", ", animationSync.fileNames()));
         }
         // DreamLang 扩展装载器（R3）：extensions/ 目录的脚本与方言适配器。
         // 必须在 visualRules.reload() 之后：reload 清脚本适配器，扩展装载负责重登
@@ -391,6 +410,9 @@ public class OpenDreamCorePlugin extends JavaPlugin {
         }
         if (network != null) {
             network.unregisterChannels();
+        }
+        if (pages != null) {
+            pages.clearVirtual();
         }
         getLogger().info("OpenDreamCore 服务端核心已停用");
     }

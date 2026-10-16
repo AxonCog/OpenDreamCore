@@ -1,5 +1,6 @@
 package com.opendreamcore.plugin.server;
 
+import com.opendreamcore.adapter.AdapterChain;
 import com.opendreamcore.script.NamespaceRegistry;
 import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import org.bukkit.Bukkit;
@@ -202,7 +203,7 @@ public final class ServerMethods {
             com.opendreamcore.script.engine.Scope scope = new com.opendreamcore.script.engine.Scope();
             scope.assignPlayer("name", player.getName());
             scope.assignPlayer("uuid", player.getUniqueId().toString());
-            com.opendreamcore.script.engine.DreamLang.execute(script, scope);
+            com.opendreamcore.script.engine.DreamLang.execute(AdapterChain.rewriteScript(script), scope);
         } catch (Exception e) {
             OpenDreamCorePlugin.get().getLogger().warning("Script 执行失败 (" + player.getName() + "): " + e);
         }

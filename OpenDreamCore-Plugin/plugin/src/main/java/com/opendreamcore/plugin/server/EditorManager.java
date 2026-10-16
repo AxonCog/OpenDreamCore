@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class EditorManager {
 
     private static final long LEASE_MS = 10 * 60 * 1000; // 10 分钟自动过期
+    private static final String UI_DIR = "UI";
 
     private final OpenDreamCorePlugin plugin;
     private final ServerPageManager pages;
@@ -36,8 +37,58 @@ public final class EditorManager {
         this.pages = pages;
     }
 
+    /** 校验页面属于当前已加载仓库，并将文件路径限制在 UI 根目录内。 */
+    private Path safePageFile(String pageId, String suffix, boolean requireExisting) {
+        EditorLease.requireSafePageId(pageId);
+        if (pages.get(pageId) == null) {
+            throw new IllegalArgumentException("页面不存在");
+        }
+        Path root = plugin.getDataFolder().toPath().resolve(UI_DIR).toAbsolutePath().normalize();
+        Path file = root.resolve(pageId + suffix).normalize();
+        if (!file.startsWith(root) || Files.isSymbolicLink(root) || Files.isSymbolicLink(file)
+                || (requireExisting && !Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS))) {
+            throw new IllegalArgumentException("页面文件不可用");
+        }
+        return file;
+    }
+
+    /** 使用页面加载器记录的实际源文件，避免双扩展名时编辑目标漂移。 */
+    private Path safeYamlFile(String pageId) {
+        Path source = pages.sourceFile(pageId);
+        if (source == null) {
+            throw new IllegalArgumentException("页面文件不可用");
+        }
+        Path root = plugin.getDataFolder().toPath().resolve(UI_DIR).toAbsolutePath().normalize();
+        Path file = source.toAbsolutePath().normalize();
+        if (!file.startsWith(root) || Files.isSymbolicLink(root) || Files.isSymbolicLink(file)
+                || !Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException("页面文件不可用");
+        }
+        return file;
+    }
+
+    /** 当前玩家是否持有指定页面的有效租约（用于协议入口权限判断）。 */
+    public boolean hasLease(Player player, String pageId) {
+        if (player == null || pageId == null) {
+            return false;
+        }
+        try {
+            safeYamlFile(pageId);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        Lease current = leases.get(pageId);
+        return current != null && !current.expired() && current.holder().equals(player.getName());
+    }
+
     /** 请求租约：没人持有（或已过期）就授予，否则拒绝。 */
     public EditorLease request(Player player, String pageId) {
+        try {
+            safeYamlFile(pageId);
+        } catch (RuntimeException e) {
+            plugin.getLogger().warning("编辑租约拒绝（页面 ID 非法、未加载或文件不可用）");
+            throw new IllegalArgumentException("页面不可用");
+        }
         Lease current = leases.get(pageId);
         if (current != null && !current.expired() && !current.holder().equals(player.getName())) {
             return new EditorLease(EditorLease.Action.DENY, pageId, current.holder());
@@ -49,6 +100,12 @@ public final class EditorManager {
 
     /** 释放租约。 */
     public void release(Player player, String pageId) {
+        try {
+            safeYamlFile(pageId);
+        } catch (RuntimeException e) {
+            plugin.getLogger().warning("编辑租约释放拒绝（页面 ID 非法或页面不可用）");
+            return;
+        }
         Lease current = leases.get(pageId);
         if (current != null && current.holder().equals(player.getName())) {
             leases.remove(pageId);
@@ -58,20 +115,19 @@ public final class EditorManager {
 
     /** 保存：校验持有者后写回页面文件并重载。 */
     public boolean save(Player player, String pageId, String yaml) {
-        Lease current = leases.get(pageId);
-        if (current == null || current.expired() || !current.holder().equals(player.getName())) {
-            plugin.getLogger().warning("保存被拒（无租约）: " + player.getName() + " -> " + pageId);
+        if (!hasLease(player, pageId)) {
+            plugin.getLogger().warning("保存被拒（页面不可用或无有效租约）: " + player.getName());
             return false;
         }
         try {
-            Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + ".yaml");
-            Files.createDirectories(file.getParent());
-            java.nio.file.Files.write(file, (yaml).getBytes(StandardCharsets.UTF_8));
+            Path file = safeYamlFile(pageId);
+            Files.write(file, yaml.getBytes(StandardCharsets.UTF_8), java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, java.nio.file.LinkOption.NOFOLLOW_LINKS);
             pages.load(); // 热重载
             plugin.getLogger().info("页面已保存: " + pageId + "（by " + player.getName() + "）");
             return true;
         } catch (Exception e) {
-            plugin.getLogger().warning("页面保存失败 " + pageId + ": " + e);
+            plugin.getLogger().warning("页面保存失败 " + pageId + ": " + e.getClass().getSimpleName());
             return false;
         }
     }
@@ -90,9 +146,8 @@ public final class EditorManager {
 
     /** 保存布局补丁（校验租约），返回是否成功。 */
     public boolean saveLayout(Player player, String pageId, java.util.List<com.opendreamcore.protocol.message.PageLayout.Entry> entries) {
-        Lease current = leases.get(pageId);
-        if (current == null || current.expired() || !current.holder().equals(player.getName())) {
-            plugin.getLogger().warning("布局保存被拒（无租约）: " + player.getName() + " -> " + pageId);
+        if (!hasLease(player, pageId)) {
+            plugin.getLogger().warning("布局保存被拒（页面不可用或无有效租约）: " + player.getName());
             return false;
         }
         try {
@@ -103,14 +158,15 @@ public final class EditorManager {
                 pos.addProperty("y", entry.y());
                 root.add(entry.elementId(), pos);
             }
-            Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + LAYOUT_SUFFIX);
-            Files.createDirectories(file.getParent());
-            java.nio.file.Files.write(file, new com.google.gson.GsonBuilder()
-                    .setPrettyPrinting().create().toJson(root).getBytes(StandardCharsets.UTF_8));
+            Path file = safePageFile(pageId, LAYOUT_SUFFIX, false);
+            Files.write(file, new com.google.gson.GsonBuilder()
+                    .setPrettyPrinting().create().toJson(root).getBytes(StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.WRITE, java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, java.nio.file.LinkOption.NOFOLLOW_LINKS);
             plugin.getLogger().info("布局已保存: " + pageId + "（by " + player.getName() + "，" + entries.size() + " 项）");
             return true;
         } catch (Exception e) {
-            plugin.getLogger().warning("布局保存失败 " + pageId + ": " + e);
+            plugin.getLogger().warning("布局保存失败 " + pageId + ": " + e.getClass().getSimpleName());
             return false;
         }
     }
@@ -119,7 +175,7 @@ public final class EditorManager {
     public java.util.List<com.opendreamcore.protocol.message.PageLayout.Entry> loadLayout(String pageId) {
         java.util.List<com.opendreamcore.protocol.message.PageLayout.Entry> entries = new java.util.ArrayList<>();
         try {
-            Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + LAYOUT_SUFFIX);
+            Path file = safePageFile(pageId, LAYOUT_SUFFIX, false);
             if (!Files.isRegularFile(file)) {
                 return entries;
             }
@@ -130,7 +186,7 @@ public final class EditorManager {
                         pos.get("x").getAsDouble(), pos.get("y").getAsDouble()));
             });
         } catch (Exception e) {
-            plugin.getLogger().warning("布局读取失败 " + pageId + ": " + e);
+            plugin.getLogger().warning("布局读取失败（页面不可用或布局无效）: " + e.getClass().getSimpleName());
         }
         return entries;
     }
@@ -147,9 +203,8 @@ public final class EditorManager {
                                java.util.List<com.opendreamcore.protocol.message.WorldLayout.Entry> entries,
                                java.util.Map<String, String> optionsProps, String pageTitle,
                                java.util.Map<String, String> variablesProps) {
-        Lease current = leases.get(pageId);
-        if (current == null || current.expired() || !current.holder().equals(player.getName())) {
-            plugin.getLogger().warning("世界布局保存被拒（无租约）: " + player.getName() + " -> " + pageId);
+        if (!hasLease(player, pageId)) {
+            plugin.getLogger().warning("世界布局保存被拒（页面不可用或无有效租约）: " + player.getName());
             return 0;
         }
         boolean hasEntries = entries != null && !entries.isEmpty();
@@ -179,11 +234,7 @@ public final class EditorManager {
                              java.util.Map<String, String> optionsProps, String pageTitle,
                              java.util.Map<String, String> variablesProps) {
         try {
-            Path file = plugin.getDataFolder().toPath().resolve("UI").resolve(pageId + ".yaml");
-            if (!Files.isRegularFile(file)) {
-                plugin.getLogger().warning("页面文件不存在，无法烘焙: " + file);
-                return 0;
-            }
+            Path file = safeYamlFile(pageId);
             java.util.List<String> lines = new java.util.ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8));
             int changed = 0;
             if (entries != null) {
@@ -227,11 +278,13 @@ public final class EditorManager {
                 }
             }
             if (changed > 0) {
-                java.nio.file.Files.write(file, (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8));
+                Files.write(file, (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8),
+                        java.nio.file.StandardOpenOption.WRITE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS);
             }
             return changed;
         } catch (Exception e) {
-            plugin.getLogger().warning("世界布局烘焙失败 " + pageId + ": " + e);
+            plugin.getLogger().warning("世界布局烘焙失败: " + e.getClass().getSimpleName());
             return 0;
         }
     }

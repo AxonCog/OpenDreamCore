@@ -13,6 +13,7 @@ java {
 
 repositories {
     mavenLocal()
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
     maven { url = 'https://repo.papermc.io/repository/maven-public/' }
     maven { url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/' }
@@ -34,16 +35,6 @@ dependencies {
     compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
 }
 
-// nms 模块是 Java21 字节码，本模块目标 8：Gradle 按 org.gradle.jvm.version
-// 属性选变体会卡住。消费侧把属性提到 21——高版本消费低版本产物本来就合法
-// （core 是 8 的字节码，21 的 JVM 照样跑），编译选项不受影响还是 jabel release 8
-import org.gradle.api.attributes.java.TargetJvmVersion
-
-configurations.configureEach {
-    attributes {
-        attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 21)
-    }
-}
 
 tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'

@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        maven { url = 'https://maven.aliyun.com/repository/gradle-plugin' }
         gradlePluginPortal()
         maven { url = 'https://maven.fabricmc.net/' }
     }

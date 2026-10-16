@@ -139,19 +139,39 @@ public final class BbModelCodec implements IModelFormatCodec {
         System.arraycopy(to, 0, mesh.to, 0, 3);
         boolean boxUv = e.containsKey("box_uv") ? Boolean.TRUE.equals(e.get("box_uv")) : defaultBoxUv;
         double[] w = {to[0] - from[0], to[1] - from[1], to[2] - from[2]};
+        Map<String, Object> faces = CodecUtil.map(e.get("faces"));
+        boolean hasMaterial = false;
+        mesh.faceMaterials = new int[6];
+        for (int i = 0; i < mesh.faceMaterials.length; i++) {
+            mesh.faceMaterials[i] = -1;
+        }
         if (boxUv) {
             mesh.boxUv = true;
             double[] uv = CodecUtil.vec2(e.get("uv"));
             fillBoxUv(mesh, uv, w);
         } else {
             mesh.boxUv = false;
-            Map<String, Object> faces = CodecUtil.map(e.get("faces"));
-            for (int i = 0; i < 6; i++) {
-                // bbmodel 实样：每面是 {"uv":[x1,y1,x2,y2],"texture":0} 对象；也容忍直接数组
-                Object raw = faces == null ? null : faces.get(FACES[i]);
+        }
+        int materialCount = model.materials.isEmpty() ? 1 : model.materials.size();
+        for (int i = 0; i < 6; i++) {
+            // bbmodel 实样：每面是 {"uv":[x1,y1,x2,y2],"texture":0} 对象；也容忍直接数组
+            Object raw = faces == null ? null : faces.get(FACES[i]);
+            Map<String, Object> fm = CodecUtil.map(raw);
+            int material = -1;
+            if (raw != null) {
+                material = fm == null ? 0 : materialIndex(fm.get("texture"), materialCount);
+                if (material < 0) {
+                    material = 0;
+                }
+            }
+            mesh.faceMaterials[i] = material;
+            if (!hasMaterial && material >= 0) {
+                mesh.material = material;
+                hasMaterial = true;
+            }
+            if (!boxUv) {
                 List<Object> f = CodecUtil.list(raw);
                 if (f == null) {
-                    Map<String, Object> fm = CodecUtil.map(raw);
                     f = fm == null ? null : CodecUtil.list(fm.get("uv"));
                 }
                 if (f != null && f.size() >= 4) {
@@ -170,6 +190,24 @@ public final class BbModelCodec implements IModelFormatCodec {
             ModelIR.Material mat = new ModelIR.Material();
             model.materials.add(mat);
         }
+    }
+
+    /** 返回有效纹理数组下标；缺失、非整数和越界索引均保留材质 0 兜底。 */
+    private int materialIndex(Object value, int materialCount) {
+        double number;
+        if (value instanceof Number) {
+            number = ((Number) value).doubleValue();
+        } else if (value instanceof String) {
+            try {
+                number = Double.parseDouble(((String) value).trim());
+            } catch (NumberFormatException invalid) {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+        int index = (int) number;
+        return number == index && index >= 0 && index < materialCount ? index : -1;
     }
 
     /** MC 盒式 UV 布局：入参 [u1,v1]，盒尺寸 w=(x,y,z)。 */
@@ -263,8 +301,10 @@ public final class BbModelCodec implements IModelFormatCodec {
         double length = CodecUtil.num(a.get("length"));
         // loop 字段实样为字符串 "loop"/"once"（也容忍布尔）
         Object loopRaw = a.get("loop");
-        boolean loop = Boolean.TRUE.equals(loopRaw) || "loop".equalsIgnoreCase(CodecUtil.str(loopRaw));
-        AnimationIR ir = new AnimationIR(name == null ? "anim" : name, length, loop);
+        String loopStr = loopRaw instanceof Boolean
+                ? (((Boolean) loopRaw) ? "loop" : "once") : CodecUtil.str(loopRaw);
+        AnimationIR ir = new AnimationIR(name == null ? "anim" : name, length, loopStr);
+        ir.reverse = Boolean.TRUE.equals(a.get("reverse"));
         Map<String, Object> animators = CodecUtil.map(a.get("animators"));
         if (animators == null) {
             return ir;
@@ -316,6 +356,18 @@ public final class BbModelCodec implements IModelFormatCodec {
         key.interp = CodecUtil.str(kf.get("interpolation"));
         if (key.interp == null) {
             key.interp = "linear";
+        }
+        String easing = CodecUtil.str(kf.get("easing"));
+        if (easing != null && !easing.isEmpty()) {
+            key.easing = easing;
+            List<Object> eargs = CodecUtil.list(kf.get("easingArgs"));
+            if (eargs != null && !eargs.isEmpty()) {
+                double[] arr = new double[eargs.size()];
+                for (int i = 0; i < arr.length; i++) {
+                    arr[i] = CodecUtil.num(eargs.get(i));
+                }
+                key.easingArgs = arr;
+            }
         }
         System.arraycopy(expr, 0, key.expr, 0, 3);
         track.keys.add(key);

@@ -19,7 +19,7 @@ class DreamCoreSystemsTest {
     private static Map<String, Object> load(String name) throws Exception {
         try (var in = DreamCoreSystemsTest.class.getResourceAsStream("/dragoncore/systems/" + name)) {
             assertNotNull(in, "样本缺失: " + name);
-            // 桥接层同样用宽松解析：龙核配置有重复键
+            // 系统规则装载同样使用宽松解析，保留龙核配置中的重复键处理。
             return YamlParser.lenient().parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
         }
     }
@@ -30,6 +30,10 @@ class DreamCoreSystemsTest {
         assertEquals("Blood", DreamCoreSystems.systemFor("Blood.yml"), "龙核血条重路由到 Blood 独立系统");
         assertEquals("HeadTag", DreamCoreSystems.systemFor("HeadTag.yml"), "龙核头顶标签文件直进 HeadTag");
         assertEquals("SlotConfig", DreamCoreSystems.systemFor("slotconfig.YML"));
+        assertEquals("ItemIcon", DreamCoreSystems.systemFor("plugins\\DragonCore\\ITEMICON.YML"));
+        assertEquals("Blood", DreamCoreSystems.systemFor("plugins/DragonCore/Blood.yml"));
+        assertEquals("", DreamCoreSystems.systemFor("plugins/DragonCore/config.yml"));
+        assertEquals("", DreamCoreSystems.systemFor(null));
         assertEquals("", DreamCoreSystems.systemFor("ItemTip.yml"), "ItemTip 是界面页，走 GUI 解析器");
         assertEquals("", DreamCoreSystems.systemFor("ItemModel.yml"), "模型替换规划外");
     }
@@ -122,10 +126,18 @@ class DreamCoreSystemsTest {
         assertEquals(4.0, ((Number) ((Map<?, ?>) bg.get("hologram")).get("width")).doubleValue(), 1e-9,
                 "200px → 4 格（50px=1格）");
         Map<?, ?> bar = (Map<?, ?>) baka.get("血条");
-        assertEquals("(5+entity.health*190) / 50", bar.get("width"), "%health%→实体上下文，套像素折算");
+        Map<?, ?> barHologram = (Map<?, ?>) bar.get("hologram");
+        assertEquals("(5+entity.health*190) / 50", barHologram.get("width"),
+                "%health%→实体上下文，动态宽度写入 hologram");
+        assertFalse(bar.containsKey("width"), "动态宽度不能写在 image 顶层");
         Map<?, ?> txt = (Map<?, ?>) baka.get("血字");
         assertEquals("text", txt.get("type"));
-        assertEquals("卧槽无情", ((Map<?, ?>) txt.get("text")).get("content"));
+        Map<?, ?> textSpec = (Map<?, ?>) txt.get("text");
+        assertEquals("卧槽无情", textSpec.get("content"));
+        assertEquals(0.5, ((Number) textSpec.get("scale")).doubleValue(), 1e-9,
+                "文本 scale 属于 text spec");
+        assertFalse(txt.containsKey("scale"), "文本 scale 不能写在元素顶层");
+
     }
 
     @Test
@@ -161,8 +173,12 @@ class DreamCoreSystemsTest {
                 "100px → 2 格（50px=1格）");
         Map<?, ?> label = (Map<?, ?>) king.get("名字文本");
         assertEquals("text", label.get("type"));
-        assertEquals("entity.name entity.health_ratio", ((Map<?, ?>) label.get("text")).get("content"),
+        Map<?, ?> labelText = (Map<?, ?>) label.get("text");
+        assertEquals("entity.name entity.health_ratio", labelText.get("content"),
                 "%name%/%per% → 实体上下文变量");
+        assertEquals(0.5, ((Number) labelText.get("scale")).doubleValue(), 1e-9,
+                "名牌 scale 属于 text spec");
+        assertFalse(label.containsKey("scale"), "名牌 scale 不能写在元素顶层");
     }
 
     @Test

@@ -126,11 +126,16 @@ public final class ProtocolListener implements PluginMessageListener {
     }
 
     public void unregisterChannels() {
+        // 通道注销同时负责插件停用边界的会话与后台任务清理。
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            removeSession(player);
+        }
+        cloud.shutdown();
         plugin.getServer().getMessenger().unregisterIncomingPluginChannel(plugin);
         plugin.getServer().getMessenger().unregisterOutgoingPluginChannel(plugin);
     }
 
-    /** 通道名：老服永远单通道，新服是 namespace:path。 */
+    /** 通道名：旧版使用单通道，新版使用 namespace:path。 */
     public String channel(String path) {
         return legacyChannels ? LEGACY_CHANNEL : Protocol.NAMESPACE + ":" + path;
     }
@@ -224,9 +229,12 @@ public final class ProtocolListener implements PluginMessageListener {
         try {
             var close = com.opendreamcore.protocol.message.PageClose.decode(
                     new com.opendreamcore.protocol.OdcByteArrayBuf(bytes));
-            var session = handler.sessionInfo(close.sessionId());
+            var session = handler.ownedSession(player, close.sessionId(), "page_close");
+            if (session == null) {
+                return;
+            }
             // 关了就允许再开：从本连接已开集合里摘掉，不然第二次 /odc open 被去重拦死
-            if (session != null && session.pageId() != null) {
+            if (session.pageId() != null) {
                 java.util.Set<String> seen = openedPages.get(player.getUniqueId());
                 if (seen != null) {
                     seen.remove(session.pageId());
@@ -234,10 +242,11 @@ public final class ProtocolListener implements PluginMessageListener {
             }
             handler.closeSession(close.sessionId());
             plugin.containerRegistry().unbind(close.sessionId());
+            // 客户端可能重复发 page_close（1.12.2 实机）：只有真有会话时才算一次关闭，
+            // 重复帧静默，不然日志和第三方关闭事件都会连发
             plugin.getLogger().info("页面关闭 " + player.getName() + " 会话 " + close.sessionId());
-            // 第三方插件监听（onPluginMessageReceived 已在主线程，直接触发）
             safeCallEvent(com.opendreamcore.plugin.event.OdcEvents.close(player,
-                    session == null ? null : session.pageId(), close.sessionId()));
+                    session.pageId(), close.sessionId()));
         } catch (Exception e) {
             plugin.getLogger().warning("page_close 处理失败 (" + player.getName() + "): " + e);
         }
@@ -291,11 +300,30 @@ public final class ProtocolListener implements PluginMessageListener {
     }
 
     private void handleEditorLease(Player player, byte[] bytes) {
+        // Preflight the request fields so an invalid page id cannot make the
+        // EditorLease constructor throw before we can return a protocol DENY.
+        String requestedPageId = null;
+        boolean request = false;
+        try {
+            var raw = new com.opendreamcore.protocol.OdcByteArrayBuf(bytes);
+            int action = raw.readByte();
+            requestedPageId = raw.readString();
+            request = action == com.opendreamcore.protocol.message.EditorLease.Action.REQUEST.id();
+        } catch (RuntimeException ignored) {
+            // A truncated/malformed frame has no safe page id to acknowledge.
+        }
         try {
             var lease = com.opendreamcore.protocol.message.EditorLease.decode(
                     new com.opendreamcore.protocol.OdcByteArrayBuf(bytes));
             var result = switch (lease.action()) {
-                case REQUEST -> editors.request(player, lease.pageId());
+                case REQUEST -> {
+                    boolean administrator = player.isOp() || player.hasPermission("opendreamcore.admin");
+                    if (!administrator && !editors.hasLease(player, lease.pageId())) {
+                        player.sendMessage("§c[OpenDreamCore] §f没有编辑器权限");
+                        yield denyLease(lease.pageId(), "没有编辑器权限");
+                    }
+                    yield editors.request(player, lease.pageId());
+                }
                 case RELEASE -> {
                     editors.release(player, lease.pageId());
                     yield null;
@@ -306,8 +334,25 @@ public final class ProtocolListener implements PluginMessageListener {
                 send(player, Protocol.EDITOR_LEASE, result);
             }
         } catch (Exception e) {
+            if (request) {
+                send(player, Protocol.EDITOR_LEASE,
+                        denyLease(requestedPageId, "页面不可用"));
+            }
             plugin.getLogger().warning("editor_lease 处理失败 (" + player.getName() + "): " + e);
         }
+    }
+
+    /** Build a DENY without ever echoing an unsafe page id into EditorLease. */
+    private static com.opendreamcore.protocol.message.EditorLease denyLease(String pageId, String reason) {
+        String safePageId;
+        try {
+            com.opendreamcore.protocol.message.EditorLease.requireSafePageId(pageId);
+            safePageId = pageId;
+        } catch (RuntimeException ignored) {
+            safePageId = "__invalid__";
+        }
+        return new com.opendreamcore.protocol.message.EditorLease(
+                com.opendreamcore.protocol.message.EditorLease.Action.DENY, safePageId, reason);
     }
 
     private void handleEditorSave(Player player, byte[] bytes) {
@@ -340,17 +385,19 @@ public final class ProtocolListener implements PluginMessageListener {
                     + "，已报备通道 " + player.getListeningPluginChannels());
             readyPlayers.put(player, System.currentTimeMillis());
             clientVersions.put(player, new ClientVersionInfo(ready.modVersion(), ready.protocolVersion(), System.currentTimeMillis()));
-            // 老服客户端的 MC|Register 报备不一定被 Bukkit 认账（1.12 实测 listening 里没有我们的通道，
-            // 而 CraftPlayer.sendPluginMessage 只给已报备的通道发包——下行全被静默跳过）。
-            // 干脆服务器这边直接补报备：addChannel 是 CraftPlayer 的 public 方法，反射调一把
-            String need = legacyChannels ? LEGACY_CHANNEL : Protocol.NAMESPACE + ":" + Protocol.CHUNK;
-            if (!player.getListeningPluginChannels().contains(need)) {
-                forceListenChannel(player, need);
-            }
-            if (!legacyChannels) {
-                String chunk = Protocol.NAMESPACE + ":" + Protocol.CHUNK;
-                if (!player.getListeningPluginChannels().contains(chunk)) {
-                    forceListenChannel(player, chunk);
+            // Bukkit 某些实现不会可靠记录客户端的 minecraft:register 报备；
+            // 所有独立下行通道都必须补报备，否则 sendPluginMessage 会静默丢包。
+            if (legacyChannels) {
+                if (!player.getListeningPluginChannels().contains(LEGACY_CHANNEL)) {
+                    forceListenChannel(player, LEGACY_CHANNEL);
+                }
+            } else {
+                java.util.Set<String> listening = player.getListeningPluginChannels();
+                for (String path : Protocol.CLIENTBOUND_CHANNELS) {
+                    String channel = Protocol.NAMESPACE + ":" + path;
+                    if (!listening.contains(channel)) {
+                        forceListenChannel(player, channel);
+                    }
                 }
             }
 
@@ -391,9 +438,9 @@ public final class ProtocolListener implements PluginMessageListener {
             } catch (Exception e) {
                 plugin.getLogger().warning("全局状态立即下发失败 (" + player.getName() + "): " + e);
             }
-            // 云资源清单下发（能力含 CLOUD 才发）
+            // 云资源扫描/哈希在有界后台线程执行，完成后回主线程发包。
             if ((ready.capabilities() & Protocol.CAPABILITY_CLOUD) != 0) {
-                send(player, Protocol.CLOUD_MANIFEST, cloud.buildManifest());
+                cloud.buildManifest(player, manifest -> send(player, Protocol.CLOUD_MANIFEST, manifest));
             }
             // 视觉规则下发：
             // 十系统的规则 YAML 原文打包同步，客户端自行解析渲染；
@@ -402,6 +449,17 @@ public final class ProtocolListener implements PluginMessageListener {
                 send(player, Protocol.VISUAL_RULES, plugin.visualRules().buildSync());
             } catch (Exception e) {
                 plugin.getLogger().warning("视觉规则下发失败: " + e);
+            }
+            // 动画文件下发：Animation/** 逐文件推（f 帧 → 客户端 AnimationStore）
+            try {
+                if (plugin.animationSync().fileCount() > 0) {
+                    int frames = plugin.animationSync().push(player, (p, payload) ->
+                            com.opendreamcore.plugin.network.CustomPacketRegistry.send(
+                                    plugin, p, com.opendreamcore.model.anim.AnimMessages.CHANNEL, payload));
+                    plugin.animationSync().logPushed(player, frames);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().warning("动画文件下发失败: " + e);
             }
             // 服务端全局变量（{{global.xxx}} 插值，含 tps/ping）
             send(player, Protocol.GLOBAL_STATE, buildGlobalState(player));
@@ -420,7 +478,7 @@ public final class ProtocolListener implements PluginMessageListener {
 
             // 页面下发：push-pages=all 时全量推送所有页面；否则只推已开会话的
             // 会话可能在通道注册前开启（join 自动开服），首发 PAGE_SYNC 会被 Paper 丢弃；
-            // ready 时通道已注册，此处补发保证可达
+            // ready 时通道已注册，此处补发以避免首发消息因通道尚未注册而丢失
             java.util.Set<String> toPush = new java.util.LinkedHashSet<>(handler.openPageIds(player));
             if (plugin.getConfig().getString("push-pages", "all").equalsIgnoreCase("all")) {
                 for (com.opendreamcore.page.Page pg : pages.allPages()) {
@@ -872,13 +930,20 @@ public final class ProtocolListener implements PluginMessageListener {
         return sb.toString();
     }
 
-    /** 玩家离线：清除握手和版本记录。 */
+    /** 玩家离线：原子清除握手、版本、页面状态，以及该 UUID 的全部协议会话。 */
     public void removeSession(Player player) {
         readyPlayers.remove(player);
         clientVersions.remove(player);
         openedPages.remove(player.getUniqueId());
         assemblers.remove(player);
         pendingOnReady.remove(player);
+        for (String sessionId : handler.removeSessions(player)) {
+            plugin.containerRegistry().unbind(sessionId);
+        }
+        // ContainerRegistry also owns the player UUID -> current binding/cursor.
+        // Keep this independent of page_close and of how many protocol sessions existed.
+        plugin.containerRegistry().unbindAll(player);
+        cloud.removeSession(player);
     }
 
     /** 会话/事件/脚本统计（/odc stats）。 */

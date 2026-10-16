@@ -120,6 +120,113 @@ class LayoutEngineTest {
         assertEquals("root", root.id());
         assertNull(nodes.get(0).hitTest(200, 200));
     }
+    @Test
+    void limitClipsSelfAndDescendantsAndRequiresAllFields() {
+        Page page = page("""
+                root:
+                  type: layout
+                  x: 0
+                  y: 0
+                  width: 100
+                  height: 100
+                  limitX: 20
+                  limitY: 20
+                  limitWidth: 30
+                  limitHeight: 30
+                  children:
+                    child:
+                      type: button
+                      x: 0
+                      y: 0
+                      width: 100
+                      height: 100
+                """);
+        RenderNode root = LayoutEngine.layout(page, 800, 600).get(0);
+        assertEquals("child", root.hitTest(25, 25).id());
+        assertNull(root.hitTest(10, 10));
+        assertNull(root.hitTestInteractive(10, 10));
+
+        Page partial = page("""
+                a:
+                  type: button
+                  x: 0
+                  y: 0
+                  width: 20
+                  height: 20
+                  limitX: 10
+                  limitY: 10
+                """);
+        RenderNode noClip = LayoutEngine.layout(partial, 800, 600).get(0);
+        assertFalse(noClip.hasLimit());
+        assertEquals("a", noClip.hitTest(1, 1).id());
+    }
+
+    @Test
+    void nestedNonOriginLimitsIntersectAsHalfOpenRectangles() {
+        Page page = page("""
+                root:
+                  type: layout
+                  pointerEvents: children
+                  x: 0
+                  y: 0
+                  width: 100
+                  height: 100
+                  limitX: 10
+                  limitY: 15
+                  limitWidth: 50
+                  limitHeight: 50
+                  children:
+                    child:
+                      type: layout
+                      pointerEvents: children
+                      x: 0
+                      y: 0
+                      width: 100
+                      height: 100
+                      limitX: 20
+                      limitY: 25
+                      limitWidth: 30
+                      limitHeight: 30
+                      children:
+                        button:
+                          type: button
+                          x: 0
+                          y: 0
+                          width: 100
+                          height: 100
+                """);
+        RenderNode root = LayoutEngine.layout(page, 800, 600).get(0);
+        assertEquals("button", root.hitTest(25, 30).id());
+        assertEquals("button", root.hitTestInteractive(25, 30).id());
+        assertEquals("button", root.hitTest(25, 30, 24, 29, 40, 45, true).id());
+        assertNull(root.hitTest(25, 30, 25, 30, 25, 45, true));
+        assertNull(root.hitTest(50, 30));
+        assertNull(root.hitTest(25, 55));
+        assertTrue(root.containsLimit(10, 15));
+        assertFalse(root.containsLimit(60, 15));
+        assertNull(root.hitTest(15, 20));
+        assertNull(root.hitTest(55, 55));
+    }
+
+    @Test
+    void zeroAreaLimitIsEmptyForHitTesting() {
+        Page page = page("""
+                empty:
+                  type: button
+                  x: 0
+                  y: 0
+                  width: 100
+                  height: 100
+                  limitX: 20
+                  limitY: 20
+                  limitWidth: 0
+                  limitHeight: 40
+                """);
+        RenderNode empty = LayoutEngine.layout(page, 800, 600).get(0);
+        assertNull(empty.hitTest(20, 20));
+        assertNull(empty.hitTestInteractive(20, 20));
+        assertFalse(empty.containsLimit(20, 20));
+    }
 
     @Test
     void positionOverrides() {
@@ -419,15 +526,20 @@ class LayoutEngineTest {
     }
 
     @Test
-    void rotationStoredInPropsAfterNormalization() {
+    void numericExpressionsRemainDynamicAcrossLayouts() {
         Page page = page("""
+                alpha: 0.5
                 a:
                   type: button
-                  rotation: "90"
+                  opacity: "vars.alpha"
+                  rotation: "vars.alpha * 100"
                 """);
-        RenderNode a = LayoutEngine.layout(page, 800, 600).get(0);
-        assertEquals(90.0, a.rotation(), 1e-9);
-        // props 里也归一化为数字（渲染端直接读取）
-        assertTrue(a.props().get("rotation") instanceof Number);
+        RenderNode first = LayoutEngine.layout(page, 800, 600).get(0);
+        assertEquals(0.5, first.opacity(), 1e-9);
+        page.variables().put("alpha", 0.8);
+        RenderNode second = LayoutEngine.layout(page, 800, 600).get(0);
+        assertEquals(0.8, second.opacity(), 1e-9);
+        assertEquals(80.0, second.rotation(), 1e-9);
+        assertEquals(0.5, first.opacity(), 1e-9);
     }
 }

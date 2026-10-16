@@ -1,5 +1,7 @@
 package com.opendreamcore.mixin;
 
+import java.util.ArrayList;
+import java.util.List;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import com.opendreamcore.client.LegacyTooltipStore;
 import net.minecraft.client.gui.AbstractGui;
@@ -42,7 +44,9 @@ public abstract class MixinTooltip {
     private static void drawTooltip(MatrixStack ms, LegacyTooltipStore.Entry e, int x, int y) {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         FontRenderer font = mc.font;
-        String[] lines = String.valueOf(e.text).split("\n", -1);
+        String[] lines = wrapLines(font, String.valueOf(e.text), tooltipWidth(e));
+
+
         int w = 0;
         for (String l : lines) {
             w = Math.max(w, font.width(l));
@@ -61,6 +65,41 @@ public abstract class MixinTooltip {
             font.draw(ms, lines[i], (float) (x + pad),
                     (float) (y + pad + i * (font.lineHeight + 1)), fg);
         }
+    }
+    private static int tooltipWidth(LegacyTooltipStore.Entry e) {
+        double width = e.width;
+        return width > 0 && Double.isFinite(width) && width <= Integer.MAX_VALUE
+                ? (int) Math.ceil(width) : Integer.MAX_VALUE;
+    }
+
+    private static String[] wrapLines(FontRenderer font, String text, int maxWidth) {
+        List<String> out = new ArrayList<>();
+        for (String raw : text.split("\\n", -1)) {
+            if (maxWidth == Integer.MAX_VALUE || font.width(raw) <= maxWidth) {
+                out.add(raw);
+                continue;
+            }
+            StringBuilder line = new StringBuilder();
+            StringBuilder formatting = new StringBuilder();
+            for (int i = 0; i < raw.length();) {
+                if (raw.charAt(i) == '\u00a7' && i + 1 < raw.length()) {
+                    formatting.append(raw, i, i + 2);
+                    line.append(raw, i, i + 2);
+                    i += 2;
+                    continue;
+                }
+                String ch = raw.substring(i, i + 1);
+                if (line.length() > formatting.length() && font.width(line + ch) > maxWidth) {
+                    out.add(line.toString());
+                    line.setLength(0);
+                    line.append(formatting);
+                }
+                line.append(ch);
+                i++;
+            }
+            out.add(line.toString());
+        }
+        return out.toArray(new String[0]);
     }
 
     private static int parseColor(String s, int fallback) {

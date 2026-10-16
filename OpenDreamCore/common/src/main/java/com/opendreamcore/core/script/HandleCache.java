@@ -18,12 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p><b>两条硬规则</b>：
  * <ol>
- *   <li><b>名字必须精确匹配</b>：绝不「按参数个数随便挑一个同名不同义的方法」。
- *       0.1.2.2 的实机事故就是这么来的 —— {@code RenderSystem.setShaderTexture(int,int)} 在 1.21.1
- *       被移除后，名字盲兜底挑中了同形的 {@code polygonMode(int,int)}，每帧刷屏 GL_INVALID_ENUM，
- *       还顺手改坏了多边形模式。句柄缓存这里不留这个口子。</li>
- *   <li><b>只支持静态方法</b>：实例方法（要绑 receiver）留到 P6，且会在解析期给出明确报错，
- *       而不是静默挑一个静态同名方法。</li>
+ *   <li><b>名字必须精确匹配</b>：不按参数个数选择同名但语义不同的方法。
+ *       旧版映射缺失时曾误选同形的 {@code polygonMode(int,int)}，导致每帧输出 GL_INVALID_ENUM
+ *       并修改多边形模式；因此缓存解析不会使用名称缺失时的宽松兜底。</li>
  * </ol>
  *
  * <p>缓存有上限（4096 条），超了整体清空重来 —— 缓存不允许无界增长（规范 §8 内存规则）。
@@ -115,7 +112,7 @@ public final class HandleCache {
         }
         if (instanceMatch != null) {
             throw new ScriptDeniedException("只支持静态方法：" + className + "#" + methodName
-                    + "（实例方法调用在 0.2.x 的 P6 加）");
+                    + "（实例方法调用暂不支持）");
         }
         throw new ScriptDeniedException("找不到方法：" + className + "#" + methodName
                 + "，参数个数 " + arity);

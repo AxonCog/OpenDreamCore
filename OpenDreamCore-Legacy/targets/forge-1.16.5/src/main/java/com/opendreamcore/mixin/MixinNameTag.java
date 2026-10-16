@@ -40,16 +40,13 @@ public abstract class MixinNameTag {
         if (style == null) {
             return;
         }
-        Minecraft mc = Minecraft.getInstance();
-        ActiveRenderInfo camera = mc.gameRenderer.getMainCamera();
+        ActiveRenderInfo camera = Minecraft.getInstance().gameRenderer.getMainCamera();
         pose.pushPose();
-        pose.translate(0.0D, entity.getDimensions(entity.getPose()).height + 0.5D, 0.0D);
+        pose.translate(0.0D, entity.getBbHeight() + 0.5D, 0.0D);
         pose.mulPose(camera.rotation());
-        float s = 0.025F;
-        pose.scale(-s, -s, s);
-        String text = name.getString();
-        int tw = mc.font.width(text);
-        mc.font.draw(pose, text, -tw / 2.0F, -mc.font.lineHeight / 2.0F, style.textColor);
+        pose.scale(-0.025F, -0.025F, 0.025F);
+        int width = Minecraft.getInstance().font.width(name.getString()) / 2;
+        Minecraft.getInstance().font.drawShadow(pose, name.getString(), -width, -4.0F, style.textColor);
         pose.popPose();
         ci.cancel();
     }

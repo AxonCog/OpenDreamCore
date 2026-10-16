@@ -11,26 +11,33 @@ import java.util.Map;
 /**
  * DragonCore 原生系统配置 → OpenDreamCore 十系统规则 IR。
  *
- * 服务器上真实跑着的龙核配置就是金标准（样本快照见
+ * 服务器上真实跑着的龙核配置即基准（样本快照见
  * common/src/test/resources/dragoncore/systems/），翻译约定逐条写在
  * 对应方法注释里：能等价的等价，只能近似的注明近似点，没有对应的一律
  * 丢弃不猜——宁可少一个特效，不要一个画错位置的。
  *
- * 全部方法纯 Map→Map，零 IO；文件读取和并入规则库由桥接层负责。
+ * 全部方法纯 Map→Map，零 IO；文件读取由装载器负责，规则转换统一经过适配器链。
  */
 public final class DreamCoreSystems {
 
     private DreamCoreSystems() {
     }
 
-    /** 龙核配置文件名 → 我们的系统名；空串表示不归十系统管（如 ItemTip 是界面页）。 */
+    /** 龙核配置文件名或路径 → 系统名；忽略 .yml/.yaml，空串表示不认领（如 config、ItemTip）。 */
     public static String systemFor(String fileName) {
         if (fileName == null) {
             return "";
         }
-        String n = fileName.toLowerCase(Locale.ROOT);
+        String n = fileName.replace('\\', '/');
+        int slash = n.lastIndexOf('/');
+        if (slash >= 0) {
+            n = n.substring(slash + 1);
+        }
+        n = n.toLowerCase(Locale.ROOT);
         if (n.endsWith(".yml")) {
             n = n.substring(0, n.length() - 4);
+        } else if (n.endsWith(".yaml")) {
+            n = n.substring(0, n.length() - 5);
         }
         switch (n) {
             case "keyconfig": return "KeyConfig";
@@ -337,7 +344,8 @@ public final class DreamCoreSystems {
                     // 纯数字宽度已在 bloodImage 里折算过，不动
                 } else if (w != null) {
                     // 表达式宽度（如 "5+%health%*190"）是像素语义，套上同款折算
-                    el.put("width", "(" + rewriteBloodVars(String.valueOf(w)) + ") / 50");
+                    Map<String, Object> hologram = (Map<String, Object>) el.get("hologram");
+                    hologram.put("width", "(" + rewriteBloodVars(String.valueOf(w)) + ") / 50");
                 }
                 ir.put("血条", el);
             }
@@ -352,13 +360,10 @@ public final class DreamCoreSystems {
                     Object content = rewriteBloodVars(str2(txt.get("content")));
                     Map<String, Object> textSpec = new LinkedHashMap<>();
                     textSpec.put("content", content);
+                    copyTextProperties(txt, textSpec);
                     el.put("text", textSpec);
                     el.put("x", numOr(txt.get("x"), 0.0));
                     el.put("y", numOr(txt.get("y"), 0.0));
-                    Object scale = txt.get("scale");
-                    if (scale != null) {
-                        el.put("scale", scale);
-                    }
                     ir.put("血字" + (i++ > 0 ? i : ""), el);
                 }
             }
@@ -406,12 +411,10 @@ public final class DreamCoreSystems {
                 el.put("type", "text");
                 Map<String, Object> textSpec = new LinkedHashMap<>();
                 textSpec.put("content", rewriteBloodVars(str2(content)));
+                copyTextProperties(lbl, textSpec);
                 el.put("text", textSpec);
                 el.put("x", numOr(lbl.get("x"), 0.0));
                 el.put("y", numOr(lbl.get("y"), 0.0));
-                if (lbl.get("scale") != null) {
-                    el.put("scale", lbl.get("scale"));
-                }
                 ir.put("名字文本", el);
             }
             // 只有匹配头没有名字件的规则不产出（空页面无意义）
@@ -420,6 +423,16 @@ public final class DreamCoreSystems {
             }
         }
         return out;
+    }
+
+    /** DragonCore 文本外观字段归入标准 text spec，避免被页面当成未知顶层属性。 */
+    private static void copyTextProperties(Map<?, ?> source, Map<String, Object> textSpec) {
+        for (String key : new String[]{"scale", "color", "shadow", "strokeColor", "strokeWidth",
+                "align", "wrap", "lineHeight", "font"}) {
+            if (source.containsKey(key)) {
+                textSpec.put(key, source.get(key));
+            }
+        }
     }
 
     /** 血条贴图 → image 元素；x/y 缺省居中贴着锚点。 */

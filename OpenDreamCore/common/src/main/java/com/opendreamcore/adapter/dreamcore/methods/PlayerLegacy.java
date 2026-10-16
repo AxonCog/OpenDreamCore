@@ -15,21 +15,22 @@ public final class PlayerLegacy {
         return LegacyMethods.delegate("Player", method, args);
     }
 
+
     public static void install() {
-        LegacyMethods.register("取玩家坐标x", a -> p("获取X"));
-        LegacyMethods.register("取玩家坐标y", a -> p("获取Y"));
-        LegacyMethods.register("取玩家坐标z", a -> p("获取Z"));
-        LegacyMethods.register("取玩家位置", a -> p("获取X") + "," + p("获取Y") + "," + p("获取Z"));
-        LegacyMethods.register("取玩家yaw", a -> p("获取偏航"));
-        LegacyMethods.register("取玩家pitch", a -> p("获取俯仰"));
-        LegacyMethods.register("取玩家名", a -> p("获取名"));
-        LegacyMethods.register("获取玩家名", a -> p("获取名"));
-        LegacyMethods.register("获取玩家UUID", a -> p("获取UUID"));
-        LegacyMethods.register("获取玩家X", a -> p("获取X"));
-        LegacyMethods.register("获取玩家Y", a -> p("获取Y"));
-        LegacyMethods.register("获取玩家Z", a -> p("获取Z"));
-        LegacyMethods.register("获取玩家俯仰", a -> p("获取俯仰"));
-        LegacyMethods.register("获取玩家偏航", a -> p("获取偏航"));
+        LegacyMethods.register("取玩家坐标x", a -> p("getX"));
+        LegacyMethods.register("取玩家坐标y", a -> p("getY"));
+        LegacyMethods.register("取玩家坐标z", a -> p("getZ"));
+        LegacyMethods.register("取玩家位置", a -> position());
+        LegacyMethods.register("取玩家yaw", a -> p("getYaw"));
+        LegacyMethods.register("取玩家pitch", a -> p("getPitch"));
+        LegacyMethods.register("取玩家名", a -> p("getName"));
+        LegacyMethods.register("获取玩家名", a -> p("getName"));
+        LegacyMethods.register("获取玩家UUID", a -> "");
+        LegacyMethods.register("获取玩家X", a -> p("getX"));
+        LegacyMethods.register("获取玩家Y", a -> p("getY"));
+        LegacyMethods.register("获取玩家Z", a -> p("getZ"));
+        LegacyMethods.register("获取玩家俯仰", a -> p("getPitch"));
+        LegacyMethods.register("获取玩家偏航", a -> p("getYaw"));
         LegacyMethods.register("获取玩家主手物品", a -> p("获取主手物品"));
         LegacyMethods.register("获取玩家当前槽位", a -> p("获取当前槽位"));
         LegacyMethods.register("获取玩家生命", a -> p("获取生命"));
@@ -41,4 +42,12 @@ public final class PlayerLegacy {
         LegacyMethods.register("获取玩家氧气", a -> p("获取氧气"));
         LegacyMethods.register("玩家移动速度", a -> p("移动速度"));
     }
+
+    static Object position() {
+        Object x = p("getX");
+        Object y = p("getY");
+        Object z = p("getZ");
+        return x == null || y == null || z == null ? null : x + "," + y + "," + z;
+    }
+
 }

@@ -4,6 +4,7 @@ import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 
+import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -118,6 +119,26 @@ public final class GUIAPI {
         }
         plugin.closePage(player);
         return true;
+    }
+    /** Register an in-memory YAML page for extension plugins. */
+    public boolean registerVirtual(String pageId, String yaml) {
+        OpenDreamCorePlugin plugin = OpenDreamCoreAPI.plugin();
+        return plugin != null && plugin.pageManager().registerVirtual(pageId, yaml);
+    }
+
+    public boolean registerVirtual(String pageId, InputStream yaml) {
+        OpenDreamCorePlugin plugin = OpenDreamCoreAPI.plugin();
+        return plugin != null && plugin.pageManager().registerVirtual(pageId, yaml);
+    }
+
+    public boolean unregisterVirtual(String pageId) {
+        OpenDreamCorePlugin plugin = OpenDreamCoreAPI.plugin();
+        return plugin != null && plugin.pageManager().unregisterVirtual(pageId);
+    }
+
+    public boolean hasVirtual(String pageId) {
+        OpenDreamCorePlugin plugin = OpenDreamCoreAPI.plugin();
+        return plugin != null && plugin.pageManager().hasVirtual(pageId);
     }
 
 

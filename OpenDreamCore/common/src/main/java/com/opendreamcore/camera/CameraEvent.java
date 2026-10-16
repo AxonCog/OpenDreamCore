@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 时间轴事件点（M1.6）：演出进行到某时刻触发 sound / particle / script；
- * animation 只留接口（解析入库，执行侧今天先记日志）。
+ * 时间轴事件点：演出进行到某时刻触发 sound / particle / script；
+ * animation 只保留接口（解析入库，执行侧记录日志）。
  * <pre>
  * 事件:
  *   - 时刻: 2.5

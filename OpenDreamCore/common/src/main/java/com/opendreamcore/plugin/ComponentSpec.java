@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * 组件规格：一个 UI 组件类型 = 解析器 + 行为 + 渲染（渲染在平台侧）。
  * 组件三件套通过 ComponentRegistry 注册，插件可新增任意组件类型。
- * 支持热拔插：onRegister/onUnregister 生命周期钩子 + 依赖声明。
+ * 支持运行时注册/注销：onRegister/onUnregister 生命周期钩子 + 依赖声明。
  */
 public interface ComponentSpec {
 
@@ -32,7 +32,7 @@ public interface ComponentSpec {
         return null;
     }
 
-    // 热拔插生命周期
+    // 生命周期
 
     /** 组件注册时调用（可做初始化、注册子组件等）。 */
     default void onRegister() {}

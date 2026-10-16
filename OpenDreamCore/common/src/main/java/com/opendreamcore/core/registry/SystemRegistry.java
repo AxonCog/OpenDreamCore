@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  * 调 {@link #applyAll(String, Map)} 应用整份规则集。
  *
  * <p>**不做类路径扫描**：条目来自编译期生成的索引。bootstrap 对每个系统做**一次**反射实例化
- * （N 个系统 = N 次，且只在启动时），这是「零扫描」与「必须有对象」之间的最小代价；
+ * （N 个系统 = N 次，且只在启动时），零扫描与必须有实例之间的最小代价；
  * 之后所有调用都是接口直调。
  */
 public final class SystemRegistry {

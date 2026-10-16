@@ -140,14 +140,24 @@ public final class ClientHooks {
         WindowBranding.setCacheDir(() -> Minecraft.getMinecraft().gameDir.toPath());
         // 聊天栏通知：页面解析失败/材质包异常这些要跟玩家说的事全走这
         com.opendreamcore.client.spi.ChatNotifier.Host.register(ClientHooks::chat);
-        // 实体真身画笔：entity 元素从占位框升级成村民/盔甲架本尊
+        // 实体渲染：entity 元素从占位框升级为村民/盔甲架实体
         com.opendreamcore.client.spi.EntityPainter.Host.register(new EntityPainter1212());
         com.opendreamcore.client.spi.LegacyEntityRenderBridge.Host.register(
                 new com.opendreamcore.client.spi.LegacyEntityRenderBridgeImpl());
         com.opendreamcore.client.spi.LegacyItemRenderBridge.Host.register(
                 new com.opendreamcore.client.spi.LegacyItemModelBridgeImpl());
-        // 物品真身画笔：item_slot/hot_slot 从格底占位升级成本尊图标
+        // 物品渲染：item_slot/hot_slot 从格底占位升级为物品图标
         com.opendreamcore.client.spi.ItemPainter.Host.register(new ItemPainter1212());
+        // 渲染错误聊天桥：1.12.2 的 sendMessage(ITextComponent)
+        com.opendreamcore.client.spi.ErrorChatBridge.Host.register(msg -> {
+            try {
+                net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+                if (mc != null && mc.player != null) {
+                    mc.player.sendMessage(new net.minecraft.util.text.TextComponentString(msg));
+                }
+            } catch (Throwable ignored) {
+            }
+        });
         // 世界相位状态守卫：把"按原值还原 GL 状态 + 先收原版待传批次"交给本代实现
         com.opendreamcore.client.render.LegacyRenderBridge.Host.register(new RenderBridge1212());
 // click/hover 音效：直接走 SoundHandler（自管，不需要 mixin）
@@ -189,6 +199,8 @@ public final class ClientHooks {
         // 所以目录必须由各代自己送进去：不送的话 OpenDreamCore/fonts 与云缓存两级都问不到，
         // 配置里写了 ttf 也只会登记不生效。跟上面云缓存同一个目录，一次说清。
         com.opendreamcore.client.visual.LegacyTtfSource.setGameDir(Minecraft.getMinecraft().gameDir.toPath());
+        com.opendreamcore.client.MessageDispatcher.setUiDir(
+                () -> Minecraft.getMinecraft().gameDir.toPath());
     }
 
     static {
@@ -228,15 +240,17 @@ public final class ClientHooks {
             VanillaBridge.install();
             VanillaBridge.registerChannels();
             sentReady = true;
+            com.opendreamcore.client.LocalOdc.loadLocalPagesOnce(DISPATCHER);
             com.opendreamcore.client.render.RenderSupport.markJoined();
             ClientControllerLegacy.sendReady(OdcLegacy.VERSION,
                     Protocol.CAPABILITY_LOCAL_UI | Protocol.CAPABILITY_CLOUD);
         } else if (!connected && sentReady) {
             sentReady = false;
+            com.opendreamcore.client.LocalOdc.resetLocalPagesLoaded();
             VanillaBridge.onDisconnect();
             WindowBranding.reset();
             // 视觉规则跟着会话走，断线清仓
-            com.opendreamcore.client.visual.LegacyVisualSkins.clear();
+            com.opendreamcore.client.visual.LegacyVisualSkins.clear(DISPATCHER);
             com.opendreamcore.client.VanillaHud.clear();
         }
         WindowBranding.tick();

@@ -26,9 +26,6 @@ import javax.imageio.ImageIO;
  */
 public final class ModelRenderer1710 {
 
-    /** 朝向基准（与 1.16.5 同口径，实机可调）。 */
-    public static float bodyYawOffset = 180.0F;
-
     private ModelRenderer1710() {
     }
 
@@ -47,18 +44,26 @@ public final class ModelRenderer1710 {
                     }
                     ResourceLocation rl = new ResourceLocation("opendreamcore",
                             "modeltex/" + safe(label));
-                    Minecraft.getMinecraft().getTextureManager()
-                            .loadTexture(rl, new net.minecraft.client.renderer.texture.DynamicTexture(img));
-                    RLS.put(label, rl);
+                    net.minecraft.client.renderer.texture.TextureManager tm =
+                            Minecraft.getMinecraft().getTextureManager();
+                    tm.loadTexture(rl, new net.minecraft.client.renderer.texture.DynamicTexture(img));
+                    ResourceLocation old = RLS.put(label, rl);
+                    if (old != null && !old.equals(rl)) {
+                        tm.deleteTexture(old);
+                    }
                 } catch (Exception e) {
                     ModelLog.warn("贴图注册失败 " + label + ": " + e);
                 }
             }
         });
-        ModelAssetStore.get().load(gameDir.toPath().resolve("OpenDreamCore").resolve("assets").resolve("model"));
-        LegacyModelRuleStore.get().applyLocalFile(
-                gameDir.toPath().resolve("OpenDreamCore").resolve("visual").resolve("Model.yml"));
-        ModelLog.info("1.7.10 模型 glue 就绪");
+        java.nio.file.Path config = gameDir.toPath().resolve("OpenDreamCore");
+        ModelAssetStore.get().load(config.resolve("assets").resolve("model"));
+        LegacyModelRuleStore.get().applyLocalFile(config.resolve("visual").resolve("Model.yml"));
+        java.nio.file.Path itemFile = config.resolve("ItemModel.yml");
+        if (!java.nio.file.Files.isRegularFile(itemFile)) {
+            itemFile = config.resolve("visual").resolve("ItemModel.yml");
+        }
+        LegacyModelRuleStore.get().applyLocalItemFile(itemFile);
     }
 
     /** 服务端规则入库。 */
@@ -66,41 +71,94 @@ public final class ModelRenderer1710 {
         LegacyModelRuleStore.get().applyBundle(bundle);
     }
 
-    /** 实体替换入口：命中返回 true（调用方取消原版 doRender）。 */
-    public static boolean tryRender(Entity entity, double x, double y, double z,
-                                    float entityYaw, float partialTicks) {
+    /** Render only the replacement body; the caller continues armor, held item, name, and shadow layers. */
+    public static boolean renderBody(Entity entity, float partialTicks) {
         LegacyModelRuleStore.Hit hit = LegacyModelRuleStore.get().hit(lookup(entity));
-        if (hit == null) {
+        if (hit == null || !bodyTexturesReady(hit)) {
             return false;
         }
         Minecraft mc = Minecraft.getMinecraft();
-        // 1.7.10 没有 GlStateManager（1.8 才有），直接 GL11
         GL11.glPushMatrix();
-        GL11.glDisable(GL11.GL_LIGHTING);
-        GL11.glTranslated(x, y, z);
-        GL11.glRotated(bodyYawOffset - entityYaw, 0.0, 1.0, 0.0);
-        float s = hit.scale;
-        if (s != 1.0F) {
-            GL11.glScaled(s, s, s);
+        if (hit.scale != 1.0F) {
+            GL11.glScalef(hit.scale, hit.scale, hit.scale);
         }
         try {
-            Tessellator tess = Tessellator.instance;
-            for (BakedModel bm : hit.baked) {
-                ResourceLocation rl = hit.textureOverride != null
-                        ? RLS.get(hit.textureOverride) : RLS.get(bm.texture);
-                if (rl == null) {
-                    continue;
+            if (hit.rig != null) {
+                drawRig(mc, entity, hit, partialTicks);
+            } else {
+                Tessellator tess = Tessellator.instance;
+                for (BakedModel bm : hit.baked) {
+                    ResourceLocation rl = hit.textureOverride != null
+                            ? RLS.get(hit.textureOverride) : RLS.get(bm.texture);
+                    mc.getTextureManager().bindTexture(rl);
+                    drawQuads(tess, bm.quads, GL11.GL_QUADS, 4);
+                    drawQuads(tess, bm.tris, GL11.GL_TRIANGLES, 3);
                 }
-                mc.getTextureManager().bindTexture(rl);
-                GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-                drawQuads(tess, bm.quads, GL11.GL_QUADS, 4);
-                drawQuads(tess, bm.tris, GL11.GL_TRIANGLES, 3);
             }
         } finally {
-            GL11.glEnable(GL11.GL_LIGHTING);
             GL11.glPopMatrix();
         }
         return true;
+    }
+
+    /** 按贴图聚顶点的缓冲出口（LegacyRigRenderer 流式回调后统一绘制）。 */
+    private static final class GroupSink implements
+            com.opendreamcore.client.model.LegacyRigRenderer.VertexSink {
+        float[] v = new float[128];
+        int n;
+
+        public void vertex(float x, float y, float z, float u, float vv,
+                           float nx, float ny, float nz) {
+            if (n + 5 > v.length) {
+                float[] g = new float[v.length * 2];
+                System.arraycopy(v, 0, g, 0, n);
+                v = g;
+            }
+            v[n++] = x;
+            v[n++] = y;
+            v[n++] = z;
+            v[n++] = u;
+            v[n++] = vv;
+        }
+    }
+
+    /** 骨骼动画路径：AutoBind 自动绑定 + 逐贴图分组绘制（全亮，与静态路径一致）。 */
+    private static void drawRig(Minecraft mc, Entity entity,
+                                LegacyModelRuleStore.Hit hit, float partialTicks) {
+        boolean moving = entity.posX != entity.prevPosX
+                || entity.posZ != entity.prevPosZ;
+        boolean hurting = entity instanceof net.minecraft.entity.EntityLivingBase
+                && ((net.minecraft.entity.EntityLivingBase) entity).hurtTime > 0;
+        final java.util.Map<String, GroupSink> groups =
+                new java.util.LinkedHashMap<String, GroupSink>();
+        com.opendreamcore.client.model.LegacyRigRenderer.render(
+                entity.getUniqueID(), hit.rig, hit.ruleAnims(),
+                hurting ? "hurt" : (moving ? "walk" : "idle"), moving, hurting,
+                entity.ticksExisted + partialTicks,
+                texture -> {
+                    GroupSink g = groups.get(texture);
+                    if (g == null) {
+                        g = new GroupSink();
+                        groups.put(texture, g);
+                    }
+                    return g;
+                });
+        Tessellator tess = Tessellator.instance;
+        for (java.util.Map.Entry<String, GroupSink> e : groups.entrySet()) {
+            ResourceLocation rl = hit.textureOverride != null
+                    ? RLS.get(hit.textureOverride) : RLS.get(e.getKey());
+            if (rl == null) {
+                continue;
+            }
+            mc.getTextureManager().bindTexture(rl);
+            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+            GroupSink g = e.getValue();
+            tess.startDrawingQuads();
+            for (int i = 0; i + 4 < g.n; i += 5) {
+                tess.addVertexWithUV(g.v[i], g.v[i + 1], g.v[i + 2], g.v[i + 3], g.v[i + 4]);
+            }
+            tess.draw();
+        }
     }
 
     private static void drawQuads(Tessellator tess, float[] data, int mode, int vertsPerPrim) {
@@ -115,6 +173,36 @@ public final class ModelRenderer1710 {
             }
         }
         tess.draw();
+    }
+
+    public static ResourceLocation texture(String label) {
+        return label == null ? null : RLS.get(label);
+    }
+
+    public static boolean texturesReady(LegacyModelRuleStore.Hit hit) {
+        if (hit.textureOverride != null) {
+            return RLS.get(hit.textureOverride) != null;
+        }
+        if (hit.rig != null) {
+            for (com.opendreamcore.model.bake.BakedRig.Bone bone : hit.rig.bones) {
+                for (com.opendreamcore.model.bake.BakedRig.Part part : bone.parts) {
+                    if (RLS.get(part.texture) == null) {
+                        return false;
+                    }
+                }
+            }
+        } else {
+            for (BakedModel bm : hit.baked) {
+                if (RLS.get(bm.texture) == null) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean bodyTexturesReady(LegacyModelRuleStore.Hit hit) {
+        return texturesReady(hit);
     }
 
     /** 实体侧匹配条件：type=EntityList id，name=自定义名。 */

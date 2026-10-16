@@ -48,7 +48,7 @@ public final class OdcLegacy {
         // （实机截图实锤的“指令注册两遍”）。现在改为聊天事件拦截转发，
         // 见 ClientHooks.onClientChat，命令名补全全交给服务器
         MinecraftForge.EVENT_BUS.register(ClientHooks.class);
-        // codc（客户端诊断）另走一家：命令名不啿 /odc，不会触发 Tab 补全重名
+        // codc（客户端诊断）走独立命令名，不占用 /odc，避免 Tab 补全重名
         CommandHandler1212.register();
         LOGGER.info("OpenDreamCore-Legacy 1.12.2 初始化完成");
     }

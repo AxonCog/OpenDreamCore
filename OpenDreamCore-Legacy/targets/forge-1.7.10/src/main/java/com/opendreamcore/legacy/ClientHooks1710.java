@@ -36,13 +36,15 @@ public final class ClientHooks1710 {
             // 立刻就往下发标题/页面，下行通道不报备好全被丢包
             VanillaBridge1710.install();
             VanillaBridge1710.registerChannels();
+            com.opendreamcore.client.LocalOdc.loadLocalPagesOnce(DISPATCHER);
             com.opendreamcore.client.render.RenderSupport.markJoined();
             ClientControllerLegacy.sendReady(OdcLegacy1710.VERSION, 0);
         } else if (!connected && sentReady) {
             sentReady = false;
+            com.opendreamcore.client.LocalOdc.resetLocalPagesLoaded();
             WindowBranding.reset();
             // 视觉规则跟着会话走，断线清仓
-            com.opendreamcore.client.visual.LegacyVisualSkins.clear();
+            com.opendreamcore.client.visual.LegacyVisualSkins.clear(DISPATCHER);
             com.opendreamcore.client.VanillaHud.clear();
         }
         // KeyConfig 组合键：旧 Forge 按键事件不可靠，tick 轮询边沿检测
@@ -75,7 +77,7 @@ public final class ClientHooks1710 {
     /**
      * 页面渲染入口：搭在血条那格 overlay 的 Post 上，每帧稳定触发一次。
      * 事件自带的分辨率字段在 forge-universal 里是混淆类型，源码碰不得，
-     * 自己按显示尺寸现算一份，省得跟字节码较劲
+     * 按显示尺寸现算一份，避免依赖字节码解析
      */
     @cpw.mods.fml.common.eventhandler.SubscribeEvent
     public static void onRenderOverlay(net.minecraftforge.client.event.RenderGameOverlayEvent.Post event) {
@@ -131,14 +133,24 @@ public final class ClientHooks1710 {
         // 所以目录必须由各代自己送进去：不送的话 OpenDreamCore/fonts 与云缓存两级都问不到，
         // 配置里写了 ttf 也只会登记不生效。跟上面云缓存同一个目录，一次说清。
         com.opendreamcore.client.visual.LegacyTtfSource.setGameDir(net.minecraft.client.Minecraft.getMinecraft().mcDataDir.toPath());
-        // 实体真身画笔：entity 元素从占位框升级成村民/盔甲架本尊
+        // 实体渲染：entity 元素从占位框升级为村民/盔甲架实体
         com.opendreamcore.client.spi.EntityPainter.Host.register(new EntityPainter1710());
         com.opendreamcore.client.spi.LegacyEntityRenderBridge.Host.register(
                 new com.opendreamcore.client.spi.LegacyEntityRenderBridgeImpl());
         com.opendreamcore.client.spi.LegacyItemRenderBridge.Host.register(
                 new com.opendreamcore.client.spi.LegacyItemModelBridgeImpl());
-        // 物品真身画笔：item_slot/hot_slot 从格底占位升级成本尊图标
+        // 物品渲染：item_slot/hot_slot 从格底占位升级为物品图标
         com.opendreamcore.client.spi.ItemPainter.Host.register(new ItemPainter1710());
+        // 渲染错误聊天桥：1.7.10 的 ChatComponentText
+        com.opendreamcore.client.spi.ErrorChatBridge.Host.register(msg -> {
+            try {
+                net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+                if (mc != null && mc.thePlayer != null) {
+                    mc.thePlayer.addChatMessage(new net.minecraft.util.ChatComponentText(msg));
+                }
+            } catch (Throwable ignored) {
+            }
+        });
         // 世界相位状态守卫：把"按原值还原 GL 状态 + 先收原版待传批次"交给本代实现
         com.opendreamcore.client.render.LegacyRenderBridge.Host.register(new RenderBridge1710());
 // click/hover 音效：直接走 SoundHandler（自管，不需要 mixin）
@@ -157,6 +169,8 @@ public final class ClientHooks1710 {
                         // 音效失败静默，页面照常
                     }
                 });
+        com.opendreamcore.client.MessageDispatcher.setUiDir(
+                () -> net.minecraft.client.Minecraft.getMinecraft().mcDataDir.toPath());
         DISPATCHER.onOpen(id -> {
             activePageId = id;
             com.opendreamcore.client.LocalOdc.activePageId.set(id);

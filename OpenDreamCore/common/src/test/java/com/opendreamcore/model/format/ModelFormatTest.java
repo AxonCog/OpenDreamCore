@@ -65,7 +65,7 @@ class ModelFormatTest {
         }
         assertNotNull(idle);
         assertEquals(2.0, idle.length, 1e-9);
-        assertTrue(idle.loop, "idle 应为循环动画");
+        assertEquals(AnimationIR.LOOP_LOOP, idle.loopMode, "idle 应为循环动画");
         assertTrue(idle.bones.size() > 5, "idle 应驱动多骨骼");
         AnimationIR.BoneAnim jaw = idle.bones.get("h_jaw");
         assertNotNull(jaw, "应有 h_jaw 骨骼轨道");

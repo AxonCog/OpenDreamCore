@@ -40,4 +40,40 @@ public final class AnimBlender {
             out[i] = a[i] + (b[i] - a[i]) * u;
         }
     }
+
+    /** 全零旋转位移 + 全 1 缩放（叠加无意义，跳过省一次遍历）。 */
+    public static boolean isNeutral(AnimEval.Pose p) {
+        return p.rot[0] == 0 && p.rot[1] == 0 && p.rot[2] == 0
+                && p.pos[0] == 0 && p.pos[1] == 0 && p.pos[2] == 0
+                && p.scale[0] == 1 && p.scale[1] == 1 && p.scale[2] == 1;
+    }
+
+    /**
+     * 姿态表叠加层（物理姿态/一次性动作叠在循环底姿上）：layer 按权重 additive
+     * 进 base（base 被修改；layer 不动）。单骨骼语义同 addInto，但按骨骼名走表、
+     * 中性骨骼直接跳过不新增条目。
+     */
+    public static void add(java.util.Map<String, AnimEval.Pose> base,
+                           java.util.Map<String, AnimEval.Pose> layer, double weight) {
+        if (base == null || layer == null || layer.isEmpty() || weight == 0) {
+            return;
+        }
+        for (java.util.Map.Entry<String, AnimEval.Pose> e : layer.entrySet()) {
+            AnimEval.Pose lp = e.getValue();
+            if (lp == null || isNeutral(lp)) {
+                continue;
+            }
+            AnimEval.Pose bp = base.get(e.getKey());
+            if (bp == null) {
+                bp = fresh();
+                base.put(e.getKey(), bp);
+            }
+            double w = Math.min(Math.max(weight, 0), 1);
+            for (int i = 0; i < 3; i++) {
+                bp.rot[i] += lp.rot[i] * w;
+                bp.pos[i] += lp.pos[i] * w;
+                bp.scale[i] *= 1 + (lp.scale[i] - 1) * w;
+            }
+        }
+    }
 }

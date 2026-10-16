@@ -2,7 +2,7 @@ package com.opendreamcore.fixtures;
 
 import com.opendreamcore.core.addons.AddonProvider;
 
-/** addons fixture：打进 fixture-provider.jar（含 META-INF/services 注册文件）供热拔插单测用。 */
+/** addons fixture：打进 fixture-provider.jar（含 META-INF/services 注册文件）供加载测试用。 */
 public class FixtureAddonProvider implements AddonProvider {
 
     private final String tag;

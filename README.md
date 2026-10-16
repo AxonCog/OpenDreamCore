@@ -23,21 +23,15 @@
 
 OpenDreamCore 不是一个单纯的 UI 模组。
 
-它是一套**完整的 Minecraft 引擎**——UI 渲染、模型渲染、动画系统、脚本语言、网络协议、资源云分发、服务端裁决……全都有。你现在看到的是 UI 模块的阶段性成果，后面的模型引擎、动作系统等模块还在排队。
+它目前以 UI 与页面系统为主，模型渲染和动作系统仍在迁移中；网络、资源与服务端能力以各子项目当前实现为准。部分功能仍在开发或仅覆盖特定版本。
 
-简单说：服主写 YAML 就能出界面，玩家进服自动加载，单机也能玩全套。点格子买东西、扣钱发货服务端裁决，不怕作弊。HUD 随便换，世界空间悬浮面板、NPC 对话气泡、自定义 tooltip……你能想到的 UI 场景基本都覆盖了。
+服主可以使用 YAML 配置页面，玩家进服后由客户端加载；具体页面、网络和单机能力取决于对应版本与子项目的实现。
 
 ## 为什么开源
 
 2022 年龙之核心出来的时候我就在关注。那时候大家都在造轮子，我也一样。2023 年正式立项搞梦想核心，一开始就是自用——自己的服务器、自己的玩法、自己折腾。2025 年小范围内测，不少朋友陪着熬了很长时间。
 
-四年来这套系统一直在跑，功能早就全面覆盖了——只是以前闭源，现在开源。
-
-> Minecraft 这个游戏在走下坡路，社区在萎缩，但偏偏在这个时候，大家还在各自造轮子。UI 框架造一个、渲染引擎造一个、脚本语言造一个——造完也不开源，然后下一个人继续从头造。这个死循环，已经转了四年了。
-
-计算机最迷人的地方就是开源。国内的开源生态跟国外比差了一大截，不是技术问题，是意识问题。如果大家都把火种藏在怀里，这片原野终究会熄灭。我希望尽自己的一点能力，推着这个生态往前走半步。哪怕只有半步。
-
-**所以梦想核心正式开源了。** 完整代码、完整协议、完整文档，毫无保留地放了出来。
+当前仓库包含已公开的代码与部分设计文档；功能覆盖和文档完整度仍在持续完善。
 
 > **以前，这是我的梦想。**
 > **以后，这是我们的核心。**
@@ -57,17 +51,16 @@ OpenDreamCore 不是一个单纯的 UI 模组。
 
 | 模块 | 状态 |
 |---|---|
-| UI 引擎（渲染 + 交互 + 页面系统 + 可视化编辑器） | ✅ 可用 |
-| 网络协议（二进制握手 + 下发 + 裁决 + 加密） | ✅ 可用 |
-| 脚本语言 DreamLang（中英双语） | ✅ 可用 |
-| 服务端插件（Paper 容器裁决 + 资源云） | ✅ 可用 |
-| 字符替换与位图字体（含 gif 动画） | ✅ 可用 |
-| HUD 多页叠加 | ✅ 可用 |
-| 资源云管线（图片/音频/字体增量同步） | ✅ 可用 |
-| 多版本覆盖（1.6.4 ~ 26.1.2，16 个 target） | ✅ 可用 |
+| UI 引擎（渲染 + 交互 + 页面系统） | 部分版本可用 |
+| 网络协议（握手 + 下发等） | 以版本实现为准 |
+| 脚本语言 DreamLang | 以当前实现为准 |
+| 服务端插件与资源云 | 以插件实现为准 |
+| 字符替换与位图字体 | 以版本实现为准 |
+| HUD 多页叠加 | 以版本实现为准 |
+| 资源云管线 | 以版本实现为准 |
+| 多版本覆盖 | 现代与远古版本分为不同子项目，能力并不自动等同 |
 | 模型渲染引擎 | 🔄 迁移中 |
 | 动作/动画系统 | 🔄 迁移中 |
-
 ## 它能干什么
 
 ### 给玩家
@@ -100,62 +93,76 @@ OpenDreamCore 不是一个单纯的 UI 模组。
        ↓ 编码
 协议层：自研二进制协议（opendreamcore:*，版本协商，加密）
        ↓
-客户端：自研渲染引擎（30+ 种元素 + 动画 + 完整交互）
-服务端：裁决引擎（商店/容器/权限/资源云）
+客户端：渲染引擎（能力随目标版本而异）
+服务端：服务端能力（以插件实现为准）
 ```
 
 ## 子项目
 
 | 目录 | 说明 | 状态 |
 |---|---|---|
-| `OpenDreamCore/` | 客户端模组（common + 12 个现代 target） | ✅ 全版本可用 |
-| `OpenDreamCore-Plugin/` | 服务端 Bukkit/Paper 插件（整包 Java 8 字节码） | ✅ 可用 |
-| `OpenDreamCore-Legacy/` | 远古版本线（1.6.4–1.16.5 Forge） | ✅ 整体迁移完成 |
+| `OpenDreamCore/` | 客户端模组（现代 target） | 现代版本线 |
+| `OpenDreamCore-Legacy/` | 远古版本线（1.7.10–1.16.5 Forge） | 独立维护 |
 
 ## 文档
 
-- [`docs/YAML语法.md`](docs/YAML语法.md) — UI 配置语法
-- [`docs/协议.md`](docs/协议.md) — 自研二进制协议
-- [`docs/DreamLang语言参考手册.md`](docs/DreamLang语言参考手册.md) — 脚本语言参考
-- [`docs/主题系统Wiki.md`](docs/主题系统Wiki.md) — 主题换皮
-- [`docs/梦想核心语法适配Wiki.md`](docs/梦想核心语法适配Wiki.md) — 龙核语法迁移指南
-- [`docs/附属开发指南.md`](docs/附属开发指南.md) — 给配套插件作者的手册
+以下文档位于现代客户端子项目的 `OpenDreamCore/docs/`：
 
-内部设计与实施文档随仓库放在 `dev/docs/` 下一起维护。
+- [`Animation.md`](OpenDreamCore/docs/Animation.md) — 动画说明
+- [`Animation-API.md`](OpenDreamCore/docs/Animation-API.md) — 动画 API
+- [`BMD.md`](OpenDreamCore/docs/BMD.md) — BMD 格式说明
+- [`YSM.md`](OpenDreamCore/docs/YSM.md) — YSM 说明
 
-示例页面在 [xamples/](examples/) 目录（模组示例 + 服务端插件示例）。
+各子项目的 README 记录其自身的构建与实现范围。仓库当前没有统一的 YAML、协议或 DreamLang 参考手册；请以代码和对应子项目文档为准。
+
+示例页面目录目前未随仓库提供。
 
 ## 构建
 
+现代客户端根工程位于 `OpenDreamCore/`，服务端插件位于 `OpenDreamCore-Plugin/`，Legacy 目标按自身 wrapper 独立构建。
+
 ```powershell
-# 一条命令全量构建（16 target + 插件 + common 测试，全绿后自动收口）
-pwsh dev\build_matrix.ps1
+# 现代客户端根工程：先查看已初始化 target
+.\gradlew.bat -p OpenDreamCore listTargets
 
-# 单独构建某个 target
-.\gradlew.bat -p targets/fabric-1.21.1 build
+# 单独构建某个现代 target
+.\gradlew.bat -p OpenDreamCore -Ptarget=fabric-1.21.1 build
 
-# 服务端插件（在 OpenDreamCore-Plugin/ 下）
-.\gradlew.bat build
+# 服务端插件
+.\gradlew.bat -p OpenDreamCore-Plugin build
+
+# Legacy 当前活动矩阵
+.\gradlew.bat -p OpenDreamCore-Legacy verifyMatrix -PmatrixContinue=true
 ```
 
-构建产物统一收进 `output/all/`：16 个版本客户端的 jar 加服务端插件，一个目录备齐，直接分发。
+各构建命令是否需要额外 JDK、网络依赖或目标专用 wrapper，以实际环境输出为准。构建产物是否收进 `output/all/` 取决于当前构建配置。
+### 本轮实测边界
+
+- `OpenDreamCore` 的 `testCommon`：通过。
+- `OpenDreamCore` 的 `fabric-1.21.1`：通过，包含共享测试、编译、打包和产物汇总。
+- `OpenDreamCore-Plugin`：通过；插件使用 JDK 8 字节码编译，JDK 8/JDK 17 工具链均已定位。
+- `OpenDreamCore-Legacy verifyMatrix -PmatrixContinue=true`：活动的 1.7.10、1.12.2、1.16.5 均通过。
+- NeoForge 1.21.1 代表目标未完成：源码测试通过，但 `neoform-runtime:2.0.24` 下载时连接 `maven.neoforged.net` 超时。26.1.2 目标还需要 JDK 25，而当前环境未提供该 JDK。
+- 当前仓库没有可直接启动的客户端 smoke 入口；画面级交互仍需在对应 Minecraft 实例中验证，不能把编译通过等同于全功能通过。
+
 
 ## 版本覆盖
 
-| 版本 | 平台 | 状态 |
-|---|---|---|
-| 1.20.1 | Forge + Fabric | ✅ 可用 |
-| 1.21.1 | Forge + Fabric + NeoForge | ✅ 可用 |
-| 1.21.4 | Fabric + NeoForge | ✅ 可用 |
-| 1.21.8 | Fabric + NeoForge | ✅ 可用 |
-| 1.21.11 | Fabric + NeoForge | ✅ 可用 |
-| 26.1.2 | Fabric + NeoForge | ✅ 可用 |
-| 1.16.5 | Forge | ✅ 可用 |
-| 1.12.2 | Forge | ✅ 可用 |
-| 1.7.10 | Forge | ✅ 可用 |
-| 1.6.4 | Forge | ✅ 可用 |
+现代客户端目标位于 `OpenDreamCore/`，远古 Forge 目标位于 `OpenDreamCore-Legacy/`。下表列出本次维护覆盖的目标版本；“可用”不代表所有功能在所有目标上完全一致。
 
-> 16 个 target 全矩阵构建绿。远古版跟新版跑同一套页面格式、同一套协议、同一套脚本能力，行为一致；加版本 = 新写一个平台层，核心代码零改动。
+| 版本 | 平台 | 子项目 |
+|---|---|---|
+| 1.20.1 | Forge + Fabric | `OpenDreamCore/` |
+| 1.21.1 | Forge + Fabric + NeoForge | `OpenDreamCore/` |
+| 1.21.4 | Fabric + NeoForge | `OpenDreamCore/` |
+| 1.21.8 | Fabric + NeoForge | `OpenDreamCore/` |
+| 1.21.11 | Fabric + NeoForge | `OpenDreamCore/` |
+| 26.1.2 | Fabric + NeoForge | `OpenDreamCore/` |
+| 1.16.5 | Forge | `OpenDreamCore-Legacy/` |
+| 1.12.2 | Forge | `OpenDreamCore-Legacy/` |
+| 1.7.10 | Forge | `OpenDreamCore-Legacy/` |
+
+现代与远古子项目分别维护平台适配层；页面格式、协议和脚本等能力请以各目标的实际实现为准，不作全矩阵行为一致性保证。
 
 ## 参与贡献
 
@@ -200,9 +207,7 @@ GitHub：[AxonCog/OpenDreamCore](https://github.com/AxonCog/OpenDreamCore)
 
 ## What is this
 
-OpenDreamCore is not just a UI mod. It is a **complete Minecraft engine** — UI rendering, model rendering, animation systems, a custom scripting language, binary networking protocol, cloud resource distribution, server-side authority... the works.
-
-In short: server owners write YAML to create UIs, players get them automatically when joining, and it works in singleplayer too. Click-to-buy with server-side authority, custom HUDs, world-space holograms, NPC dialogue bubbles, custom tooltips — pretty much every UI scenario you can think of.
+OpenDreamCore focuses on UI and page systems. Model rendering and animation are still being migrated, and network, resource, and server capabilities depend on the implementation of each subproject and target.
 
 ## Why open source
 
@@ -210,7 +215,7 @@ Minecraft is getting old. The community is shrinking. But what saddens me most i
 
 Open source is the soul of computing. The gap between China's MC open-source ecosystem and the international community isn't about technical skill — it's about mindset. I want to push this ecosystem forward, even if just by half a step.
 
-**So here it is. Full code, full protocol, full docs. No strings attached.**
+The repository contains the currently published code and selected design documents; documentation and feature coverage are still being expanded.
 
 > *This used to be my dream.*
 > *Now, it's our core.*
@@ -220,13 +225,13 @@ PRs, Issues, ideas — all welcome.
 ## Build
 
 ```powershell
-pwsh dev\build_matrix.ps1  # full matrix: 16 targets + server plugin + tests
+pwsh dev\build_matrix.ps1  # build according to the repository's current matrix configuration
 .\gradlew.bat build        # or build a single target / the server plugin
 ```
 
-Artifacts are collected into `output/all/`.
+Artifacts may be collected into `output/all/` by the current build configuration.
 
-All 16 targets (Minecraft 1.6.4 → 26.1.2) build green and behave the same from the same page format, protocol and scripting engine.
+Modern targets are maintained in `OpenDreamCore/`; legacy Forge targets are maintained separately in `OpenDreamCore-Legacy/`. Their supported features and behavior should not be assumed identical.
 
 ## Community
 

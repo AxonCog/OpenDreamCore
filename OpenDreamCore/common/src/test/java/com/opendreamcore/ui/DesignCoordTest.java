@@ -10,6 +10,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 设计坐标三路证明：顶层贴边 px + anchor 入向 + 子元素相对 px。
@@ -114,5 +116,64 @@ class DesignCoordTest {
         assertEquals(50.0 + 10.0, child.y(), EPS);
         assertEquals(40.0, child.width(), EPS);
         assertEquals(20.0, child.height(), EPS);
+    }
+
+    @Test
+    void projectedNonOriginLimitUsesScreenCoordinates() {
+        Page p = page("""
+                design:
+                  width: 1920
+                  height: 1080
+                clipped:
+                  type: button
+                  x: 0
+                  y: 0
+                  width: 1920
+                  height: 1080
+                  limitX: 100
+                  limitY: 200
+                  limitWidth: 400
+                  limitHeight: 300
+                """);
+        Viewport vp = LayoutEngine.viewportFor(p, 960, 540);
+        List<RenderNode> projected = LayoutEngine.projectTree(designLayout(p, 960, 540), vp);
+        RenderNode node = projected.get(0);
+        assertEquals(50, node.limitX(), EPS);
+        assertEquals(100, node.limitY(), EPS);
+        assertEquals(200, node.limitWidth(), EPS);
+        assertEquals(150, node.limitHeight(), EPS);
+        assertEquals("clipped", node.hitTest(100, 150).id());
+        assertTrue(node.hitTest(100, 260) == null);
+        assertTrue(node.hitTest(250, 150) == null);
+        assertTrue(node.hitTest(100, 250) == null);
+    }
+
+    @Test
+    void projectionPreservesAutomaticDimensionsAndDesignLimitProperties() {
+        Page p = page("""
+                design:
+                  width: 1920
+                  height: 1080
+                auto:
+                  type: image
+                  x: 20
+                  y: 40
+                  limitX: 20
+                  limitY: 40
+                  limitWidth: 100
+                  limitHeight: 80
+                """);
+        List<RenderNode> design = designLayout(p, 1200, 540);
+        RenderNode original = design.get(0);
+        RenderNode projected = LayoutEngine.projectTree(design,
+                LayoutEngine.viewportFor(p, 1200, 540)).get(0);
+        assertTrue(Double.isNaN(projected.width()));
+        assertTrue(Double.isNaN(projected.height()));
+        assertEquals(130, projected.limitX(), EPS);
+        assertEquals(20, projected.limitY(), EPS);
+        assertEquals(50, projected.limitWidth(), EPS);
+        assertEquals(40, projected.limitHeight(), EPS);
+        assertEquals(20, ((Number) original.props().get("limitX")).doubleValue(), EPS);
+        assertEquals(100, ((Number) original.props().get("limitWidth")).doubleValue(), EPS);
     }
 }

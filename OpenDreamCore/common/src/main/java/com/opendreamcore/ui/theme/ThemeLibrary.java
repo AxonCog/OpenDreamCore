@@ -17,9 +17,8 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * 主题库。整套主题体系源自梦想引擎的设计启发，这里是它的进程级单例：主题文件解析成 Theme 后登记于此，页面编译（PageSchema.build）
- * 按页面声明的主题名取用。服务端与客户端单机两条加载路径共用本类，
- * 平台版本层零感知——这就是"common 改一处、全版本受益"的落点。
+ * 进程级主题库：主题文件解析成 {@link Theme} 后登记于此，页面编译（{@code PageSchema.build}）
+ * 按页面声明的主题名取用。服务端与客户端的加载路径共用本类，不直接依赖平台版本 API。
  *
  * 约定目录：OpenDreamCore/themes/*.yml|*.yaml|*.json，文件名即主题名；
  * default 主题缺省生效，页面可用 theme: <名字> 显式选择其它主题。

@@ -32,9 +32,9 @@ public final class FinalGapLegacy {
         LegacyMethods.register("get_opengl_time", a ->
                 (double) (System.currentTimeMillis() % 100000));
         LegacyMethods.register("get_player_pos", a -> new double[]{
-                dbl(LegacyMethods.delegate("Player", "获取X")),
-                dbl(LegacyMethods.delegate("Player", "获取Y")),
-                dbl(LegacyMethods.delegate("Player", "获取Z"))});
+                dbl(LegacyMethods.delegate("Player", "获取坐标X")),
+                dbl(LegacyMethods.delegate("Player", "获取坐标Y")),
+                dbl(LegacyMethods.delegate("Player", "获取坐标Z"))});
         LegacyMethods.register("get_px_description", a -> "");
         LegacyMethods.register("insert", a -> {
             String src = str(a, 0);

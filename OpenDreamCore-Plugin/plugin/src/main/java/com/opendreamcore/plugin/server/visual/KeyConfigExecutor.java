@@ -32,6 +32,7 @@ public final class KeyConfigExecutor {
         public final String script;        // null = 无脚本
         public final String ruleRun;       // run: 键（十系统通用脚本声明，null = 无）
         public final String eventName;     // event: 键（触发时发布的事件名，null = 无）
+        public final String animTrigger;   // anim: 键（触发控制器 trigger，null = 无）
 
         ComboRule(String id, Map<String, Object> ir) {
             this.id = id;
@@ -53,6 +54,7 @@ public final class KeyConfigExecutor {
             this.script = str(ir.get("script"));
             this.ruleRun = str(ir.get("run"));
             this.eventName = str(ir.get("event"));
+            this.animTrigger = str(ir.get("anim"));
         }
     }
 
@@ -67,6 +69,7 @@ public final class KeyConfigExecutor {
     /** 从规则 IR 装载（VisualRuleManager 转交）。两种形态都认：新形态 ID + keys 列表（每个键展开成一条规则，commands 承接命令，老配置写的 trigger 也认）；老形态键名即组合串。组合串一律 canonical 归一，与客户端上报一致。 */
     public void load(Map<String, Map<String, Object>> rulesIr) {
         rules.clear();
+        states.clear(); // 重载后旧规则的冷却状态不可沿用
         for (Map.Entry<String, Map<String, Object>> e : rulesIr.entrySet()) {
             try {
                 String id = e.getKey();
@@ -123,12 +126,26 @@ public final class KeyConfigExecutor {
      * 返回：true = 有规则命中并执行
      */
     public boolean feed(Player player, String combo) {
-        if (combo == null || (combo).trim().isEmpty()) {
+        String canonicalCombo = com.opendreamcore.visual.KeyCombo.canonical(combo);
+        if (canonicalCombo.isEmpty()) {
             return false;
         }
-        ComboRule rule = rules.get(combo.trim());
-        return rule != null && fire(player, rule, combo.trim());
+        ComboRule rule = rules.get(canonicalCombo);
+        if (rule == null) {
+            // 未命中直出（一次限流 3s）：规则没装载/归一不一致/服主改了键位，
+            // 静默丢弃的话服主永远不知道按键链断在哪环
+            long now = System.currentTimeMillis();
+            if (now - lastMissLog > 3000) {
+                lastMissLog = now;
+                log("收到按键「" + combo + "」未命中规则（已装载 " + rules.size()
+                        + " 条: " + rules.keySet() + "）");
+            }
+            return false;
+        }
+        return fire(player, rule, canonicalCombo);
     }
+
+    private long lastMissLog;
 
     private boolean fire(Player player, ComboRule rule, String comboText) {
         String stateKey = player.getUniqueId() + "|" + rule.id;
@@ -149,45 +166,41 @@ public final class KeyConfigExecutor {
         }
         st.lastConditionPassed = true;
         st.lastFiredAt = now;
+        log(player.getName() + " 触发「" + comboText + "」→ " + rule.id
+                + (rule.animTrigger != null && !rule.animTrigger.isEmpty()
+                        ? "（动画 " + rule.animTrigger + "）" : ""));
 
-        // 执行命令（三种身份前缀）
         for (String cmd : rule.commands) {
             dispatch(player, cmd);
         }
-        // 执行脚本：龙核方言先进适配器链过一遍（方法.xxx → xxx，老脚本直接能跑）
-        String script = com.opendreamcore.adapter.AdapterChain.rewriteScript(rule.script);
-        if (script != null && !script.trim().isEmpty()) {
-            Scope scope = new Scope();
-            scope.assignPlayer("name", player.getName());
-            scope.assignVar("player_name", player.getName());
-            try {
-                DreamLang.execute(script, scope);
-            } catch (Exception ex) {
-                log("脚本执行失败 " + rule.id + ": " + ex);
-            }
+        if (rule.animTrigger != null && !rule.animTrigger.isEmpty()) {
+            com.opendreamcore.api.AnimationAPI.anim().trigger(player, rule.animTrigger);
         }
-        // run:（十系统通用脚本键，与 script 同语义——KeyConfig 形态二叫 script，
-        // 规则里写 run 也认）；event:（规则触发时发布到 EventBus 的事件名）
-        String ruleRun = com.opendreamcore.adapter.AdapterChain.rewriteScript(rule.ruleRun);
-        if (ruleRun != null && !ruleRun.trim().isEmpty()) {
-            Scope scope = new Scope();
-            scope.assignPlayer("name", player.getName());
-            scope.assignVar("player_name", player.getName());
-            try {
-                DreamLang.execute(ruleRun, scope);
-            } catch (Exception ex) {
-                log("run 脚本执行失败 " + rule.id + ": " + ex);
-            }
-        }
-        if (rule.eventName != null && !rule.eventName.trim().isEmpty()) {
-            try {
-                com.opendreamcore.script.EventBus.publish(rule.eventName,
-                        player.getName(), rule.id);
-            } catch (Exception ex) {
-                log("事件发布失败 " + rule.id + ": " + ex);
-            }
+        runScript(player, rule.id, rule.script);
+        runScript(player, rule.id, rule.ruleRun);
+        if (rule.eventName != null && !rule.eventName.isEmpty()) {
+            com.opendreamcore.script.EventBus.publish(rule.eventName, player.getName(), rule.id);
         }
         return true;
+    }
+
+    /**
+     * 跑一段 DreamLang（script: 与 run: 同语义；龙核方言先过适配器链）。
+     * 环境变量：name/player_name。空串/null 直接跳过。
+     */
+    private void runScript(Player player, String ruleId, String raw) {
+        String script = raw == null ? null : com.opendreamcore.adapter.AdapterChain.rewriteScript(raw);
+        if (script == null || script.trim().isEmpty()) {
+            return;
+        }
+        Scope scope = new Scope();
+        scope.assignPlayer("name", player.getName());
+        scope.assignVar("player_name", player.getName());
+        try {
+            DreamLang.execute(script, scope);
+        } catch (Exception ex) {
+            log("脚本执行失败 " + ruleId + ": " + ex);
+        }
     }
 
     private void dispatch(Player player, String raw) {

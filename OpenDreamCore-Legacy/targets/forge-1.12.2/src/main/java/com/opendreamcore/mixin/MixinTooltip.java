@@ -1,5 +1,7 @@
 package com.opendreamcore.mixin;
 
+import java.util.ArrayList;
+import java.util.List;
 import com.opendreamcore.client.LegacyTooltipStore;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -46,7 +48,7 @@ public abstract class MixinTooltip {
     private static void drawTooltip(LegacyTooltipStore.Entry e, int x, int y) {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
         net.minecraft.client.gui.FontRenderer font = mc.fontRenderer;
-        String[] lines = String.valueOf(e.text).split("\n", -1);
+        String[] lines = wrapLines(font, String.valueOf(e.text), tooltipWidth(e));
         int w = 0;
         for (String l : lines) {
             w = Math.max(w, font.getStringWidth(l));
@@ -64,6 +66,25 @@ public abstract class MixinTooltip {
         for (int i = 0; i < lines.length; i++) {
             font.drawString(lines[i], x + pad, y + pad + i * (font.FONT_HEIGHT + 1), fg);
         }
+    }
+
+    private static int tooltipWidth(LegacyTooltipStore.Entry e) {
+        double width = e.width;
+        return width > 0 && Double.isFinite(width) && width <= Integer.MAX_VALUE ? (int) Math.ceil(width) : Integer.MAX_VALUE;
+    }
+
+    private static String[] wrapLines(net.minecraft.client.gui.FontRenderer font, String text, int maxWidth) {
+        List<String> out = new ArrayList<>();
+        for (String raw : text.split("\\n", -1)) {
+            StringBuilder line = new StringBuilder();
+            for (int i = 0; i < raw.length(); i++) {
+                String ch = raw.substring(i, i + 1);
+                if (line.length() > 0 && (maxWidth != Integer.MAX_VALUE && font.getStringWidth(line + ch) > maxWidth)) { out.add(line.toString()); line.setLength(0); }
+                line.append(ch);
+            }
+            out.add(line.toString());
+        }
+        return out.toArray(new String[0]);
     }
 
     private static int parseColor(String s, int fallback) {

@@ -17,7 +17,7 @@ import java.util.Map;
  * DreamLang 执行器：AST → 值。
  * 支持：分层表达式求值（三元/逻辑/相等/比较/加减/乘除/一元）、
  * var/const 声明、if/else、赋值、方法调用（方法.xxx）、成员/索引访问。
- * 完整语言特性（循环/类/模块/异常/异步）按需逐步补齐。
+ * 异步执行由显式 AST 续体驱动；同步入口仍使用本访问器。
  */
 public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
 
@@ -33,6 +33,36 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
 
     public Scope scope() {
         return scope;
+    }
+
+    void scope(Scope scope) { this.scope = scope; }
+    /** Execute using an explicit activation stack; no Java visitor stack survives delay. */
+    void executeAsync(DreamLangParser.ProgramContext program, AsyncScheduler scheduler) {
+        if (program == null || scheduler == null) {
+            throw new IllegalArgumentException("program and scheduler are required");
+        }
+        new AsyncExecution(this, program, scheduler).run();
+    }
+    @Override
+    public Object visit(ParseTree tree) {
+        Scope previous = DreamLang.enterScope(scope);
+        try {
+            return super.visit(tree);
+        } finally {
+            DreamLang.leaveScope(previous);
+        }
+    }
+
+    @Override
+    public Object visitBlockStatement(DreamLangParser.BlockStatementContext ctx) {
+        Object last = null;
+        for (DreamLangParser.StatementContext statement : ctx.statement()) {
+            last = visit(statement);
+            if (last instanceof DreamLang.PauseRequest || signal != null) {
+                return last;
+            }
+        }
+        return last;
     }
 
     // 函数定义 / Lambda
@@ -60,13 +90,25 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     }
 
     /** 用户函数：调用时开子作用域执行体。 */
-    private final class UserFunction implements Callable {
+    private final class UserFunction implements ScriptCallable {
         private final List<String> params;
         private final DreamLangParser.BlockStatementContext body;
 
         UserFunction(List<String> params, DreamLangParser.BlockStatementContext body) {
             this.params = params;
             this.body = body;
+        }
+
+        @Override
+        public ParseTree scriptBody() { return body; }
+
+        @Override
+        public Scope callScope(Scope caller, Object[] args) {
+            Scope child = caller.child();
+            for (int i = 0; i < params.size(); i++) {
+                child.declare(params.get(i), i < args.length ? args[i] : null);
+            }
+            return child;
         }
 
         @Override
@@ -86,7 +128,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     }
 
     /** Lambda 箭头函数：(x) => 表达式 / (x) => { 语句 }。 */
-    private final class LambdaFunction implements Callable {
+    private final class LambdaFunction implements ScriptCallable {
         private final List<String> params;
         private final DreamLangParser.LambdaBodyContext body;
 
@@ -96,14 +138,30 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         }
 
         @Override
+        public ParseTree scriptBody() { return body; }
+
+        @Override
+        public Scope callScope(Scope caller, Object[] args) {
+            Scope child = caller.child();
+            for (int i = 0; i < params.size(); i++) {
+                child.declare(params.get(i), i < args.length ? args[i] : null);
+            }
+            return child;
+        }
+
+        @Override
         public Object call(Object[] args) {
-            Scope saved = scope;
             Scope child = scope.child();
             for (int i = 0; i < params.size(); i++) {
                 child.assign(params.get(i), i < args.length ? args[i] : null);
             }
             return runIn(child, () -> body.expression() != null
-                    ? visit(body.expression()) : visit(body.blockStatement()));
+                    ? visit(body.expression()) : visitLambdaBlock(body.blockStatement()));
+        }
+
+        private Object visitLambdaBlock(DreamLangParser.BlockStatementContext block) {
+            Object result = visit(block);
+            return signal == null ? null : result;
         }
 
         @Override
@@ -387,26 +445,38 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     }
 
     /** 按层折叠二元运算：操作数交替出现，操作符为中间 token。 */
+    /** 按层折叠二元运算；&&/|| 在左值已决定结果时不求值右侧。 */
     private Object fold(ParserRuleContext ctx, Class<?> operandClass) {
         Object result = null;
         String op = null;
+        boolean hasResult = false;
         for (int i = 0; i < ctx.getChildCount(); i++) {
             ParseTree child = ctx.getChild(i);
             if (operandClass.isInstance(child)) {
                 Object v = visit(child);
-                if (result == null) {
+                if (!hasResult) {
                     result = v;
+                    hasResult = true;
                 } else {
                     result = applyBinary(op, result, v);
                 }
             } else if (child instanceof TerminalNode t) {
                 op = t.getText();
+                if (isShortCircuit(ctx, op)
+                        && ("&&".equals(op) ? !truthy(result) : truthy(result))) {
+                    return result;
+                }
             }
         }
         return result;
     }
 
-    private Object applyBinary(String op, Object l, Object r) {
+    private static boolean isShortCircuit(ParserRuleContext ctx, String op) {
+        return (ctx instanceof DreamLangParser.AndExpressionContext && "&&".equals(op))
+                || (ctx instanceof DreamLangParser.OrExpressionContext && "||".equals(op));
+    }
+
+    static Object applyBinary(String op, Object l, Object r) {
         switch (op) {
             case "+":
                 return (l instanceof String || r instanceof String)
@@ -455,13 +525,15 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
             } else {
                 assignTarget(ctx.atom(), value);
             }
-            return value;
+        }
+        if (target instanceof BoundMethod) {
+            return invoke(target, new Object[0]);
         }
         return target;
     }
 
     /** 赋值目标：裸标识符 → 局部/页面变量。 */
-    private void assignTarget(DreamLangParser.AtomContext atom, Object value) {
+    void assignTarget(DreamLangParser.AtomContext atom, Object value) {
         if (atom instanceof DreamLangParser.IdentifierAtomContext id) {
             String name = id.IDENTIFIER().getText();
             if ("vars".equals(name) || "global".equals(name) || "player".equals(name) || "papi".equals(name)) {
@@ -473,7 +545,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         throw new ScriptException("暂不支持的赋值目标: " + atom.getText());
     }
 
-    /** 后缀赋值：list[i] = v / map[key] = v（最后一个后缀必须是下标访问）。 */
+    /** 后缀赋值：list[i] = v / map[key] = v / map.member = v。 */
     @SuppressWarnings("unchecked")
     private void assignSuffixTarget(DreamLangParser.PrimaryExpressionContext ctx, Object value) {
         Object target = visit(ctx.atom());
@@ -499,7 +571,22 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
                 ((java.util.Map<Object, Object>) m).put(String.valueOf(index), value);
                 return;
             }
+            if (target instanceof MapLike map && index != null) {
+                map.put(String.valueOf(index), value);
+                return;
+            }
             throw new ScriptException("暂不支持的赋值目标: " + ctx.getText());
+        }
+        if (last instanceof DreamLangParser.DotAccessSuffixContext dot) {
+            String member = dot.IDENTIFIER().getText();
+            if (target instanceof java.util.Map<?, ?> m) {
+                ((java.util.Map<Object, Object>) m).put(member, value);
+                return;
+            }
+            if (target instanceof MapLike map) {
+                map.put(member, value);
+                return;
+            }
         }
         throw new ScriptException("暂不支持的赋值目标: " + ctx.getText());
     }
@@ -531,12 +618,19 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     /** 方法调用：方法.xxx(...) / 函数(...) / 对象.方法(...)。 */
     private Object invoke(Object target, Object[] args) {
         if (target instanceof Callable callable) {
-            return callable.call(args);
+            Object value = callable.call(args);
+            if (value instanceof DreamLang.PauseRequest) {
+                throw new ScriptException("延时需要 executeAsync 调度器");
+            }
+            if (value instanceof DreamLang.ScriptCallRequest call) {
+                return DreamLang.execute(call.script(), call.scope());
+            }
+            return value;
         }
         throw new ScriptException("不可调用: " + target);
     }
 
-    private Object access(Object target, String member) {
+    static Object access(Object target, String member) {
         if (target instanceof Callable c) {
             return c.member(member);
         }
@@ -549,7 +643,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         throw new ScriptException("成员访问失败: " + target + "." + member);
     }
 
-    private Object index(Object target, Object index) {
+    static Object index(Object target, Object index) {
         if (target instanceof MapLike map && index != null) {
             return map.get(String.valueOf(index));
         }
@@ -600,16 +694,15 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     public Object visitIdentifierAtom(DreamLangParser.IdentifierAtomContext ctx) {
         String name = ctx.IDENTIFIER().getText();
         if ("方法".equals(name)) {
-            return new MethodNamespace();
+            Object local = scope.resolve(name);
+            return local != null ? local : new MethodNamespace();
         }
-        if (NamespaceRegistry.containsNamespace(name)) {
-            return new NamespaceObject(name);
-        }
+        if (NamespaceRegistry.containsNamespace(name)) return new NamespaceObject(name);
         Callable fn = functions.get(name);
-        if (fn != null) {
-            return fn;
-        }
-        return scope.resolve(name);
+        if (fn != null) return fn;
+        Object local = scope.resolve(name);
+        if (local != null) return local;
+        return MethodRegistry.contains(name) ? new BoundMethod(name) : null;
     }
 
     @Override
@@ -682,6 +775,12 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         }
     }
 
+    /** AST function metadata consumed by the explicit async activation stack. */
+    public interface ScriptCallable extends Callable {
+        ParseTree scriptBody();
+        Scope callScope(Scope caller, Object[] args);
+    }
+
     /** 可调用对象（方法/函数）。 */
     public interface Callable {
         Object call(Object[] args);
@@ -694,11 +793,25 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
     /** Map 访问适配。 */
     public interface MapLike {
         Object get(String key);
+
+        default void put(String key, Object value) {
+            throw new ScriptException("Map 不可写: " + key);
+        }
     }
 
     /** 包装 java.util.Map 为 MapLike。 */
     public static MapLike wrapMap(java.util.Map<String, Object> map) {
-        return map::get;
+        return new MapLike() {
+            @Override
+            public Object get(String key) {
+                return map.get(key);
+            }
+
+            @Override
+            public void put(String key, Object value) {
+                map.put(key, value);
+            }
+        };
     }
 
     private static Object normalize(Object v) {
@@ -708,7 +821,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         return v;
     }
 
-    private static double num(Object v) {
+    static double num(Object v) {
         if (v instanceof Number n) {
             return n.doubleValue();
         }
@@ -718,7 +831,7 @@ public final class DreamLangExecutor extends DreamLangBaseVisitor<Object> {
         throw new ScriptException("不是数字: " + v);
     }
 
-    private static boolean truthy(Object v) {
+    static boolean truthy(Object v) {
         if (v == null) {
             return false;
         }

@@ -35,7 +35,8 @@ public abstract class MixinItemHeld {
         if (context == ItemDisplayContext.GUI) {
             return;
         }
-        if (ItemIconWorld.tryDraw(stack, pose, buffers, light, overlay)) {
+        if (ItemIconWorld.tryDraw(stack, pose, buffers, light, overlay,
+                context == ItemDisplayContext.FIRST_PERSON_LEFT_HAND || context == ItemDisplayContext.FIRST_PERSON_RIGHT_HAND)) {
             ci.cancel();
         }
     }

@@ -8,8 +8,9 @@
     "MixinCursor",
     "MixinArmorLayer",
     "MixinNameTag",
-        "OdcModelMixin1710"
-    
+    "OdcModelMixin1710",
+    "LegacyItemModelHeld1710",
+    "LegacyItemModelDrop1710"
   ],
   "injectors": {
     "defaultRequire": 1

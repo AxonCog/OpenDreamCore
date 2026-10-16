@@ -8,6 +8,10 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.6'
 }
 
+def domesticMaven = repositories.maven { url = 'https://maven.aliyun.com/repository/public' }
+repositories.remove(domesticMaven)
+repositories.addFirst(domesticMaven)
+
 // 加载共享元数据（根 gradle.properties）+ 本 target 覆盖（gradle.properties）
 def properties = new Properties()
 file('../../gradle.properties').withInputStream { properties.load(it) }
@@ -75,7 +79,7 @@ tasks.register('prepareModel1211', Sync) {
     into "$buildDir/generated/model-1.21.1"
 }
 
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214', 'prepareCamera120To1218', 'prepareCameraFov1201211', 'prepareModel1211' }
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'prepareGlyph120To1214', 'prepareCamera120To1218', 'prepareCameraFov1201211', 'prepareModel1211' , 'preparePlayerAnim'}
 tasks.named('prepareGlyph120To1214') { outputs.upToDateWhen { false } }
 
 // 中文源码/注释：javac 显式 UTF-8（不依赖 daemon 编码）
@@ -107,6 +111,7 @@ dependencies {
     // common 源码的运行时依赖（antlr4-runtime 需要随 mod 打包）
     // 编译期可见；运行时由 shadow 打平重定向后打进主 jar。
     implementation 'org.antlr:antlr4-runtime:4.13.1'
+    implementation 'org.tukaani:xz:1.9'
     // gson MC 运行时自带（compileOnly 即可）；snakeyaml Fabric 客户端不自带，
     // 必须 shade 进 jar（见下方 shadeOnly），否则运行时 NoClassDefFoundError
     compileOnly 'org.yaml:snakeyaml:2.2'
@@ -119,6 +124,7 @@ configurations {
 }
 dependencies {
     shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.tukaani:xz:1.9'
     // snakeyaml：Fabric 客户端类路径没有，必须打进 jar 并 relocate（与 NeoForge target 一致）
     shadeOnly 'org.yaml:snakeyaml:2.2'
     // 加密材质包支持（AES zip）：PackInstaller 经反射调用，运行时可选强化
@@ -192,3 +198,10 @@ tasks.register('collectOutput') {
     }
 }
 tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
+
+// playeranim/playeranim-1.20-1.21.8/ 玩家动画（setupAnim TAIL 叠加六部件姿态）
+tasks.register('preparePlayerAnim', Sync) {
+    from('../../gensrc/playeranim-1.20-1.21.8/src/main/java')
+    into "$buildDir/generated/playeranim-playeranim-1.20-1.21.8"
+}
+sourceSets.main.java.srcDir "$buildDir/generated/playeranim-playeranim-1.20-1.21.8"

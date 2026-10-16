@@ -19,4 +19,17 @@ public interface IModelFormatCodec {
 
     /** 解码。文本入参 = 完整文件内容。 */
     DecodeResult decode(String text);
+
+    /**
+     * 二进制格式入口（BMD、YSM 容器等）。默认不支持返回 null；
+     * FormatCodecs 的二进制入口会跳过未实现的 codec。
+     */
+    default DecodeResult decode(byte[] data) {
+        return null;
+    }
+
+    /** 二进制嗅探（zip 混合包 / 无扩展名分发用）。默认不可识别。 */
+    default boolean sniffBinary(byte[] data) {
+        return false;
+    }
 }

@@ -144,6 +144,89 @@ public class AnimRuntimeTest {
         assertEquals(1.0, scaleAt(out, 1), 1e-9);
     }
 
+    @Test
+    public void catmullromIsCurvedAndFullRotationIsNotCollapsed() {
+        AnimationIR a = anim("curve", 3, false,
+                track(kf(0, 0, 0, 0), kf(1, 10, 0, 0), kf(2, 0, 0, 0), kf(3, 10, 0, 0)), null, null);
+        for (AnimationIR.Keyframe k : a.bone("body").rot.keys) {
+            k.interp = "catmullrom";
+        }
+        Map<String, AnimEval.Pose> out = new LinkedHashMap<String, AnimEval.Pose>();
+        AnimEval.sample(a, 0.5, null, out);
+        assertEquals(5.625, rotAt(out, 0), 1e-9, "Catmull-Rom 中点不应退化成线性 5");
+
+        AnimationIR roll = anim("roll", 1, false,
+                track(kf(0, 0, 0, 0), kf(1, 360, 0, 0)), null, null);
+        AnimEval.sample(roll, 0.5, null, out);
+        assertEquals(180, rotAt(out, 0), 1e-9, "欧拉角线性插值必须保留 360 度翻滚");
+    }
+
+    @Test
+    public void emptyTrackClearsToZeroAndPrePostUsesBoundaryValues() {
+        AnimationIR a = anim("boundary", 2, false,
+                track(kf(0, 1, 0, 0), kf(2, 3, 0, 0)), null, null);
+        AnimationIR.Keyframe b = a.bone("body").rot.keys.get(1);
+        b.preValue = new double[]{9, 0, 0};
+        Map<String, AnimEval.Pose> out = new LinkedHashMap<String, AnimEval.Pose>();
+        AnimEval.sample(a, 1.999, null, out);
+        assertEquals(8.996, rotAt(out, 0), 1e-9);
+        AnimEval.sample(a, 2, null, out);
+        assertEquals(3, rotAt(out, 0), 1e-9);
+
+        AnimationIR.Track empty = new AnimationIR.Track();
+        AnimationIR blank = anim("blank", 1, false, empty, null, null);
+        AnimEval.sample(blank, 0.5, null, out);
+        assertEquals(0, rotAt(out, 0), 1e-9, "空轨道不能残留上一动画姿态");
+    }
+
+    @Test
+    public void nestedSamplingKeepsOuterTimeAndEndpointBuffers() {
+        AnimationIR outer = anim("outer", 1, false,
+                track(kf(0, 1, 0, 0), kf(1, 3, 0, 0)), null, null);
+        outer.bone("body").rot.keys.get(1).expr[0] = "variable.nested + query.anim_time";
+        outer.bone("body").rot.keys.get(1).expr[1] = "query.anim_time";
+        AnimationIR inner = anim("inner", 1, false, track(kf(0, 100, 0, 0)), null, null);
+        Map<String, AnimEval.Pose> out = new LinkedHashMap<String, AnimEval.Pose>();
+        Map<String, AnimEval.Pose> nestedOut = new LinkedHashMap<String, AnimEval.Pose>();
+        AnimEval.sample(outer, .5, name -> {
+            AnimEval.sample(inner, .9, null, nestedOut);
+            return 3;
+        }, out);
+        assertEquals(2.25, rotAt(out, 0), 1e-9);
+        assertEquals(.25, rotAt(out, 1), 1e-9);
+        assertEquals(100, rotAt(nestedOut, 0), 1e-9);
+    }
+
+    @Test
+    public void parallelSamplingKeepsSeparateTimeVariablesAndBuffers() throws Exception {
+        final AnimationIR a = anim("a", 1, false, track(kf(0, 1, 0, 0), kf(1, 3, 0, 0)), null, null);
+        a.bone("body").rot.keys.get(1).expr[0] = "variable.barrier + query.anim_time";
+        final java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<Double> f1 = pool.submit(() -> parallelValue(a, .25, 10, barrier));
+            java.util.concurrent.Future<Double> f2 = pool.submit(() -> parallelValue(a, .75, 20, barrier));
+            assertEquals(3.3125, f1.get(), 1e-9);
+            assertEquals(15.8125, f2.get(), 1e-9);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static double parallelValue(AnimationIR anim, double time, double value,
+                                         java.util.concurrent.CyclicBarrier barrier) {
+        Map<String, AnimEval.Pose> out = new LinkedHashMap<String, AnimEval.Pose>();
+        AnimEval.sample(anim, time, name -> {
+            try {
+                barrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+            return value;
+        }, out);
+        return rotAt(out, 0);
+    }
+
     // ---------------------------------------------------------------- 混合
 
     @Test

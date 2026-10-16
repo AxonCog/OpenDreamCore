@@ -21,11 +21,11 @@ public final class CameraStore {
         return INSTANCE;
     }
 
-    /** 保留顶层键：运镜设置（M1.4）。它不是规则，因此不进/不列/不解析成规则。 */
+    /** 保留顶层键：运镜设置。它不是规则，因此不进、不列、不解析成规则。 */
     public static final String SETTINGS_KEY = "运镜设置";
 
     private volatile Map<String, CameraRule> rules = Collections.emptyMap();
-    /** 运镜设置（M1.4）：默认「直接驱动开 + 别人占着就让位 + 光影不让位」。 */
+    /** 运镜设置：默认直接驱动相机、其他模组占用时让位、光影占用时不让位。 */
     private volatile CameraSettings settings = CameraSettings.defaults();
 
     CameraStore() {
@@ -95,6 +95,12 @@ public final class CameraStore {
         return summary;
     }
 
+    /** Clears the server-owned snapshot, including settings, without changing local reload semantics. */
+    public synchronized void clear() {
+        rules = Collections.emptyMap();
+        settings = CameraSettings.defaults();
+    }
+
     /**
      * 摘要行（M1.1 契约文案：「相机配置已同步：机位 N，路径 M」，改措辞会破坏契约断言）。
      */
@@ -135,7 +141,7 @@ public final class CameraStore {
         return rules.get(id);
     }
 
-    /** 移除单条规则（M1.7 编辑器预览用）：返回是否真的移了。 */
+    /** 移除单条规则（编辑器预览用）：返回是否真的移除。 */
     public synchronized boolean remove(String id) {
         Map<String, CameraRule> next = new LinkedHashMap<>(rules);
         boolean gone = next.remove(id) != null;
@@ -145,7 +151,7 @@ public final class CameraStore {
         return gone;
     }
 
-    /** 运镜设置（M1.4）；未配置时是默认值，永不返回 null。 */
+    /** 运镜设置；未配置时使用默认值，不返回 null。 */
     public CameraSettings settings() {
         return settings;
     }

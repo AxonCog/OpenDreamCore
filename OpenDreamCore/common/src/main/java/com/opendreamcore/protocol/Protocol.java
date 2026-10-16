@@ -27,7 +27,7 @@ public final class Protocol {
     // sound / sound_stop —— SoundAPI.播放/停止 的下行（服务端只发键名，客户端查规则库执行）
     public static final String CUSTOM_SOUND = "sound";
     public static final String CUSTOM_SOUND_STOP = "sound_stop";
-    // 资源云管线（跟着服务端资源文件夹走，分片 base64 塞进 custom_packet 走天下）：
+    // 资源云管线（基于服务端资源文件夹，分片 base64 经 custom_packet 下发）：
     // resource_key      S→C 资源加密密码（同步开始时先发；客户端记住下次直接比 MD5）
     // resource_report   C→S 客户端缓存清单上报（"name,md5;name,md5;"，GZIP+base64）
     // resource_push     S→C 文件分片下发（"name|md5|seq/total|base64chunk"）
@@ -79,9 +79,10 @@ public final class Protocol {
             TOOLTIP_REGISTRY, TOOLTIP_RESYNC, CLOUD_MANIFEST, CLOUD_DIFF, CLOUD_FILE,
             CLOUD_DELETE, CLOUD_DONE, EDITOR_LEASE, EDITOR_SNAPSHOT, EDITOR_WORLD_ACK,
             PAGE_LAYOUT, CONTAINER_SYNC, PAGE_CLOSE, VISUAL_RULES, WINDOW_TITLE,
+            CHAT_MESSAGE, UI_EFFECT, BOSS_BAR, NAME_TAG, ITEM_TIP, HUD_SYNC,
+            MUSIC, CONFIG_PUSH, UI_ANIMATION, WORLD_TAB, WORLD_ELEMENT_STATE,
             CHUNK,
     };
-
     /** 构造 minecraft:register 声明载荷（NUL 分隔的全限定通道名）。 */
     public static byte[] clientboundRegisterPayload() {
         StringBuilder sb = new StringBuilder();

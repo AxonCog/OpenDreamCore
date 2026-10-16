@@ -3,7 +3,7 @@ package com.opendreamcore.plugin;
 /**
  * UI 组件注册表（万物皆插件核心之一）。
  * 内置组件与第三方插件组件同一注册表，无特权差异。
- * 支持热拔插：注册时调用 onRegister，注销时调用 onUnregister。
+ * 支持运行时注册/注销：注册时调用 onRegister，注销时调用 onUnregister。
  */
 public final class ComponentRegistry {
 

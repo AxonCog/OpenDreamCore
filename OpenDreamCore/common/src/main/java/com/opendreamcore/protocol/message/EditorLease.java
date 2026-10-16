@@ -41,12 +41,25 @@ public final class EditorLease implements Message {
     private final String holder;
 
     public EditorLease(Action action, String pageId, String holder) {
-        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64) {
-            throw new IllegalArgumentException("页面 id 非法: " + pageId);
-        }
+        requireSafePageId(pageId);
         this.action = action;
         this.pageId = pageId;
         this.holder = holder;
+    }
+
+    /** 页面 ID 必须是 UI 根目录下的单个安全文件名。 */
+    public static void requireSafePageId(String pageId) {
+        if (pageId == null || J8.isBlank(pageId) || pageId.length() > 64
+                || ".".equals(pageId) || "..".equals(pageId)
+                || pageId.endsWith(".") || pageId.endsWith(" ")) {
+            throw new IllegalArgumentException("页面 id 非法（必须是安全的单个文件名）");
+        }
+        for (int i = 0; i < pageId.length(); i++) {
+            char ch = pageId.charAt(i);
+            if (Character.isISOControl(ch) || "/\\:<>\"|?*".indexOf(ch) >= 0) {
+                throw new IllegalArgumentException("页面 id 非法（含路径或非法文件名字符）");
+            }
+        }
     }
 
     public Action action() {

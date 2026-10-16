@@ -2,6 +2,9 @@ package com.opendreamcore.legacy;
 
 import com.opendreamcore.client.render.LegacyRenderer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityList;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
@@ -88,6 +91,46 @@ public final class Renderer1710 implements LegacyRenderer {
     public void endWorld() {
         // 状态还原在总闸里按进入前的原值做
         GL11.glPopMatrix();
+    }
+
+    @Override
+    public java.util.List<com.opendreamcore.client.spi.EntitySource.Snapshot> nearbyLiving(
+            double camX, double camY, double camZ, double maxDist) {
+        java.util.List<com.opendreamcore.client.spi.EntitySource.Snapshot> out =
+                new java.util.ArrayList<com.opendreamcore.client.spi.EntitySource.Snapshot>();
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.theWorld == null) {
+            return out;
+        }
+        double maxSq = maxDist * maxDist;
+        for (Object raw : mc.theWorld.loadedEntityList) {
+            if (!(raw instanceof EntityLivingBase)) {
+                continue;
+            }
+            EntityLivingBase entity = (EntityLivingBase) raw;
+            if (entity.isDead || entity.getHealth() <= 0.0F) {
+                continue;
+            }
+            double dx = entity.posX - camX;
+            double dy = entity.posY - camY;
+            double dz = entity.posZ - camZ;
+            if (dx * dx + dy * dy + dz * dz > maxSq) {
+                continue;
+            }
+            com.opendreamcore.client.spi.EntitySource.Snapshot snapshot =
+                    new com.opendreamcore.client.spi.EntitySource.Snapshot();
+            snapshot.x = entity.posX;
+            snapshot.y = entity.posY;
+            snapshot.z = entity.posZ;
+            snapshot.height = entity.height;
+            snapshot.health = entity.getHealth();
+            snapshot.maxHealth = entity.getMaxHealth();
+            snapshot.name = entity.getCommandSenderName();
+            String type = EntityList.getEntityString((Entity) entity);
+            snapshot.typeId = type == null ? "" : type;
+            out.add(snapshot);
+        }
+        return out;
     }
 
     @Override

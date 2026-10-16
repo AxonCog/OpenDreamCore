@@ -3,6 +3,7 @@ package com.opendreamcore.plugin.server;
 import com.opendreamcore.page.Page;
 import com.opendreamcore.plugin.OpenDreamCorePlugin;
 import com.opendreamcore.plugin.page.ServerPageManager;
+import com.opendreamcore.adapter.AdapterChain;
 import com.opendreamcore.script.engine.DreamLang;
 import com.opendreamcore.script.engine.Scope;
 import org.bukkit.entity.Player;
@@ -93,7 +94,7 @@ public final class FunctionTriggers implements Listener {
                 // 绑定页面上下文：Screen.设置变量 等方法据此写回正确的页面并同步查看者
                 ScriptContext.bind(pageId);
                 try {
-                    DreamLang.execute(script, scope);
+                    DreamLang.execute(AdapterChain.rewriteScript(script), scope);
                 } finally {
                     ScriptContext.clear();
                 }

@@ -1,7 +1,7 @@
 package com.opendreamcore.camera;
 
 /**
- * 相机演出的纯数学效果层（M1.5：震屏 + FOV 平滑）。
+ * 相机演出的纯数学效果层（震屏 + FOV 平滑）。
  *
  * <p>只做算术、不 import 任何 MC 类——这是它能进共享层并被 JDK8 测试宿主直接覆盖的前提；
  * 「摸 MC」的那半边在客户端的 {@code CameraFx}。独立开关由调用方保证：

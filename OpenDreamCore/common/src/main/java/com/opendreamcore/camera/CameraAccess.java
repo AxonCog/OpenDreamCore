@@ -1,7 +1,7 @@
 package com.opendreamcore.camera;
 
 /**
- * 相机姿态写入面（M1.4）。
+ * 相机姿态写入面。
  *
  * <p><b>为什么必须要有这层接口</b>：原版 {@code Camera} 的 {@code detached} 是
  * {@code private} 字段，{@code setPosition}/{@code setRotation} 是 {@code protected} 方法
@@ -14,7 +14,7 @@ package com.opendreamcore.camera;
  * （{@code com.opendreamcore.mixin.OdcCameraMixin} 用 {@code @Accessor}/{@code @Invoker}
  * 生成实现，见各 gensrc/camera-* 源码树），共享层的驱动只认这个接口。
  * 好处：①拿到 private/protected 的能力；②共享层保持零 MC 依赖、可用假实现单测；
- * ③混入没注册/被别的模组替换掉 Camera 时，{@code instanceof} 自然失败，上层能干净地退回 M1.2 路线。
+ * ③混入没注册/被别的模组替换掉 Camera 时，{@code instanceof} 自然失败，上层回退到临时实体路线。
  */
 public interface CameraAccess {
 

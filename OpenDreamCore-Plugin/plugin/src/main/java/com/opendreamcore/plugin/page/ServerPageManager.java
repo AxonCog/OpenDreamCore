@@ -1,5 +1,6 @@
 package com.opendreamcore.plugin.page;
 
+import com.opendreamcore.adapter.AdapterRegistry;
 import com.opendreamcore.config.PageSchema;
 import com.opendreamcore.config.YamlParser;
 import com.opendreamcore.page.Page;
@@ -11,22 +12,36 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 服务端页面仓库：加载 plugins/OpenDreamCore/UI/*.yaml。
- * 页面目录热加载（reload 命令）；下发时把 YAML 原文推给客户端。
+ * 服务端页面仓库：递归加载 plugins/OpenDreamCore/UI/ 下的 .yaml/.yml。
+ * 页面 ID 为相对目录路径（不含扩展名）；下发保留已加载的 YAML 原文。
  */
 public final class ServerPageManager {
 
     private final OpenDreamCorePlugin plugin;
+    private final Object virtualLock = new Object();
+
     private final Map<String, Page> pages = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> irst = new ConcurrentHashMap<>();
-    /** 世界面板位置覆盖（拖拽落点持久化）：页面 id → 元素 id → [x, y, z]。 */
+    private final Map<String, String> diskYaml = new ConcurrentHashMap<>();
+    /** Runtime pages registered by extension plugins; kept separate from disk pages. */
+    private final Map<String, Page> virtualPages = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> virtualIrs = new ConcurrentHashMap<>();
+    private final Map<String, String> virtualYaml = new ConcurrentHashMap<>();
+    /** 实际生效的页面源文件（同 ID 的重复扩展名按扫描顺序覆盖）。 */
+    private final Map<String, Path> sourceFiles = new ConcurrentHashMap<>();
     private final Map<String, Map<String, double[]>> worldPositions = new ConcurrentHashMap<>();
     private Path uiDir;
+
+    /** 返回 load() 实际采用的源文件；不存在或未成功解析时返回 null。 */
+    public Path sourceFile(String pageId) {
+        return pageId == null ? null : sourceFiles.get(pageId);
+    }
 
     /** 加载阶段用的编译上下文：保留所有元素（condition 不剔除），字符串原样返回。
      *  条件剔除和占位符替换只在 compiledYaml() 下发时按玩家上下文做。 */
@@ -39,10 +54,21 @@ public final class ServerPageManager {
     public ServerPageManager(OpenDreamCorePlugin plugin) {
         this.plugin = plugin;
     }
+    /** Release extension-owned pages when the plugin is disabled. */
+    public void clearVirtual() {
+        synchronized (virtualLock) {
+            virtualPages.clear();
+            virtualIrs.clear();
+            virtualYaml.clear();
+        }
+    }
 
     /** 扫描页面目录（不存在就创建，不报错）。 */
     public void load() {
         pages.clear();
+        sourceFiles.clear();
+        irst.clear();
+        diskYaml.clear();
         uiDir = plugin.getDataFolder().toPath().resolve("UI");
         if (!Files.isDirectory(uiDir)) {
             try {
@@ -53,33 +79,36 @@ public final class ServerPageManager {
             }
         }
         List<Path> files;
-        try (var stream = Files.list(uiDir)) {
-            files = stream.filter(p -> {
-                String name = p.getFileName().toString();
-                return name.endsWith(".yaml") || name.endsWith(".yml");
-            }).sorted().collect(java.util.stream.Collectors.toList());
-        } catch (IOException e) {
+        Path root = uiDir.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(uiDir)) {
+            plugin.getLogger().warning("UI 目录是符号链接，拒绝加载");
+            return;
+        }
+        try (var stream = Files.walk(uiDir)) {
+            files = stream.filter(p -> !Files.isSymbolicLink(p) && Files.isRegularFile(p,
+                            java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    .filter(p -> {
+                        String name = p.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                        return name.endsWith(".yaml") || name.endsWith(".yml");
+                    }).sorted().collect(java.util.stream.Collectors.toList());
+        } catch (IOException | java.io.UncheckedIOException e) {
             plugin.getLogger().warning("UI 目录读取失败: " + e);
             return;
         }
-        if (files.isEmpty()) {
-            try (var stream = Files.list(uiDir)) {
-                files = stream.filter(p -> {
-                    String name = p.getFileName().toString();
-                    return name.endsWith(".yaml") || name.endsWith(".yml");
-                }).sorted().collect(java.util.stream.Collectors.toList());
-            } catch (IOException ignored) {
-                files = java.util.Collections.emptyList();
-            }
-        }
         // 两阶段：先解析全部 IR（import 模板跨页面解析需要全量），再逐个展开构建
-        irst.clear();
         Map<String, Map<String, Object>> parsed = new java.util.LinkedHashMap<>();
         for (Path file : files) {
             try {
-                String yaml = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-                String id = file.getFileName().toString().replaceFirst("\\.(yaml|yml)$", "");
-                parsed.put(id, new YamlParser().parse(yaml));
+                String id = root.relativize(file.toAbsolutePath().normalize()).toString()
+                        .replace('\\', '/').replaceFirst("(?i)\\.(yaml|yml)$", "");
+                Path safeFile = safePagePath(root, id, file.getFileName().toString()
+                        .substring(file.getFileName().toString().lastIndexOf('.')));
+                String yaml = new String(Files.readAllBytes(safeFile), StandardCharsets.UTF_8);
+                com.opendreamcore.config.ConfigParser adapter = AdapterRegistry.detect(yaml);
+                Map<String, Object> parsedIr = adapter == null ? new YamlParser().parse(yaml) : adapter.parse(yaml);
+                parsed.put(id, parsedIr);
+                diskYaml.put(id, adapter == null ? yaml : new org.yaml.snakeyaml.Yaml(dumpOptions()).dump(parsedIr));
+                sourceFiles.put(id, safeFile);
             } catch (Exception e) {
                 plugin.getLogger().warning("页面解析失败 " + file.getFileName() + ": " + e.getMessage());
             }
@@ -94,16 +123,75 @@ public final class ServerPageManager {
                         ? com.opendreamcore.config.GuiCompiler.compile(expanded, LOAD_ALL_KEEP)
                         : expanded;
                 Page page = PageSchema.build(entry.getKey(), ir);
+                irst.put(entry.getKey(), expanded);
                 pages.put(page.id() == null ? entry.getKey() : page.id(), page);
                 plugin.getLogger().info("页面已加载: " + (page.id() == null ? entry.getKey() : page.id())
                         + " (" + page.elements().size() + " 元素"
                         + (com.opendreamcore.config.GuiCompiler.isFlat(entry.getValue()) ? "，扁平语法" : "") + ")");
             } catch (Exception e) {
+                irst.remove(entry.getKey());
+                diskYaml.remove(entry.getKey());
+                sourceFiles.remove(entry.getKey());
                 plugin.getLogger().warning("页面加载失败 " + entry.getKey() + ": " + e.getMessage());
             }
         }
         loadWorldPositions();
         applyWorldPositions();
+    }
+
+    /** Normalize an externally supplied page ID and reject paths escaping the UI root. */
+    public static String normalizePageId(String pageId) {
+        if (pageId == null || pageId.trim().isEmpty()) {
+            throw new IllegalArgumentException("页面 id 不能为空");
+        }
+        String raw = pageId.trim().replace('\\', '/');
+        Path parsed;
+        try {
+            parsed = java.nio.file.Paths.get(raw);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("页面 id 非法", e);
+        }
+        if (parsed.isAbsolute()) {
+            throw new IllegalArgumentException("页面 id 不得为绝对路径");
+        }
+        Path normalized = parsed.normalize();
+        if (normalized.toString().isEmpty() || ".".equals(normalized.toString())
+                || normalized.startsWith("..")) {
+            throw new IllegalArgumentException("页面 id 路径越界");
+        }
+        String normalizedId = normalized.toString().replace('\\', '/');
+        if (!normalizedId.equals(raw)) {
+            throw new IllegalArgumentException("页面 id 必须为规范化相对路径");
+        }
+        for (Path segment : normalized) {
+            com.opendreamcore.protocol.message.EditorLease.requireSafePageId(segment.toString());
+        }
+        return normalizedId;
+    }
+
+    static Path safePagePath(Path root, String pageId, String suffix) {
+        String normalizedId = normalizePageId(pageId);
+        Path absoluteRoot = root.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(root) || Files.isSymbolicLink(absoluteRoot)) {
+            throw new IllegalArgumentException("页面根目录不可为符号链接");
+        }
+        Path file = absoluteRoot.resolve(normalizedId + suffix).normalize();
+        if (!file.startsWith(absoluteRoot) || Files.isSymbolicLink(file)) {
+            throw new IllegalArgumentException("页面路径越界或为符号链接");
+        }
+        Path parent = file.getParent();
+        while (parent != null && parent.startsWith(absoluteRoot) && !parent.equals(absoluteRoot)) {
+            if (Files.isSymbolicLink(parent)) {
+                throw new IllegalArgumentException("页面路径包含符号链接");
+            }
+            parent = parent.getParent();
+        }
+        return file;
+    }
+
+    private static Map<String, Object> parseAuto(String yaml) {
+        com.opendreamcore.config.ConfigParser parser = AdapterRegistry.detect(yaml);
+        return parser == null ? new YamlParser().parse(yaml) : parser.parse(yaml);
     }
 
     // 世界面板位置持久化（拖拽落点 overlay）
@@ -202,12 +290,16 @@ public final class ServerPageManager {
                 });
                 out.add(pid, pageObj);
             });
-            java.nio.file.Files.write(worldPositionsFile(), new com.google.gson.GsonBuilder()
+            Path target = worldPositionsFile();
+            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+            java.nio.file.Files.write(temp, new com.google.gson.GsonBuilder()
                     .setPrettyPrinting().create().toJson(out).getBytes(StandardCharsets.UTF_8));
+            java.nio.file.Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         } catch (Exception e) {
             plugin.getLogger().warning("世界面板位置保存失败: " + e);
         }
     }
+
 
     /** 页面元素递归查找（位置应用用）。 */
     private static com.opendreamcore.page.Element findElement(Page page, String id) {
@@ -239,13 +331,20 @@ public final class ServerPageManager {
      * 标准嵌套语法 → 原文下发（占位符由客户端按各自上下文解析）。
      */
     public String compiledYaml(String pageId, org.bukkit.entity.Player player) {
-        Map<String, Object> ir = irst.get(pageId);
-        if (ir == null) {
+        if (pageId == null) return null;
+        final String id;
+        try {
+            id = normalizePageId(pageId);
+        } catch (IllegalArgumentException e) {
             return null;
         }
-        if (!com.opendreamcore.config.GuiCompiler.isFlat(ir)) {
-            return yamlOf(pageId);
+        Map<String, Object> ir;
+        synchronized (virtualLock) {
+            ir = virtualIrs.get(id);
         }
+        if (ir == null) ir = irst.get(id);
+        if (ir == null) return null;
+        if (!com.opendreamcore.config.GuiCompiler.isFlat(ir)) return yamlOf(id);
         Map<String, Object> compiled = com.opendreamcore.config.GuiCompiler.compile(ir, new GuiContext(player));
         return new org.yaml.snakeyaml.Yaml(dumpOptions()).dump(compiled);
     }
@@ -309,33 +408,98 @@ public final class ServerPageManager {
         }
     }
 
+    /** Register a runtime YAML page without writing to the UI directory. */
+    public boolean registerVirtual(String pageId, String yaml) {
+        if (yaml == null) return false;
+        final String id;
+        try {
+            id = normalizePageId(pageId);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        try {
+            Map<String, Object> parsed = parseAuto(yaml);
+            Map<String, Object> expanded = com.opendreamcore.page.PageImporter.expand(parsed, this::lookupIr);
+            Map<String, Object> ir = com.opendreamcore.config.GuiCompiler.isFlat(expanded)
+                    ? com.opendreamcore.config.GuiCompiler.compile(expanded, LOAD_ALL_KEEP) : expanded;
+            Page page = PageSchema.build(id, ir);
+            synchronized (virtualLock) {
+                virtualIrs.put(id, expanded);
+                virtualYaml.put(id, yaml);
+                virtualPages.put(id, page);
+            }
+            return true;
+        } catch (Exception e) {
+            plugin.getLogger().warning("虚拟页面注册失败 " + id + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** Register a runtime page from an input stream; the stream is consumed and closed. */
+    public boolean registerVirtual(String pageId, java.io.InputStream input) {
+        if (input == null) return false;
+        try {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            return registerVirtual(pageId, new String(bytes.toByteArray(), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            return false;
+        } finally {
+            try { input.close(); } catch (IOException ignored) { }
+        }
+    }
+
+    private Map<String, Object> lookupIr(String id) {
+        synchronized (virtualLock) {
+            Map<String, Object> value = virtualIrs.get(id);
+            return value != null ? value : irst.get(id);
+        }
+    }
+
+    public boolean unregisterVirtual(String pageId) {
+        if (pageId == null) return false;
+        synchronized (virtualLock) {
+            boolean removed = virtualPages.remove(pageId) != null;
+            removed |= virtualIrs.remove(pageId) != null;
+            removed |= virtualYaml.remove(pageId) != null;
+            return removed;
+        }
+    }
+
+    public boolean hasVirtual(String pageId) {
+        if (pageId == null) return false;
+        synchronized (virtualLock) {
+            return virtualPages.containsKey(pageId);
+        }
+    }
+
     public Page get(String pageId) {
+        synchronized (virtualLock) {
+            Page virtual = virtualPages.get(pageId);
+            if (virtual != null) return virtual;
+        }
         return pages.get(pageId);
     }
 
-    /** 所有已加载页面（用于进服扫描下发）。 */
+    /** 所有已加载页面（磁盘与扩展插件虚拟页面，虚拟页覆盖同 ID 磁盘页）。 */
     public java.util.Collection<Page> allPages() {
-        return pages.values();
+        java.util.Map<String, Page> result = new java.util.LinkedHashMap<>(pages);
+        synchronized (virtualLock) {
+            result.putAll(virtualPages);
+        }
+        return result.values();
     }
 
-    /** 页面 YAML 原文（下发用；保留注释与原始排版）。 */
     public String yamlOf(String pageId) {
-        Page page = pages.get(pageId);
-        if (page == null) {
-            return null;
+        if (pageId == null) return null;
+        // IDs are registry keys, never untrusted filesystem paths (including virtual IDs).
+        synchronized (virtualLock) {
+            String runtime = virtualYaml.get(pageId);
+            if (runtime != null) return runtime;
         }
-        // 尝试 .yaml 和 .yml 两种后缀
-        for (String suffix : new String[]{".yaml", ".yml"}) {
-            Path file = uiDir.resolve(pageId + suffix);
-            if (Files.isRegularFile(file)) {
-                try {
-                    return new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-                } catch (IOException e) {
-                    return null;
-                }
-            }
-        }
-        return null;
+        return diskYaml.get(pageId);
     }
 
     /** 按 match 找第一个命中的页面（进服/开容器时调用）。 */
@@ -345,7 +509,7 @@ public final class ServerPageManager {
 
     /** 按 match 找第一个命中的页面；player 非空时 when 表达式可用 player.xxx。 */
     public Page match(String target, String title, org.bukkit.entity.Player player) {
-        return pages.values().stream()
+        return allPages().stream()
                 .filter(p -> p.match() != null && matches(p.match(), target, title, player))
                 .sorted((a, b) -> Integer.compare(b.match().priority(), a.match().priority()))
                 .findFirst()
@@ -354,6 +518,31 @@ public final class ServerPageManager {
 
     private static boolean matches(com.opendreamcore.page.Match match, String target, String title,
                                    org.bukkit.entity.Player player) {
+        String m = match.target();
+        if (m == null) {
+            return false;
+        }
+        // 特殊 match 目标：按 display 模式匹配（与客户端 LocalPageManager 一致）
+        boolean targetMatches;
+        if (m.equalsIgnoreCase("hud")) {
+            targetMatches = true; // target/title 由调用方指定为 "hud"
+        } else if (m.equalsIgnoreCase("world")) {
+            targetMatches = true;
+        } else if (m.equalsIgnoreCase("screen")) {
+            targetMatches = true;
+        } else if (m.equalsIgnoreCase("inventory") || m.equalsIgnoreCase("player")) {
+            targetMatches = target != null && (target.equalsIgnoreCase("inventory")
+                    || target.equalsIgnoreCase("player")
+                    || target.equalsIgnoreCase("minecraft:chest")
+                    || target.equalsIgnoreCase("minecraft:crafting_table"));
+        } else if (m.contains(":")) {
+            targetMatches = target != null && m.equalsIgnoreCase(target);
+        } else {
+            targetMatches = title != null && m.equalsIgnoreCase(title);
+        }
+        if (!targetMatches) {
+            return false;
+        }
         if (match.when() != null && !match.when().trim().isEmpty()) {
             // 表达式条件：DreamLang 求值（player.xxx + 页面变量）
             try {
@@ -372,34 +561,12 @@ public final class ServerPageManager {
                 return false; // 表达式出错不匹配
             }
         }
-        String m = match.target();
-        if (m == null) {
-            return false;
-        }
-        // 特殊 match 目标：按 display 模式匹配（与客户端 LocalPageManager 一致）
-        if (m.equalsIgnoreCase("hud")) {
-            return true; // target/title 由调用方指定为 "hud"
-        }
-        if (m.equalsIgnoreCase("world")) {
-            return true;
-        }
-        if (m.equalsIgnoreCase("screen")) {
-            return true;
-        }
-        if (m.equalsIgnoreCase("inventory") || m.equalsIgnoreCase("player")) {
-            return target != null && (target.equalsIgnoreCase("inventory")
-                    || target.equalsIgnoreCase("player")
-                    || target.equalsIgnoreCase("minecraft:chest")
-                    || target.equalsIgnoreCase("minecraft:crafting_table"));
-        }
-        if (m.contains(":")) {
-            return target != null && m.equalsIgnoreCase(target);
-        }
-        return title != null && m.equalsIgnoreCase(title);
+        return true;
     }
 
     public List<String> ids() {
-        List<String> ids = new ArrayList<>(pages.keySet());
+        List<String> ids = new ArrayList<>();
+        for (Page page : allPages()) ids.add(page.id());
         ids.sort(String::compareTo);
         return ids;
     }

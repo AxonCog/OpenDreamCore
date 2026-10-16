@@ -8,9 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * 线C②：头顶语境实体桩布线——方法.取实体血量() 等经
- * EntityLegacy.headField → HostExt（client 安装，读 VisualNameTags.CURRENT_ENTITY）。
- * 这里验证静态路由契约：安装后按 field 名取值，未实现的字段回退 null。
+ * 验证头顶实体字段通过 {@link EntityLegacy#headField(String)} 路由到已安装宿主；
+ * 宿主未实现的字段返回 {@code null}。
  */
 class EntityLegacyHeadFieldTest {
 

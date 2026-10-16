@@ -82,6 +82,11 @@ public final class OpenDreamCoreAPI {
         return NetworkAPI.INSTANCE;
     }
 
+    /** 动画 API：实体触发/播放/停止骨骼动画（配套 Animation/ 控制器）。 */
+    public static AnimationAPI anim() {
+        return AnimationAPI.INSTANCE;
+    }
+
     /** 插件实例（未加载返回 null）。 */
     static OpenDreamCorePlugin plugin() {
         return OpenDreamCorePlugin.get();

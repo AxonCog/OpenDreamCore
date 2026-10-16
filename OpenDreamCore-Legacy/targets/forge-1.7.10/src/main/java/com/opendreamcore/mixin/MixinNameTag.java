@@ -39,8 +39,8 @@ public abstract class MixinNameTag {
         GL11.glRotatef(this.renderManager.playerViewX, 1.0F, 0.0F, 0.0F);
         GL11.glScalef(-0.025F, -0.025F, 0.025F);
         GL11.glDisable(GL11.GL_LIGHTING);
-        int i = Minecraft.getMinecraft().fontRenderer.getStringWidth(str) / 2;
-        Minecraft.getMinecraft().fontRenderer.drawStringWithShadow(str, -i, -4, style.textColor);
+        int width = Minecraft.getMinecraft().fontRenderer.getStringWidth(str) / 2;
+        Minecraft.getMinecraft().fontRenderer.drawStringWithShadow(str, -width, -4, style.textColor);
         GL11.glEnable(GL11.GL_LIGHTING);
         GL11.glPopMatrix();
         ci.cancel();

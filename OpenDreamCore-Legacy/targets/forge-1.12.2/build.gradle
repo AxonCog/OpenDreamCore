@@ -4,6 +4,7 @@
 
 buildscript {
     repositories {
+        maven { url = 'https://maven.aliyun.com/repository/public' }
         mavenCentral()
         maven { url = 'https://maven.minecraftforge.net/' }
         maven { url = 'https://repo.spongepowered.org/maven/' }
@@ -15,7 +16,7 @@ buildscript {
 
 apply plugin: 'net.minecraftforge.gradle'
 
-version = '0.2.0'
+version = hasProperty('mod_version') ? mod_version : '0.2.1'
 group = 'com.opendreamcore'
 archivesBaseName = 'OpenDreamCore-Legacy-forge-1.12.2'
 
@@ -27,6 +28,7 @@ tasks.withType(JavaCompile) {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://repo.spongepowered.org/maven/' }
@@ -59,6 +61,7 @@ dependencies {
     bundle 'org.yaml:snakeyaml:1.27'
     bundle 'com.google.code.gson:gson:2.10.1'
     bundle 'org.antlr:antlr4-runtime:4.13.1'
+    bundle 'org.tukaani:xz:1.9'
     // mixin 全局注入（tooltip/名牌/盔甲等原版侵入面）：运行时用 MixinBootstrap 自初始化
     bundle 'org.spongepowered:mixin:0.7.11-SNAPSHOT'
     bundle fileTree(dir: '../../common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
@@ -81,7 +84,11 @@ jar {
             'Manifest-Version': '1.0',
             'Specification-Title': 'OpenDreamCore-Legacy',
             'Specification-Version': version,
-            'Implementation-Version': version
+            'Implementation-Version': version,
+            // Cleanroom 在 coremod 阶段读这个属性提前注册 mixin 配置；
+            // 缺了它配置会被晚扫到，那时 GuiScreen 已被别的 mod 加载，
+            // MixinTooltip 直接 MixinTargetAlreadyLoadedException（实机 crash）
+            'MixinConfigs': 'opendreamcore.mixins.json'
         )
     }
 }

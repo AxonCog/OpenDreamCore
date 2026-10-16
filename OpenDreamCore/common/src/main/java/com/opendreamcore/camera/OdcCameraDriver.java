@@ -17,7 +17,7 @@ package com.opendreamcore.camera;
  *
  * <p>身份用 {@code ==} 比：原版 {@code Camera} 是 {@code Minecraft} 持有的单例
  * （{@code gameRenderer.getMainCamera()}），谁被换掉、或者混入没生效，这里的引用就对不上，
- * 我们自然不写——不猜、不反射、不抢别人的相机。
+ * 我们自然不写——不猜、不反射、不覆盖其他模组的相机。
  */
 public final class OdcCameraDriver {
 

@@ -1,18 +1,17 @@
 package com.opendreamcore.mixin;
-
+import com.opendreamcore.ItemEffect1165;
 import com.opendreamcore.client.visual.LegacyVisualItemEffects;
-import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.ItemRenderer;
 import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.vector.Matrix4f;
-import net.minecraftforge.registries.ForgeRegistries;
 import org.lwjgl.opengl.GL11;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.minecraftforge.registries.ForgeRegistries;
 
 /**
  * 物品特效（1.16.5）：renderGuiItem 画完图标叠特效层，发光=半透明扩散色块。
@@ -22,9 +21,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ItemRenderer.class)
 public abstract class MixinItemEffect {
 
-    @Inject(method = "func_175042_a(Lnet/minecraft/item/ItemStack;II)V",
-            at = @At("RETURN"))
+    @Inject(method = "func_175042_a(Lnet/minecraft/item/ItemStack;II)V", at = @At("RETURN"))
     private void opendreamcore$itemEffect(ItemStack stack, int x, int y, CallbackInfo ci) {
+        ItemEffect1165.render(stack, x, y);
+    }
+
+    /** Shared consumer for paths that cancel ItemRenderer before RETURN. */
+    public static void renderEffect(ItemStack stack, int x, int y) {
         if (stack == null || stack.isEmpty()) {
             return;
         }
@@ -45,16 +48,16 @@ public abstract class MixinItemEffect {
         com.mojang.blaze3d.systems.RenderSystem.enableBlend();
         com.mojang.blaze3d.systems.RenderSystem.disableTexture();
         com.mojang.blaze3d.systems.RenderSystem.color4f(r, g, b, Math.max(0.05F, a * 0.20F));
-        Matrix4f m = new Matrix4f();
         Tessellator tt = Tessellator.getInstance();
         BufferBuilder bb = tt.getBuilder();
         bb.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
-        bb.vertex(m, x - 3, y - 3, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
-        bb.vertex(m, x - 3, y + 19, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
-        bb.vertex(m, x + 19, y + 19, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
-        bb.vertex(m, x + 19, y - 3, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
+        bb.vertex(x - 3, y - 3, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
+        bb.vertex(x - 3, y + 19, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
+        bb.vertex(x + 19, y + 19, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
+        bb.vertex(x + 19, y - 3, 0.0F).color(r, g, b, Math.max(0.05F, a * 0.20F)).endVertex();
         Tessellator.getInstance().end();
         com.mojang.blaze3d.systems.RenderSystem.enableTexture();
         com.mojang.blaze3d.systems.RenderSystem.disableBlend();
     }
+
 }

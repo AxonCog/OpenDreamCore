@@ -143,6 +143,14 @@ public final class VanillaBridge165 {
                 com.opendreamcore.protocol.Protocol.CLIENTBOUND_CHANNELS.length);
     }
 
+    /**
+     * 连接断开时丢弃尚未完成的分片及重复片记录，避免下一次连接复用旧会话状态。
+     * Netty 管线随连接销毁，无需在这里移除钩子。
+     */
+    public static void onDisconnect() {
+        ASSEMBLER.clear();
+    }
+
     /** 上行发送：path+data 走共享分片帧，大件自动切 chunk 通道。 */
     public static void sendToServer(String path, byte[] data) {
         NetworkManager manager = connection();

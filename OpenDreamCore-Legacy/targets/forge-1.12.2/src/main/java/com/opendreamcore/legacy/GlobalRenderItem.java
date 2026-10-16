@@ -2,6 +2,7 @@ package com.opendreamcore.legacy;
 
 import com.opendreamcore.client.visual.LegacyVisualItemEffects;
 import com.opendreamcore.client.visual.LegacyVisualItemIcons;
+import com.opendreamcore.model1212.LegacyItemModel1212;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.GlStateManager;
@@ -33,12 +34,14 @@ public class GlobalRenderItem extends RenderItem {
     public void renderItemAndEffectIntoGUI(ItemStack stack, int x, int y) {
         String id = "";
         if (stack != null && !stack.isEmpty()) {
+        if (LegacyItemModel1212.tryGui(this, stack, x, y)) {
+            return;
+        }
             id = stack.getItem().getRegistryName() == null
                     ? "" : stack.getItem().getRegistryName().toString();
-            String tex = LegacyVisualItemIcons.textureFor(id,
-                    stack.getDisplayName());
-            if (tex != null) {
-                drawIcon(tex, x, y);
+            LegacyVisualItemIcons.Selection selected =
+                    LegacyVisualItemIcons.selectionForStack(id, stack);
+            if (selected != null && drawIcon(selected, x, y)) {
                 drawEffect(id, x, y);
                 return;
             }
@@ -74,37 +77,56 @@ public class GlobalRenderItem extends RenderItem {
     }
 
     /** 把覆写贴图画在图标位：bind + tessellator quad。 */
-    private static void drawIcon(String tex, int x, int y) {
-        ResourceLocation rl = resolve(tex);
-        try {
-            Minecraft.getMinecraft().getTextureManager().bindTexture(rl);
-        } catch (Exception ignored) {
-            return;
+    private static boolean drawIcon(LegacyVisualItemIcons.Selection selected, int x, int y) {
+        if (selected == null || selected.texture == null || !(selected.scale > 0.0)
+                || Double.isNaN(selected.scale) || Double.isInfinite(selected.scale)) {
+            return false;
         }
+        com.opendreamcore.client.LooseTextureLoader.Sheet sheet =
+                com.opendreamcore.client.LooseTextureLoader.sheetOf(
+                        selected.texture, selected.frameMs);
+        ResourceLocation rl;
+        try {
+            if (sheet != null) {
+                rl = new ResourceLocation(sheet.rl);
+            } else {
+                String loose = com.opendreamcore.client.LooseTextureLoader.lookup(selected.texture);
+                if (loose != null) {
+                    rl = new ResourceLocation(loose);
+                } else {
+                    int colon = selected.texture.indexOf(':');
+                    rl = colon > 0
+                            ? new ResourceLocation(selected.texture)
+                            : new ResourceLocation(OdcLegacy.MODID, selected.texture);
+                    try (java.io.InputStream in = Minecraft.getMinecraft().getResourceManager()
+                            .getResource(rl).getInputStream()) {
+                        // Opening the stream verifies that the vanilla resource exists.
+                    }
+                }
+            }
+            Minecraft.getMinecraft().getTextureManager().bindTexture(rl);
+        } catch (Exception ex) {
+            return false;
+        }
+        double size = 16.0 * selected.scale;
+        double left = x + 8.0 - size / 2.0;
+        double top = y + 8.0 - size / 2.0;
+        double u0 = sheet != null && sheet.frames > 1
+                ? (double) sheet.frame / sheet.frames : 0.0;
+        double u1 = sheet != null && sheet.frames > 1
+                ? (double) (sheet.frame + 1) / sheet.frames : 1.0;
         GlStateManager.enableBlend();
         GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
         Tessellator tess = Tessellator.getInstance();
         BufferBuilder bb = tess.getBuffer();
         bb.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
-        bb.pos(x, y, 0.0D).tex(0.0D, 0.0D).endVertex();
-        bb.pos(x, y + 16, 0.0D).tex(0.0D, 1.0D).endVertex();
-        bb.pos(x + 16, y + 16, 0.0D).tex(1.0D, 1.0D).endVertex();
-        bb.pos(x + 16, y, 0.0D).tex(1.0D, 0.0D).endVertex();
+        bb.pos(left, top, 0.0D).tex(u0, 0.0D).endVertex();
+        bb.pos(left, top + size, 0.0D).tex(u0, 1.0D).endVertex();
+        bb.pos(left + size, top + size, 0.0D).tex(u1, 1.0D).endVertex();
+        bb.pos(left + size, top, 0.0D).tex(u1, 0.0D).endVertex();
         tess.draw();
         GlStateManager.disableBlend();
-    }
-
-    private static ResourceLocation resolve(String tex) {
-        // 散装贴图（含中文文件名）优先
-        String loose = com.opendreamcore.client.LooseTextureLoader.lookup(tex);
-        if (loose != null) {
-            return new ResourceLocation(loose);
-        }
-        int colon = tex.indexOf(':');
-        if (colon > 0) {
-            return new ResourceLocation(tex);
-        }
-        return new ResourceLocation(OdcLegacy.MODID, tex);
+        return true;
     }
 
     /** 全局替换安装：幂等，反射换掉 Minecraft.renderItem（1.12.2 字段是 private）。 */

@@ -1,5 +1,6 @@
 package com.opendreamcore.mixin;
 
+import com.opendreamcore.client.model.GenItemModelRenderer;
 import com.opendreamcore.client.resources.LooseResourceLoader;
 import com.opendreamcore.client.visual.VisualItemSkins;
 import net.minecraft.client.gui.GuiGraphics;
@@ -36,33 +37,38 @@ public abstract class MixinItemIcon {
             return;
         }
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        String tex = VisualItemSkins.textureFor(id, stack.getHoverName().getString());
-        if (tex == null) {
+        VisualItemSkins.Selection selected = VisualItemSkins.select(id, stack);
+        if (selected == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) ci.cancel();
             return;
         }
-        var si = LooseResourceLoader.sheetOf(tex);
+        var si = LooseResourceLoader.sheetOf(selected.texture());
         if (si == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) ci.cancel();
             return;
         }
-        float u0 = 0.0F;
-        float u1 = 1.0F;
-        if (si.frames() > 1) {
-            float step = 1.0F / si.frames();
-            u0 = si.frame() * step;
-            u1 = u0 + step;
-        }
+        int size = VisualItemSkins.guiSize(selected);
+        int dx = x + (16 - size) / 2;
+        int dy = y + (16 - size) / 2;
+        int frame = VisualItemSkins.frame(selected, si);
+        float step = 1.0F / si.frames();
+        float u0 = frame * step;
+        float u1 = u0 + step;
         ResourceLocation rl = si.rl();
         GuiGraphics g = (GuiGraphics) (Object) this;
-        var consumer = this.bufferSource.getBuffer(RenderType.text(rl));
-        var pose = g.pose().last().pose();
-        float w = 16.0F;
-        float h = 16.0F;
-        float z = 0.0F;
-        consumer.addVertex(pose, x, y, z).setUv(u0, 0.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
-        consumer.addVertex(pose, x, y + h, z).setUv(u0, 1.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
-        consumer.addVertex(pose, x + w, y + h, z).setUv(u1, 1.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
-        consumer.addVertex(pose, x + w, y, z).setUv(u1, 0.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
-        ci.cancel();
+        try {
+            var consumer = this.bufferSource.getBuffer(RenderType.text(rl));
+            var pose = g.pose().last().pose();
+            float w = size;
+            float h = size;
+            float z = 0.0F;
+            consumer.addVertex(pose, dx, dy, z).setUv(u0, 0.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
+            consumer.addVertex(pose, dx, dy + h, z).setUv(u0, 1.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
+            consumer.addVertex(pose, dx + w, dy + h, z).setUv(u1, 1.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
+            consumer.addVertex(pose, dx + w, dy, z).setUv(u1, 0.0F).setColor(255, 255, 255, 255).setLight(0xF000F0);
+            ci.cancel();
+        } catch (Throwable ignored) {
+        }
     }
     // 容器槽位三参重载（seed）：TrMenu 等菜单的图标从这条路出（1.21.1 实机实证）。
     @Inject(method = "renderItem(Lnet/minecraft/world/item/ItemStack;III)V",

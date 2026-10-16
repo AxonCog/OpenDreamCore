@@ -73,6 +73,9 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
 
     /** 判断文本是否为 DreamCore 旧格式（顶层有 type 键的元素 = 旧格式特征）。 */
     public static boolean isDreamCoreFormat(String text) {
+        if (text == null) {
+            return false;
+        }
         return text.contains("hideVanillaList:") || text.contains("界面变量")
                 || text.contains("ChatDisplay") || text.contains("preRender:");
     }
@@ -86,6 +89,9 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
 
     @SuppressWarnings("unchecked")
     public static Map<String, Object> transform(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
         // 页面级保留键（不当作元素）；旧版用大写 Functions，新版小写 functions，两者都保留
         var pageKeys = J8.set("match", "display", "title", "background", "options",
                 "variables", "functions", "Functions", "priority", "through", "hideVanilla", "hideVanillaList");
@@ -119,11 +125,11 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
                 Map<String, Object> elMap = (Map<String, Object>) m;
                 Map<String, Object> el = new LinkedHashMap<>(elMap);
                 el.put("id", key);
-                String oldType = String.valueOf(el.get("type"));
-                el.put("type", oldType == null || "null".equals(oldType)
-                        ? com.opendreamcore.config.TypeInferrer.resolve(null, key)
-                        : mapType(oldType));
-                mapSpecKey(oldType, el);
+                String oldType = el.get("type") == null ? null : String.valueOf(el.get("type"));
+                String inferredType = oldType == null
+                        ? com.opendreamcore.config.TypeInferrer.resolve(null, key) : mapType(oldType);
+                el.put("type", inferredType);
+                mapSpecKey(oldType == null ? inferredType : oldType, el);
                 processElement(el);
                 elements.add(el);
                 continue;
@@ -177,7 +183,7 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
         put("TextModule", "text");
         put("Button", "button");
         put("Input", "input");
-        put("ChatInput", "chat_input");
+        put("textbox", "input");
         put("ChatDisplay", "chat_display");
         put("Suggestion", "suggestion");
         put("AreaInput", "area_input");
@@ -198,7 +204,6 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
         put("texture", "image");
         put("slot", "chest_slot");
         put("label", "text");
-        put("image", "image");
         put("text", "text");
         put("button", "button");
     }};
@@ -233,15 +238,32 @@ public final class DreamCoreParser implements ConfigParser, AdapterRegistry.Self
         }
         mapCommonProps(el);
     }
-
     /**
      * 通用属性映射（菜单.yml 实际使用的旧键名 → 新键名）：
-     * alpha→opacity、tip→tooltip、drawBackground→chest_slot.showSlot(取反)、
-     * identifier(container_N)→chest_slot.slot、texture/textureHovered→image.src/hoverSrc。
+     * alpha→opacity、tip→tooltip、enable/visible → enabledWhen/visibleWhen；
+     * texts → text.content；limit* 保留为元素 props，供滚动/裁剪消费者读取。
      */
     @SuppressWarnings("unchecked")
     private static void mapCommonProps(Map<String, Object> el) {
         String type = String.valueOf(el.get("type"));
+        // Legacy conditions are accepted as booleans or expression strings by PageSchema.
+        if (el.containsKey("enable") && !el.containsKey("enabledWhen")) {
+            el.put("enabledWhen", el.remove("enable"));
+        }
+        if (el.containsKey("visible") && !el.containsKey("visibleWhen")) {
+            el.put("visibleWhen", el.remove("visible"));
+        }
+        // label/text used a plural legacy key; never overwrite an explicit text spec content.
+        if ("text".equals(type) && el.containsKey("texts")) {
+            Object texts = el.remove("texts");
+            Map<String, Object> textSpec = specOf(el, "text");
+            if (!textSpec.containsKey("content") && texts != null) {
+                textSpec.put("content", texts);
+            }
+            if (!textSpec.isEmpty()) {
+                el.put("text", textSpec);
+            }
+        }
         // alpha → opacity
         if (el.containsKey("alpha")) {
             el.put("opacity", el.remove("alpha"));

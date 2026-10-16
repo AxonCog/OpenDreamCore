@@ -46,8 +46,9 @@ public final class CacheNames {
                 sb.append(Character.forDigit((b >> 4) & 0xF, 16));
                 sb.append(Character.forDigit(b & 0xF, 16));
             }
+            int slash = relPath.lastIndexOf('/');
             int dot = relPath.lastIndexOf('.');
-            return dot >= 0 ? sb + relPath.substring(dot) : sb.toString();
+            return dot > slash ? sb + relPath.substring(dot) : sb.toString();
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 不可用", e);
         }

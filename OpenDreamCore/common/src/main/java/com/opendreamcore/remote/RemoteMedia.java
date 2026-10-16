@@ -20,10 +20,12 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,11 +52,22 @@ public final class RemoteMedia {
             .connectTimeout(CONNECT_TIMEOUT)
             .build();
 
-    private static final ExecutorService DOWNLOADS = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "odc-remote-media");
-        t.setDaemon(true);
-        return t;
-    });
+    /** 固定下载并发度及排队上限，避免远程 URL 请求耗尽线程/内存。 */
+    private static final int DOWNLOAD_THREADS = 4;
+    private static final int DOWNLOAD_QUEUE_CAPACITY = 64;
+    /** DNS 安全结果短 TTL 缓存；过期后重新解析，避免渲染帧同步重复 DNS。 */
+    private static final long DNS_CACHE_TTL_MILLIS = 5_000L;
+    private static final Map<String, DnsSafety> DNS_CACHE = new ConcurrentHashMap<>();
+    private record DnsSafety(boolean safe, long expiresAt) {
+    }
+    private static final ExecutorService DOWNLOADS = new ThreadPoolExecutor(
+            DOWNLOAD_THREADS, DOWNLOAD_THREADS, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(DOWNLOAD_QUEUE_CAPACITY),
+            r -> {
+                Thread t = new Thread(r, "odc-remote-media");
+                t.setDaemon(true);
+                return t;
+            }, new ThreadPoolExecutor.AbortPolicy());
 
     /** 进行中的下载（URL → future），避免同一 URL 并发重复下载。 */
     private static final Map<String, CompletableFuture<Path>> IN_FLIGHT = new ConcurrentHashMap<>();
@@ -76,15 +89,20 @@ public final class RemoteMedia {
     public static CompletableFuture<Path> get(String url, Path cacheDir) {
         return IN_FLIGHT.computeIfAbsent(url, u -> {
             CompletableFuture<Path> f = new CompletableFuture<>();
-            DOWNLOADS.execute(() -> {
-                try {
-                    f.complete(downloadNow(u, cacheDir));
-                } catch (Throwable t) {
-                    f.completeExceptionally(t);
-                } finally {
-                    IN_FLIGHT.remove(u);
-                }
-            });
+            try {
+                DOWNLOADS.execute(() -> {
+                    try {
+                        f.complete(downloadNow(u, cacheDir));
+                    } catch (Throwable t) {
+                        f.completeExceptionally(t);
+                    } finally {
+                        IN_FLIGHT.remove(u, f);
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                f.completeExceptionally(new IOException("远程下载队列已满", e));
+                IN_FLIGHT.remove(u, f);
+            }
             return f;
         });
     }
@@ -204,18 +222,27 @@ public final class RemoteMedia {
         if (uri.getUserInfo() != null) {
             return false; // user:pass@host 一律拒绝
         }
+        long now = System.currentTimeMillis();
+        DnsSafety cachedSafety = DNS_CACHE.get(host);
+        if (cachedSafety != null && cachedSafety.expiresAt() > now) {
+            return cachedSafety.safe();
+        }
         try {
             InetAddress[] resolved = InetAddress.getAllByName(host);
             if (resolved.length == 0) {
+                DNS_CACHE.put(host, new DnsSafety(false, now + DNS_CACHE_TTL_MILLIS));
                 return false;
             }
             for (InetAddress addr : resolved) {
                 if (!isPublicAddress(addr)) {
+                    DNS_CACHE.put(host, new DnsSafety(false, now + DNS_CACHE_TTL_MILLIS));
                     return false;
                 }
             }
+            DNS_CACHE.put(host, new DnsSafety(true, now + DNS_CACHE_TTL_MILLIS));
             return true;
         } catch (UnknownHostException e) {
+            DNS_CACHE.put(host, new DnsSafety(false, now + DNS_CACHE_TTL_MILLIS));
             return false; // 解析失败 → 不安全
         }
     }

@@ -30,7 +30,8 @@ public abstract class MixinItemHeld {
                                             ItemDisplayContext context, boolean leftHand,
                                             PoseStack pose, MultiBufferSource buffers,
                                             int light, CallbackInfo ci) {
-        if (ItemIconWorld.tryDraw(stack, pose, buffers, light, 0)) {
+        if (ItemIconWorld.tryDraw(stack, pose, buffers, light, 0,
+                context == ItemDisplayContext.FIRST_PERSON_LEFT_HAND || context == ItemDisplayContext.FIRST_PERSON_RIGHT_HAND)) {
             ci.cancel();
         }
     }

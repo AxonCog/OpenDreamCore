@@ -98,7 +98,13 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage("用法: /odc open <页面id>");
                     return true;
                 }
-                String id = args[1];
+                final String id;
+                try {
+                    id = ServerPageManager.normalizePageId(args[1]);
+                } catch (IllegalArgumentException e) {
+                    sender.sendMessage("页面 ID 非法，拒绝访问");
+                    return true;
+                }
                 String yaml = pages.compiledYaml(id, player);
                 if (yaml == null) {
                     sender.sendMessage("没有这个页面: " + id + "（用 /odc list 查看）");
@@ -148,17 +154,24 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                             sender.sendMessage("未知模板: " + args[3] + "（可选 board/menu/shop）");
                             return true;
                         }
-                        if (pages.ids().contains(pageId)) {
-                            sender.sendMessage("页面已存在: " + pageId);
+                        final String normalizedPageId;
+                        try {
+                            normalizedPageId = ServerPageManager.normalizePageId(pageId);
+                        } catch (IllegalArgumentException e) {
+                            sender.sendMessage("页面 ID 非法，拒绝写入: " + pageId);
+                            return true;
+                        }
+                        if (pages.ids().contains(normalizedPageId)) {
+                            sender.sendMessage("页面已存在: " + normalizedPageId);
                             return true;
                         }
                         Path uiDir = plugin.getDataFolder().toPath().resolve("UI");
-                        if (com.opendreamcore.plugin.page.WorldTemplates.write(uiDir, pageId, tpl)) {
+                        if (com.opendreamcore.plugin.page.WorldTemplates.write(uiDir, normalizedPageId, tpl)) {
                             pages.load();
-                            sender.sendMessage("已生成世界页面 " + pageId + "（模板 " + tpl + "）");
-                            sender.sendMessage("进入 WYSIWYG 编辑: /odc edit world " + pageId + " [玩家]");
+                            sender.sendMessage("已生成世界页面 " + normalizedPageId + "（模板 " + tpl + "）");
+                            sender.sendMessage("进入 WYSIWYG 编辑: /odc edit world " + normalizedPageId + " [玩家]");
                         } else {
-                            sender.sendMessage("页面文件写入失败（" + pageId + ".yaml 可能已存在）");
+                            sender.sendMessage("页面文件写入失败（页面 ID 非法、路径不安全或文件已存在）");
                         }
                     }
                     case "list" -> {
@@ -261,6 +274,43 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                     default -> sender.sendMessage("未知编辑子命令: " + args[1]);
                 }
             }
+            case "anim" -> {
+                // /odc anim play|trigger <玩家> <动画|触发名> | /odc anim stop <玩家>
+                boolean stop = args.length > 1 && "stop".equals(args[1]);
+                if (args.length < 3 || (args.length < 2 || !("play".equals(args[1]) || "trigger".equals(args[1]) || stop))
+                        || (!stop && args.length < 4)) {
+                    sender.sendMessage("§e用法: §f/odc anim play|trigger <玩家> <动画或触发名> §7| §f/odc anim stop <玩家>");
+                    return true;
+                }
+                Player target = Bukkit.getPlayerExact(args[2]);
+                if (target == null) {
+                    sender.sendMessage("§c玩家不在线: " + args[2]);
+                    return true;
+                }
+                com.opendreamcore.api.AnimationAPI api = com.opendreamcore.api.OpenDreamCoreAPI.anim();
+                boolean ok;
+                String desc;
+                if (stop) {
+                    ok = api.stop(target);
+                    desc = "stop";
+                } else if ("play".equals(args[1])) {
+                    // 名字先验：Animation/ 里没这个动画就直接拒（带可用名单），
+                    // 不然客户端 library.get null 静默丢弃，服主还以为播了
+                    java.util.List<String> names = plugin.animationSync() != null
+                            ? plugin.animationSync().animNames() : java.util.Collections.emptyList();
+                    if (!names.contains(args[3])) {
+                        sender.sendMessage("§c没有动画「" + args[3] + "」可用: §7" + names);
+                        return true;
+                    }
+                    ok = api.play(target, args[3]);
+                    desc = "play " + args[3];
+                } else {
+                    ok = api.trigger(target, args[3]);
+                    desc = "trigger " + args[3];
+                }
+                sender.sendMessage(ok ? "§a已对 " + target.getName() + " 执行 anim " + desc
+                        : "§c执行失败（目标未握手，身边无广播接收者）");
+            }
             case "help" -> printHelp(sender);
             default -> sender.sendMessage("未知子命令: " + args[0] + "（/odc help 看全部）");
         }
@@ -278,6 +328,7 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("  reload              - config.yml + 页面重载");
         sender.sendMessage("  world list|reset|template [页面] [元素]");
         sender.sendMessage("  edit list|grant|world|revoke ...");
+        sender.sendMessage("  anim play|trigger|stop <玩家> <动画或触发名> - 动画触发");
     }
 
     @Override
@@ -285,7 +336,7 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
                                                 @NotNull String alias, @NotNull String[] args) {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
-            for (String sub : new String[]{"open", "close", "list", "reload", "world", "edit", "stats", "version", "help"}) {
+            for (String sub : new String[]{"open", "close", "list", "reload", "world", "edit", "stats", "version", "anim", "help"}) {
                 if (sub.startsWith(args[0])) {
                     out.add(sub);
                 }
@@ -325,6 +376,31 @@ public final class OdcCommand implements CommandExecutor, TabCompleter {
             for (String tpl : new String[]{"board", "menu", "shop"}) {
                 if (tpl.startsWith(args[2])) {
                     out.add(tpl);
+                }
+            }
+        } else if ("anim".equals(args[0]) && args.length >= 2) {
+            if (args.length == 2) {
+                // 二级：play / trigger / stop
+                for (String sub : new String[]{"play", "trigger", "stop"}) {
+                    if (sub.startsWith(args[1].toLowerCase())) {
+                        out.add(sub);
+                    }
+                }
+            } else if (args.length == 3) {
+                // 三级：在线玩家名
+                for (Player online : Bukkit.getOnlinePlayers()) {
+                    if (online.getName().toLowerCase().startsWith(args[2].toLowerCase())) {
+                        out.add(online.getName());
+                    }
+                }
+            } else if (args.length == 4 && !"stop".equals(args[1])) {
+                // 四级：动画/触发名（Animation/ 扫描结果，含裸名别名）
+                if (plugin.animationSync() != null) {
+                    for (String name : plugin.animationSync().animNames()) {
+                        if (name.toLowerCase().startsWith(args[3].toLowerCase())) {
+                            out.add(name);
+                        }
+                    }
                 }
             }
         }

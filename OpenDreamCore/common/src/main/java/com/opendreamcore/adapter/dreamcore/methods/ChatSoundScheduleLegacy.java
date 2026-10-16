@@ -115,7 +115,12 @@ public final class ChatSoundScheduleLegacy {
         LegacyMethods.register("get_tick_counter", a -> 0.0);
         LegacyMethods.register("reset_tick_counter", a -> null);
         LegacyMethods.register("thread_sleep", a -> {
-            try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { /* 睡眠被打断：静默恢复，不影响调度 */ }
+            try {
+                Thread.sleep((long) num(a, 0));
+            } catch (InterruptedException interrupted) {
+                // 调度器要求继续运行，但中断信号不能被这层兼容 API 吃掉。
+                Thread.currentThread().interrupt();
+            }
             return null;
         });
 

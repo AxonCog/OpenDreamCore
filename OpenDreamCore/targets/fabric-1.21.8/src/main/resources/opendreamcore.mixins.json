@@ -16,10 +16,12 @@
     "MixinCursor",
     "MixinTooltip",
     "MixinRenderPipelinesAccessor",
+    "MixinRenderPipelinesInit",
     "MixinCompositeStateAccessor",
     "OdcCameraMixin",
     "OdcFovMixin",
-    "OdcEntityModelMixin"
+    "OdcEntityModelMixin",
+    "OdcPlayerModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

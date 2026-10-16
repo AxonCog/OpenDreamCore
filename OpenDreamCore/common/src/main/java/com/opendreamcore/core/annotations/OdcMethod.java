@@ -34,6 +34,6 @@ public @interface OdcMethod {
     /** 参数名列表（文档 / 报错用，可含「可选参数...」这类说明项）。 */
     String[] args() default {};
 
-    /** 一句话说明。 */
+    /** 简要说明。 */
     String desc() default "";
 }

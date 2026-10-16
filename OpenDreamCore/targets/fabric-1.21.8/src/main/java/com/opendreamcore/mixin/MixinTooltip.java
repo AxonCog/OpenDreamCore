@@ -2,6 +2,7 @@ package com.opendreamcore.mixin;
 
 import com.opendreamcore.client.ClientController;
 import com.opendreamcore.protocol.message.TooltipRegistry;
+import com.opendreamcore.client.elements.ElementTextUtil;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -39,7 +40,7 @@ public abstract class MixinTooltip {
     /** 自绘提示框：背景条 + 边框 + 多行文字（样式取服务端条目，缺省给默认）。 */
     private static void drawTooltip(GuiGraphics g, Font font, TooltipRegistry.Entry e,
                                     int x, int y) {
-        String[] lines = String.valueOf(e.text()).split("\n", -1);
+        String[] lines = ElementTextUtil.wrapLinesFlat(font, String.valueOf(e.text()), tooltipWidth(e));
         int w = 0;
         for (String l : lines) {
             w = Math.max(w, font.width(l));
@@ -57,6 +58,12 @@ public abstract class MixinTooltip {
         for (int i = 0; i < lines.length; i++) {
             g.drawString(font, lines[i], x + pad, y + pad + i * (font.lineHeight + 1), fg);
         }
+    }
+
+    private static int tooltipWidth(TooltipRegistry.Entry e) {
+        double width = e.width();
+        return width > 0 && Double.isFinite(width) && width <= Integer.MAX_VALUE
+                ? (int) Math.ceil(width) : Integer.MAX_VALUE;
     }
 
     private static int parseColor(String s, int fallback) {

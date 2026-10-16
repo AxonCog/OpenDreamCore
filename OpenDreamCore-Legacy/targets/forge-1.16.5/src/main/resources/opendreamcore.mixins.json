@@ -11,8 +11,8 @@
     "MixinCursor",
     "MixinArmorLayer",
     "MixinNameTag",
-        "OdcModelMixin1165"
-    
+    "OdcModelMixin1165",
+    "LegacyItemModelWorld1165"
   ],
   "injectors": {
     "defaultRequire": 1

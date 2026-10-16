@@ -99,6 +99,10 @@ public final class UiWatcher {
             plugin.tooltipManager().load();
             plugin.loadTypeAliases();
             int v = plugin.visualRules().reload();
+            // 动画文件夹重扫（Animation/** 变了 → 新文件随下次 ready/重进下发）
+            if (plugin.animationSync() != null) {
+                plugin.animationSync().reload();
+            }
             // 资源云重扫：资源文件夹里的文件变了 → 在线玩家全部重新对账
             plugin.resourcePipeline().configure();
             plugin.resourcePipeline().reload();

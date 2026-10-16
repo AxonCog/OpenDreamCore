@@ -3,7 +3,7 @@
 
 apply plugin: 'java'
 
-version = '0.2.0'
+version = hasProperty('mod_version') ? mod_version : '0.2.1'
 group = 'com.opendreamcore'
 archivesBaseName = 'OpenDreamCore-Legacy-forge-1.7.10'
 
@@ -17,9 +17,9 @@ compileJava {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
     maven { url = 'https://repo.spongepowered.org/maven/' }
-    maven { url = 'https://maven.aliyun.com/repository/public' }
     flatDir { dirs 'libs' }
 }
 
@@ -34,6 +34,7 @@ dependencies {
     compile 'org.spongepowered:mixin:0.7.11-SNAPSHOT'
     compile 'com.google.code.gson:gson:2.10.1'
     compile 'org.antlr:antlr4-runtime:4.13.1'
+    compile 'org.tukaani:xz:1.9'
     compile fileTree(dir: '../../common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar')
 }
 
@@ -48,7 +49,7 @@ jar {
     // 全拖进来（previous 版本干过这傻事，jar 被撑到 5MB）
     from {
         configurations.compile
-                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('common-j8') }
+                .filter { it.name.contains('snakeyaml') || it.name.contains('gson') || it.name.contains('antlr') || it.name.contains('xz') || it.name.contains('common-j8') }
                 .collect { zipTree(it) }
     }
     // MC/Forge 本体类运行时由游戏提供，绝不进 jar
@@ -96,4 +97,127 @@ task collectLegacyOutput {
     }
 }
 build.dependsOn collectLegacyOutput
+// 背景：1.7.10 实机 FML 把 MC 类成员换成了 SRG 名，而编译期用的是 MCP 名 jar，
+// 直调 getMinecraft() 这类在实机会 NoSuchMethodError（实机 crash 实锤）。
+// 映射文件 reobf-mapping-1.7.10.txt 是三 jar（MCP 名 jar / 混淆客户端 jar /
+// forge 的 deobfuscation_data）按“改名不改序 + 描述符互译逐条校验”生成的静态
+// 产物，只在 MC/Forge 版本变动时才需要重新生成，平时构建直接消费。
+// 实现：逐个 class 常量池扫描，把指向 MC 类成员的 NameAndType 换成新追增的
+// SRG 名条目（不改动可能被多处共享的原条目，只改引用指针）。
+task reobf1710(dependsOn: jar) {
+    doLast {
+        def fMap = [:], mMap = [:]
+        file('reobf-mapping-1.7.10.txt').eachLine('UTF-8') { line ->
+            line = line.trim()
+            if (!line) return
+            def sp = line.split(' ', 2)
+            def kv = sp[1].split(' -> ')
+            def key = kv[0].replace(' ', '|')
+            if (sp[0] == 'F') fMap[key] = kv[1] else mMap[key] = kv[1]
+        }
+        int hits = 0, classes = 0, totalRefs = 0
+        def outJar = new File(project.buildDir, 'libs')
+        outJar.listFiles()?.each { jf ->
+            if (!jf.name.endsWith('.jar') || jf.name.endsWith('-sources.jar')) return
+            def zin = new java.util.zip.ZipFile(jf)
+            def buf = new ByteArrayOutputStream()
+            def zout = new java.util.zip.ZipOutputStream(buf)
+            zin.entries().each { ze ->
+                zout.putNextEntry(new java.util.zip.ZipEntry(ze.name))
+                def data = zin.getInputStream(ze).bytes
+                if (ze.name.endsWith('.class')) {
+                    try {
+                        def r = reobfClass(data, fMap, mMap)
+                        hits += r[1]
+                        totalRefs += r[2]
+                        data = r[0]
+                    } catch (Throwable ex) {
+                        throw new RuntimeException("reobf 失败: " + ze.name, ex)
+                    }
+                    classes++
+                }
+                zout.write(data)
+                zout.closeEntry()
+            }
+            zout.close()
+            zin.close()
+            jf.bytes = buf.toByteArray()
+        }
+        println String.format("reobf1710: 改写 %d 处成员引用（class 条目 %d，解析到引用 %d）", hits, classes, totalRefs)
+    }
+}
+
+def reobfClass(byte[] data, Map fMap, Map mMap) {
+    def bb = java.nio.ByteBuffer.wrap(data)
+    if (bb.int != -889275714) return [data, 0, 0]   // 0xCAFEBABE 在 Groovy 里是 Long，int 得用补码字面值
+    bb.short; bb.short                       // minor/major
+    int n = bb.short & 0xFFFF
+    def utf8 = [:], cls = [:], nat = [:]
+    def refs = []                            // [tag, ownerIdx, natIdx, natPtrPos]
+    int i = 1
+    while (i < n) {
+        int tag = bb.get() & 0xFF
+        switch (tag) {
+            case 1:
+                int len = bb.short & 0xFFFF
+                byte[] b = new byte[len]; bb.get(b)
+                utf8[i] = new String(b, 'UTF-8'); break
+            case 7: cls[i] = bb.short & 0xFFFF; break
+            case 9: case 10: case 11:
+                int ci = bb.short & 0xFFFF
+                int ni = bb.short & 0xFFFF
+                refs << [tag, ci, ni, bb.position() - 2]; break
+            case 12: nat[i] = [bb.short & 0xFFFF, bb.short & 0xFFFF]; break
+            case 5: case 6: bb.long; i++; break
+            case 15: bb.get(); bb.short; break
+            case 3: case 4: bb.int; break
+            case 17: case 18: bb.short; bb.short; break   // Dynamic/InvokeDynamic：bsm + nat
+            default: bb.short               // 8/16/19/20
+        }
+        i++
+    }
+    int cpEnd = bb.position()
+    // 追增条目：新 Utf8(SRG 名) + 新 NameAndType(新名, 原 desc)
+    def appended = new ByteArrayOutputStream()
+    int newIdx = n
+    def newNat = [:]
+    int hits = 0, totalRefs = 0
+    for (r in refs) {
+        totalRefs++
+        def owner = utf8[cls[r[1]]]
+        if (owner == null) continue
+        def nt = nat[r[2]]
+        if (nt == null) continue
+        def name = utf8[nt[0]], desc = utf8[nt[1]]
+        if (name == null || desc == null) continue
+        def srg = (r[0] == 9 ? fMap : mMap)[owner + '|' + name + '|' + desc]
+        if (srg == null || srg == name) continue
+        def key = srg + '|' + nt[1]
+        if (!newNat.containsKey(key)) {
+            def nb = srg.getBytes('UTF-8')
+            appended.write(1)
+            appended.write((nb.length >>> 8) & 0xFF); appended.write(nb.length & 0xFF)
+            appended.write(nb)
+            newIdx++
+            def srgIdx = newIdx - 1
+            appended.write(12)
+            appended.write((srgIdx >>> 8) & 0xFF); appended.write(srgIdx & 0xFF)
+            appended.write((nt[1] >>> 8) & 0xFF); appended.write(nt[1] & 0xFF)
+            newIdx++
+            newNat[key] = newIdx - 1
+        }
+        java.nio.ByteBuffer.wrap(data, r[3], 2).putShort((short) (int) newNat[key])
+        hits++
+    }
+    if (appended.size() == 0) return [data, hits, totalRefs]
+    def out = new ByteArrayOutputStream()
+    out.write(data, 0, 8)                     // 魔数+minor+major（计数位单独重写）
+    out.write((newIdx >>> 8) & 0xFF); out.write(newIdx & 0xFF)   // newIdx = 下一空位 = count
+    out.write(data, 10, cpEnd - 10)           // 原常量池（含已打补丁的指针）
+    appended.writeTo(out)
+    out.write(data, cpEnd, data.length - cpEnd)
+    return [out.toByteArray(), hits, totalRefs]
+}
+
+collectLegacyOutput.dependsOn reobf1710
 

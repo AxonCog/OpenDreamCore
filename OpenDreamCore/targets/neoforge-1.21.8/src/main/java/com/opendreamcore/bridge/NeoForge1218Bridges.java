@@ -7,12 +7,10 @@ import com.opendreamcore.client.spi.GlStateBridge;
 import com.opendreamcore.client.spi.ResourcePackInjector;
 
 /**
- * neoforge-1.21.8 的桥总实现：TargetBridges 契约缺一不行——接口加方法这文件就得跟着
- * 加，漏了直接编译红，全版本对齐从结构上兜底。
+ * neoforge-1.21.8 的 TargetBridges 实现；接口新增方法时需同步实现，确保该目标的桥契约完整。
  */
 public final class NeoForge1218Bridges implements TargetBridges {
-
-    /** 全局 GL / 着色器状态桥：这一族的调用点一律走它，绝不按签名反射（见 GlStateBridge 的 Javadoc）。 */
+    /** 全局 GL / 着色器状态桥；调用点统一使用该桥，避免按签名反射。 */
     private static final GlStateBridge GL_STATE = new com.opendreamcore.client.GlStateBridgeImpl();
 
     private static final EntityRenderBridge ENTITY = new com.opendreamcore.client.entity.EntityRenderBridgeImpl();

@@ -58,9 +58,9 @@ public final class LegacyItemCompat {
      * 自己包一层——老版本直接走废弃分支，同一个口子进出。
      */
     /**
-     * 玩家延迟：Paper 有 getPing()，Spigot 1.12.2 及更早只有 NMS 字段
-     * EntityPlayer.ping。反射两连招都拿不到才认输填 0，别让占位符
-     * 链路在老服上炸 NoSuchMethodError 把整个 query 拖死。
+     * 玩家延迟：Paper 提供 getPing()，Spigot 1.12.2 及更早版本只有 NMS 字段
+     * EntityPlayer.ping。两种反射方式都不可用时返回 0，避免旧版本抛出 NoSuchMethodError
+     * 使 query 占位符解析失败。
      */
     public static long ping(Player p) {
         if (p == null) {

@@ -50,12 +50,16 @@ public final class ModelIR {
         /** from/to（模型空间，3 分量）。 */
         public final double[] from = new double[3];
         public final double[] to = new double[3];
-        /** true=box UV（uv=[u1,v1,u2,v2]），false=逐面 UV（faces 北东西南上下的 [u1,v1,u2,v2]）。 */
         public boolean boxUv;
-        /** boxUv 时 [u1,v1,u2,v2]；逐面时按 顺序 north,east,south,west,up,down 存 6 组。 */
+        /** boxUv 时 [u1,v1,u2,v2]；逐面时按 north,east,south,west,up,down 存 6 组。 */
         public final double[][] uv = new double[6][4];
         /** 材质索引（materials 下标）。 */
         public int material = 0;
+        /**
+         * 逐面材质索引，顺序与 uv 相同（north,east,south,west,up,down）。
+         * null 表示六面共用 material；负值表示该面在源格式中不存在，应跳过。
+         */
+        public int[] faceMaterials;
         /** 可选整体膨胀（bbmodel inflate / geo cube grow）。 */
         public double inflate;
     }

@@ -65,6 +65,11 @@ public final class LegacyOdcScreen1710 extends GuiScreen {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        // 指针必须每帧拉回来：initGui 那一次放出去后，其他 mod/
+        // 分辨率重设都可能再 grab 走，表现为「开 GUI 鼠标不出来」
+        if (org.lwjgl.input.Mouse.isGrabbed()) {
+            org.lwjgl.input.Mouse.setGrabbed(false);
+        }
         // 不画背景——页面由叠加层负责；这里只把真鼠标换算成 guiScaled 坐标喂出去
         double scale = mc.displayWidth / (double) Math.max(1, this.width);
         com.opendreamcore.client.render.MouseState.set(

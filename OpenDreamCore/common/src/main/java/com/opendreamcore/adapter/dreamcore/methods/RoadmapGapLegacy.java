@@ -377,7 +377,7 @@ public final class RoadmapGapLegacy {
         return null;
     }
 
-    /** 头顶语境优先（线C②）：渲染名牌时读当前实体字段，否则回退 fallback（指向实体/常量）。 */
+    /** 渲染名牌时优先读取当前实体字段；字段不可用时返回 fallback（指向实体或常量）。 */
     private static Object headOr(String field, Object fallback) {
         Object v = EntityLegacy.headField(field);
         return v != null ? v : fallback;

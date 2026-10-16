@@ -4,10 +4,8 @@ import com.opendreamcore.script.MethodRegistry;
 import com.opendreamcore.script.NamespaceRegistry;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -41,6 +39,60 @@ class LegacyMethodsTest {
 
         Object r = MethodRegistry.require("播放声音").invoke(new Object[]{"菜单/打开菜单.ogg"});
         assertEquals("played:菜单/打开菜单.ogg", r);
+    }
+
+    @Test
+    void legacyKeyStatusDelegatesToHost() {
+        LegacyMethods.ensureRegistered();
+        LegacyMethods.Host original = LegacyMethods.host();
+        try {
+            LegacyMethods.installHost(new LegacyMethods.Host() {
+                @Override public void runFunctionAsync(String name) { }
+                @Override public double screenHeight() { return 0; }
+                @Override public double wheelDelta() { return 0; }
+                @Override public String pressedKey() { return ""; }
+                @Override public boolean keyDown(String key) { return "LMENU".equals(key); }
+                @Override public String slotItem(String identifier) { return ""; }
+                @Override public int slotItemCount(Object item) { return 0; }
+                @Override public void refreshVariables(String name) { }
+                @Override public long pageAliveMs() { return 0; }
+            });
+            assertEquals(true, MethodRegistry.require("键位是否按下").invoke(new Object[]{"LMENU"}));
+            assertEquals(false, MethodRegistry.require("键位是否按下").invoke(new Object[]{"W"}));
+        } finally {
+            LegacyMethods.installHost(original);
+        }
+    }
+
+    @Test
+    void sleepMethodsPreserveInterruptStatus() {
+        LegacyMethods.ensureRegistered();
+
+        Thread.currentThread().interrupt();
+        try {
+            Object pause = MethodRegistry.require("延时").invoke(new Object[]{0L});
+            assertInstanceOf(com.opendreamcore.script.engine.DreamLang.PauseRequest.class, pause);
+            assertEquals(0L, ((com.opendreamcore.script.engine.DreamLang.PauseRequest) pause).delayMs());
+            assertTrue(Thread.currentThread().isInterrupted(), "延时返回暂停请求且不能清除线程中断信号");
+        } finally {
+            Thread.interrupted();
+        }
+
+        Thread.currentThread().interrupt();
+        try {
+            assertNull(MethodRegistry.require("thread_sleep").invoke(new Object[]{0L}));
+            assertTrue(Thread.currentThread().isInterrupted(), "thread_sleep 不能吞掉线程中断信号");
+        } finally {
+            Thread.interrupted();
+        }
+
+        Thread.currentThread().interrupt();
+        try {
+            assertNull(MethodRegistry.require("线程休眠").invoke(new Object[]{0L}));
+            assertTrue(Thread.currentThread().isInterrupted(), "线程休眠不能吞掉线程中断信号");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

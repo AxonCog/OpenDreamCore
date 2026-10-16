@@ -65,6 +65,11 @@ public final class LegacyOdcScreen extends GuiScreen {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        // 指针必须每帧拉回来：initGui 那一次放出去后，其他 mod/OptiFine/
+        // 分辨率重设都可能再 grab 走，表现为「开 GUI 鼠标不出来」
+        if (org.lwjgl.input.Mouse.isGrabbed()) {
+            org.lwjgl.input.Mouse.setGrabbed(false);
+        }
         // 全透：不画背景不画页面（PageDirector 的叠加层负责画页面），
         // 只把真鼠标坐标喂给共享层（guiScaled 系，跟命中盒同坐标系）。
         // 点击/拖拽的边沿检测都在 MouseState，这里只负责喂。

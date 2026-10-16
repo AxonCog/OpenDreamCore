@@ -102,8 +102,7 @@ public final class FullGapLegacy {
         LegacyMethods.register("删除", a -> null);
         LegacyMethods.register("删除变量", a -> V("设置变量",arg(a,0),null));
         LegacyMethods.register("删除槽位物品", a -> null);
-        LegacyMethods.register("删除物品", a -> null);
-        LegacyMethods.register("删除组件", a -> SC1B("隐藏元素"));
+        LegacyMethods.register("删除组件", a -> LegacyMethods.delegate("Screen", "删除元素", LegacyMethods.arg(a, 0)));
         LegacyMethods.register("删除路标", a -> null);
         LegacyMethods.register("到整数", a -> TO_INT(a));
         LegacyMethods.register("到相机距离", a -> 0.0);
@@ -142,7 +141,7 @@ public final class FullGapLegacy {
         LegacyMethods.register("变量加", a -> VAR_ADD(a));
         LegacyMethods.register("变量存在", a -> V("是否有变量",arg(a,0)));
         LegacyMethods.register("变量数量", a -> V("获取变量数量"));
-        LegacyMethods.register("变量清除", a -> null);
+        LegacyMethods.register("变量清除", a -> V("清空"));
         LegacyMethods.register("变量置值", a -> V("设置变量",arg(a,0),arg(a,1)));
         LegacyMethods.register("变量自减", a -> VAR_DEC(a));
         LegacyMethods.register("变量自增", a -> VAR_INC(a));
@@ -269,10 +268,9 @@ public final class FullGapLegacy {
         LegacyMethods.register("断开连接", a -> null);
         LegacyMethods.register("断言", a -> null);
         LegacyMethods.register("新建数组", a -> null);
-        LegacyMethods.register("新建组件", a -> null);
         LegacyMethods.register("日志", a -> null);
         LegacyMethods.register("时间戳", a -> NOW_MS(a));
-        LegacyMethods.register("映射", a -> null);
+        LegacyMethods.register("映射", CoreArrayLegacy::mapWithCallable);
         LegacyMethods.register("是否为空", a -> false);
         LegacyMethods.register("是否全屏", a -> false);
         LegacyMethods.register("是否可调整", a -> false);
@@ -328,7 +326,6 @@ public final class FullGapLegacy {
         LegacyMethods.register("模拟按键", a -> LegacyMethods.delegate("Key", "模拟按下", a));
         LegacyMethods.register("模拟控制按键", a -> LegacyMethods.delegate("Key", "模拟按下", a));
         LegacyMethods.register("模拟消息", a -> null);
-        LegacyMethods.register("模拟点击槽位", a -> null);
         LegacyMethods.register("正切", a -> null);
         LegacyMethods.register("正弦", a -> null);
         LegacyMethods.register("正面运镜", a -> null);
@@ -347,15 +344,12 @@ public final class FullGapLegacy {
         LegacyMethods.register("添加卡片按钮", a -> null);
         LegacyMethods.register("添加抖动动画", a -> 0.0);
         LegacyMethods.register("添加数组", a -> null);
-        LegacyMethods.register("添加组件", a -> null);
-        LegacyMethods.register("添加组件前", a -> null);
-        LegacyMethods.register("添加组件后", a -> null);
         LegacyMethods.register("添加路标", a -> null);
         LegacyMethods.register("添加过渡动画", a -> 0.0);
         LegacyMethods.register("清空临时变量", a -> null);
         LegacyMethods.register("清空动画", a -> 0.0);
         LegacyMethods.register("清空卡片", a -> null);
-        LegacyMethods.register("清空变量", a -> null);
+        LegacyMethods.register("清空变量", a -> V("清空"));
         LegacyMethods.register("清空延迟变量", a -> null);
         LegacyMethods.register("清空延迟表达式", a -> null);
         LegacyMethods.register("清空文本纹理缓存", a -> null);
@@ -363,7 +357,7 @@ public final class FullGapLegacy {
         LegacyMethods.register("清空过渡", a -> null);
         LegacyMethods.register("清除临时变量", a -> null);
         LegacyMethods.register("清除卡片", a -> null);
-        LegacyMethods.register("清除变量", a -> null);
+        LegacyMethods.register("清除变量", a -> V("清空"));
         LegacyMethods.register("清除导入缓存", a -> null);
         LegacyMethods.register("清除延迟变量", a -> null);
         LegacyMethods.register("清除延迟表达式", a -> null);
@@ -384,30 +378,30 @@ public final class FullGapLegacy {
         LegacyMethods.register("物品护甲值", a -> null);
         LegacyMethods.register("物品转字符串", a -> null);
         LegacyMethods.register("特效动画", a -> 0.0);
-        LegacyMethods.register("玩家UUID", a -> P("获取名字"));
-        LegacyMethods.register("玩家X", a -> P("获取名字"));
-        LegacyMethods.register("玩家Y", a -> P("获取名字"));
-        LegacyMethods.register("玩家Z", a -> P("获取名字"));
-        LegacyMethods.register("玩家motionx", a -> P("获取名字"));
-        LegacyMethods.register("玩家motiony", a -> P("获取名字"));
-        LegacyMethods.register("玩家motionz", a -> P("获取名字"));
-        LegacyMethods.register("玩家pitch", a -> P("获取名字"));
-        LegacyMethods.register("玩家yaw", a -> P("获取名字"));
-        LegacyMethods.register("玩家位置", a -> P("获取名字"));
-        LegacyMethods.register("玩家俯仰角", a -> P("获取名字"));
-        LegacyMethods.register("玩家偏航角", a -> P("获取名字"));
-        LegacyMethods.register("玩家分数", a -> P("获取名字"));
+        LegacyMethods.register("玩家UUID", a -> S(""));
+        LegacyMethods.register("玩家X", a -> P("获取坐标X"));
+        LegacyMethods.register("玩家Y", a -> P("获取坐标Y"));
+        LegacyMethods.register("玩家Z", a -> P("获取坐标Z"));
+        LegacyMethods.register("玩家motionx", a -> 0.0);
+        LegacyMethods.register("玩家motiony", a -> 0.0);
+        LegacyMethods.register("玩家motionz", a -> 0.0);
+        LegacyMethods.register("玩家pitch", a -> P("获取俯仰角"));
+        LegacyMethods.register("玩家yaw", a -> P("获取偏航角"));
+        LegacyMethods.register("玩家位置", a -> P("获取坐标X") + "," + P("获取坐标Y") + "," + P("获取坐标Z"));
+        LegacyMethods.register("玩家俯仰角", a -> P("获取俯仰角"));
+        LegacyMethods.register("玩家偏航角", a -> P("获取偏航角"));
+        LegacyMethods.register("玩家分数", a -> 0.0);
         LegacyMethods.register("玩家名", a -> P("获取名字"));
-        LegacyMethods.register("玩家在地面", a -> P("获取名字"));
-        LegacyMethods.register("玩家在岩浆", a -> P("获取名字"));
-        LegacyMethods.register("玩家在水中", a -> P("获取名字"));
-        LegacyMethods.register("玩家坐标x", a -> P("获取名字"));
-        LegacyMethods.register("玩家坐标y", a -> P("获取名字"));
-        LegacyMethods.register("玩家坐标z", a -> P("获取名字"));
-        LegacyMethods.register("玩家头盔", a -> P("获取名字"));
-        LegacyMethods.register("玩家延迟", a -> P("获取名字"));
-        LegacyMethods.register("玩家当前人称", a -> P("获取名字"));
-        LegacyMethods.register("玩家总经验", a -> P("获取经验"));
+        LegacyMethods.register("玩家在地面", a -> P("是否在地面"));
+        LegacyMethods.register("玩家在岩浆", a -> false);
+        LegacyMethods.register("玩家在水中", a -> P("是否在水中"));
+        LegacyMethods.register("玩家坐标x", a -> P("获取坐标X"));
+        LegacyMethods.register("玩家坐标y", a -> P("获取坐标Y"));
+        LegacyMethods.register("玩家坐标z", a -> P("获取坐标Z"));
+        LegacyMethods.register("玩家头盔", a -> S(""));
+        LegacyMethods.register("玩家延迟", a -> P("延迟"));
+        LegacyMethods.register("玩家当前人称", a -> 0.0);
+        LegacyMethods.register("玩家总经验", a -> P("获取经验值"));
         LegacyMethods.register("玩家护甲值", a -> P("获取护甲"));
         LegacyMethods.register("玩家护腿", a -> S(""));
         LegacyMethods.register("玩家是否在地面上", a -> PBOOL("on_ground"));
@@ -418,9 +412,9 @@ public final class FullGapLegacy {
         LegacyMethods.register("玩家最大血量", a -> P("获取最大血量"));
         LegacyMethods.register("玩家氧气", a -> 300.0);
         LegacyMethods.register("玩家游戏模式", a -> P("获取游戏模式"));
-        LegacyMethods.register("玩家游泳", a -> P("获取名字"));
-        LegacyMethods.register("玩家潜行", a -> P("获取名字"));
-        LegacyMethods.register("玩家燃烧", a -> P("获取名字"));
+        LegacyMethods.register("玩家游泳", a -> P("是否游泳"));
+        LegacyMethods.register("玩家潜行", a -> P("是否潜行"));
+        LegacyMethods.register("玩家燃烧", a -> P("是否着火"));
         LegacyMethods.register("玩家物品ID", a -> LegacyMethods.slotItem(a, 0));
         LegacyMethods.register("玩家物品名称", a -> LegacyMethods.slotItem(a, 0));
         LegacyMethods.register("玩家物品数量", a -> 1.0);
@@ -429,11 +423,11 @@ public final class FullGapLegacy {
         LegacyMethods.register("玩家物品栏大小", a -> 36.0);
         LegacyMethods.register("玩家物品耐久", a -> 0.0);
         LegacyMethods.register("玩家生物群系", a -> P("获取生物群系"));
-        LegacyMethods.register("玩家疾跑", a -> P("获取名字"));
-        LegacyMethods.register("玩家睡觉", a -> P("获取名字"));
+        LegacyMethods.register("玩家疾跑", a -> P("是否疾跑"));
+        LegacyMethods.register("玩家睡觉", a -> false);
         LegacyMethods.register("玩家等级", a -> P("获取等级"));
-        LegacyMethods.register("玩家经验", a -> P("获取经验"));
-        LegacyMethods.register("玩家经验值", a -> P("获取经验"));
+        LegacyMethods.register("玩家经验", a -> P("获取经验值"));
+        LegacyMethods.register("玩家经验值", a -> P("获取经验值"));
         LegacyMethods.register("玩家维度", a -> S(""));
         LegacyMethods.register("玩家胸甲", a -> S(""));
         LegacyMethods.register("玩家血量", a -> P("获取血量"));
@@ -444,7 +438,7 @@ public final class FullGapLegacy {
         LegacyMethods.register("玩家重生", a -> P("重生"));
         LegacyMethods.register("玩家靴子", a -> S(""));
         LegacyMethods.register("玩家飞行速度", a -> 0.0);
-        LegacyMethods.register("玩家饥饿值", a -> P("获取饥饿"));
+        LegacyMethods.register("玩家饥饿值", a -> P("获取饥饿值"));
         LegacyMethods.register("玩家饱和度", a -> 20.0);
         LegacyMethods.register("环绕动画", a -> null);
         LegacyMethods.register("生成带背景文本纹理", a -> null);
@@ -578,7 +572,7 @@ public final class FullGapLegacy {
         LegacyMethods.register("重载脚本", a -> null);
         LegacyMethods.register("锁定功能", a -> null);
         LegacyMethods.register("错误通知", a -> TIP("§c"));
-        LegacyMethods.register("键位是否按下", a -> false);
+        LegacyMethods.register("键位是否按下", a -> LegacyMethods.host().keyDown(LegacyMethods.argStr(a, 0)));
         LegacyMethods.register("长度", a -> LEN(a));
         LegacyMethods.register("闪烁", a -> BLINK(a));
         LegacyMethods.register("闪烁动画", a -> BLINK(a));
@@ -863,7 +857,12 @@ public final class FullGapLegacy {
         return null;
     }
     private static Object SLEEP(Object[] a) {
-        try { Thread.sleep((long) num(a, 0)); } catch (InterruptedException ignored) { /* 睡眠被打断：静默恢复 */ }
+        try {
+            Thread.sleep((long) num(a, 0));
+        } catch (InterruptedException interrupted) {
+            // 脚本层可以继续返回，但线程的中断状态要交还给上层调度器。
+            Thread.currentThread().interrupt();
+        }
         return null;
     }
     private static Object FN_RUN(Object[] a) {

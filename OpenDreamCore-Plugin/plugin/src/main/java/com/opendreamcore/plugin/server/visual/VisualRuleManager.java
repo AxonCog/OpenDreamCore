@@ -1,12 +1,16 @@
 package com.opendreamcore.plugin.server.visual;
 
-import com.opendreamcore.visual.VisualRules;
+import com.opendreamcore.adapter.AdapterChain;
+import com.opendreamcore.config.YamlParser;
 import com.opendreamcore.visual.VisualTemplates;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -51,7 +55,7 @@ public final class VisualRuleManager {
     public int reload() {
         // 适配器链先清场：脚本登记的方言适配器（extensions/adapters）全部注销，
         // 扩展装载器在本方法之后重载并重新登记——Java 附属注册的常驻，不受影响
-        com.opendreamcore.adapter.AdapterChain.clearScripted();
+        AdapterChain.clearScripted();
         bundles.clear();
         int total = 0;
         Map<String, Map<String, Object>> keyRules = new LinkedHashMap<>();
@@ -79,10 +83,8 @@ public final class VisualRuleManager {
                 slotRules.putAll(rules);
             }
         }
-        total += mergeExternal(keyRules);
-        if (!keyRules.isEmpty()) {
-            keyExecutor.load(keyRules);
-        }
+        total += mergeExternal(keyRules, slotRules);
+        keyExecutor.load(keyRules);
         // SlotConfig 装进裁决器（KeyConfig 执行器同一套 reload 习惯）
         slotGuard.load(slotRules);
         if (slotGuard.size() > 0) {
@@ -94,21 +96,27 @@ public final class VisualRuleManager {
     }
 
     /**
-     * 并入龙核原生配置（plugins/DragonCore/ 顶层的 KeyConfig.yml、Blood.yml
-     * 那一批）。id 统一挂 dc/ 前缀：跟服主自己写的规则天然不撞车，日志里
+     * 并入龙核原生配置（plugins/DragonCore/ 顶层的 .yml/.yaml 系统文件，
+     * 如 KeyConfig.yml、Blood.yaml）。id 统一挂 dc/ 前缀：跟服主自己写的规则天然不撞车，日志里
      * 也一眼认出出处。同名按键组合龙核后到、后到嬴，跟龙核自己的装载
      * 顺序一致。翻译失败只记一条日志，不拖垮其它文件。
      */
-    private int mergeExternal(Map<String, Map<String, Object>> keyRules) {
+    private int mergeExternal(Map<String, Map<String, Object>> keyRules,
+                              Map<String, Map<String, Object>> slotRules) {
         if (externalRoot == null || !java.nio.file.Files.isDirectory(externalRoot)) {
             return 0;
         }
         int merged = 0;
         List<Path> files = new ArrayList<>();
-        try (java.nio.file.DirectoryStream<Path> stream =
-                     java.nio.file.Files.newDirectoryStream(externalRoot, "*.yml")) {
+        try (java.nio.file.DirectoryStream<Path> stream = Files.newDirectoryStream(externalRoot)) {
             for (Path p : stream) {
-                files.add(p);
+                if (!Files.isRegularFile(p)) {
+                    continue;
+                }
+                String name = p.getFileName().toString().toLowerCase(Locale.ROOT);
+                if (name.endsWith(".yml") || name.endsWith(".yaml")) {
+                    files.add(p);
+                }
             }
         } catch (Exception e) {
             java.util.logging.Logger.getLogger("OpenDreamCore")
@@ -118,19 +126,35 @@ public final class VisualRuleManager {
         // 排序后装载，同名键结果可复现
         files.sort(java.util.Comparator.comparing(p -> p.getFileName().toString()));
         for (Path file : files) {
-            for (Map.Entry<String, Map<String, Map<String, Object>>> entry :
-                    DreamCoreBridge.translateFile(file, VisualRuleManager::noop).entrySet()) {
-                String system = entry.getKey();
-                Map<String, String> bundle = bundles.computeIfAbsent(system,
-                        k -> new LinkedHashMap<>());
-                for (Map.Entry<String, Map<String, Object>> rule : entry.getValue().entrySet()) {
-                    String id = "dc/" + rule.getKey();
-                    bundle.put(id, com.opendreamcore.visual.VisualYaml.dump(rule.getValue()));
-                    if (system.equals("KeyConfig")) {
-                        keyRules.put(id, rule.getValue());
+            try {
+                // 宽松解析保留龙核配置中的重复键和 BOM 处理；各文件独立失败。
+                String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                Map<String, Object> root = YamlParser.lenient().parse(text);
+                for (Map.Entry<String, Map<String, Map<String, Object>>> entry :
+                        AdapterChain.translate(file.getFileName().toString(), root).entrySet()) {
+                    String system = entry.getKey();
+                    Map<String, String> bundle = bundles.computeIfAbsent(system,
+                            k -> new LinkedHashMap<>());
+                    for (Map.Entry<String, Map<String, Object>> rule : entry.getValue().entrySet()) {
+                        String id = "dc/" + rule.getKey();
+                        Map<String, Object> body = rule.getValue();
+                        if (system.equals("KeyConfig")) {
+                            body = new LinkedHashMap<>(body);
+                            // Namespace the rule identity, never the execution combo. Explicit
+                            // bindings survive unchanged; legacy map-key combos become keys.
+                            if (!body.containsKey("keys")) {
+                                body.put("keys", java.util.Collections.singletonList(rule.getKey()));
+                            }
+                            keyRules.put(id, body);
+                        } else if (system.equals("SlotConfig")) {
+                            slotRules.put(id, body);
+                        }
+                        bundle.put(id, com.opendreamcore.visual.VisualYaml.dump(body));
+                        merged++;
                     }
-                    merged++;
                 }
+            } catch (Exception e) {
+                logExternalError(file.getFileName().toString(), e);
             }
         }
         if (merged > 0) {
@@ -140,7 +164,7 @@ public final class VisualRuleManager {
         return merged;
     }
 
-    private static void noop(String name, Throwable t) {
+    private static void logExternalError(String name, Throwable t) {
         java.util.logging.Logger.getLogger("OpenDreamCore")
                 .warning("龙核配置解析失败 " + name + "：" + t);
     }

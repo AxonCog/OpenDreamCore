@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- JDK 21（Temurin 或 Oracle）
+- JDK 21（root/common/插件与大部分现代 target）；1.20.1 target 需要 JDK 17，26.1.2 target 需要 JDK 25，完整发布还需要 legacy 的 JDK 8/17。
 - Git
 - IDE：IntelliJ IDEA 推荐（装 Minecraft Development 插件）
 
@@ -13,18 +13,26 @@
 ```powershell
 git clone https://github.com/AxonCog/OpenDreamCore.git
 cd OpenDreamCore
-
-# 客户端模组
+# 进入仓库里的现代端根 Gradle 工程
 cd OpenDreamCore
-.\gradlew.bat -p targets/neoforge-1.21.1 build
-.\gradlew.bat -p targets/fabric-1.21.1 build
 
-# 服务端插件
-cd ..\OpenDreamCore-Plugin
-.\gradlew.bat build
+# 共享层测试（root build/buildFull/verifyMatrix 都会先执行此门禁）
+.\gradlew.bat testCommon
+
+# 编译指定 target（默认首个 active target）；完整矩阵会使用各 target 要求的 JDK
+.\gradlew.bat -Ptarget=neoforge-1.21.1 build
+.\gradlew.bat verifyMatrix
+
+# 全量现代 target、在建 legacy target、插件及 output/all 产物门禁
+.\gradlew.bat buildFull
 ```
 
-构建产物在 `output/` 目录。
+独立 target 仍可直接构建，例如 `.\gradlew.bat -p targets/fabric-1.21.1 build`；服务端插件在 `..\OpenDreamCore-Plugin` 中运行其 wrapper。构建产物在 `output/` 目录。
+
+Root Gradle 8.8 使用 JDK 21 运行。按需设置 `JAVA8_HOME`、`JAVA17_HOME`、`JAVA21_HOME`、`JAVA25_HOME`，或传入对应的 `-Pjava8Home=...`、`-Pjava17Home=...`、`-Pjava21Home=...`、`-Pjava25Home=...`。`build` 与 `verifyMatrix` 复用同一套 target JDK 选择；`testCommon` 和插件使用 JDK 21，`buildLegacy` 使用 JDK 17 并向 legacy 编排传递 JDK 8/17 配置。
+`buildFull` 先通过 common 测试，再构建并汇总现代、Legacy（1.7.10、1.12.2、1.16.5）和插件产物，最后运行 `verifyArtifacts`。
+
+所有 wrapper 使用腾讯 Gradle 镜像，保留原有 Gradle 版本；wrapper 本身不自动切换下载地址，镜像不可达时可将 `distributionUrl` 改为同版本的 `https://services.gradle.org/distributions/gradle-<版本>-bin.zip`。Maven/插件依赖优先使用国内镜像，后置官方仓库作为未命中时的回退，并保留 Fabric/Forge/NeoForge 等专用仓库。
 
 ## 项目结构
 
@@ -45,8 +53,7 @@ OpenDreamCore-Legacy/
 OpenDreamCore-Plugin/
 ├── core/                      ← 与 Bukkit 无关的核心逻辑
 ├── plugin/src/.../api/        ← 附属插件用的 Java API
-├── plugin/src/.../plugin/     ← 服务端实现
-└── nms-v1_21_R1/              ← 直连服务端内部的 NMS 层
+└── plugin/src/.../plugin/     ← 服务端实现
 ```
 
 ### 共享源码树
@@ -129,7 +136,7 @@ PR 会自动触发 CI 构建和测试。
 
 ## 附属插件开发
 
-参考 [docs/API.md](docs/API.md) 了解如何使用 OpenDreamCore 的 Java API 开发附属插件。
+当前仓库没有统一的 `docs/API.md`。服务端插件 API 以 `OpenDreamCore-Plugin/plugin/src/main/java/com/opendreamcore/plugin/api/` 下的源码和各模块构建配置为准。
 
 ## 行为准则
 
@@ -137,15 +144,10 @@ PR 会自动触发 CI 构建和测试。
 - 保持讨论技术相关
 - PR 里不要夹带未公开授权的内容（内部资料、别人的反编译产物之类）
 
-## 架构约定：功能必须全版本对齐
+## 架构约定：按共享边界维护
 
-客户端分两层：`common/`、`client/` 是跨加载器共享源码树，`targets/` 下每个壳只放平台胶水（入口类、事件挂接、API 接线）。
+客户端分两层：`common/`、`client/` 是跨加载器共享源码树，`targets/` 下的壳负责平台入口、事件挂接和 API 接线。现代目标优先复用共享实现；Legacy 线因 Java 8 和 Minecraft API 差异保留独立适配代码。
 
-由此有两条硬规矩：
+修改功能时应同时检查共享层消费者和所有受影响 target，不把尚未验证的跨版本行为写成统一承诺。注释只说明代码做什么、为什么这样做。
 
-1. **功能长在共享树里**。新功能先以 neoforge-1.21.1 为标杆做通，然后把平台无关的部分沉到共享层，版本差异用 Compat*/SPI 接口吸收（比如 WorldHologram 里的 rsDepthMask 就是这么处理的）。各 target 壳里出现业务逻辑就算漂移，得回收进共享层。
-2. **所有 12 个 target 行为必须一致**，不允许"先跑通某个版本再说"。提交前自查：新增的 SPI/挂点在其他壳里有没有对应接线——跑 `gradlew.bat verifyMatrix` 逐壳编译，全绿才提。
-
-注释只写"这段代码做什么、为什么这么做"。
-
-违反上面两条的 PR 不会被合并。
+违反上面约定的 PR 不会被合并。

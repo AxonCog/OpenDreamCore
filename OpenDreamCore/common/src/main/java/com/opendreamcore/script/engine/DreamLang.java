@@ -20,6 +20,62 @@ public final class DreamLang {
         return executor.visitProgram(tree);
     }
 
+    /** Host-owned asynchronous AST execution. Cancellation belongs to host scheduler. */
+    public static void executeAsync(String script, Scope scope, AsyncScheduler scheduler) {
+        if (script == null || scope == null || scheduler == null) {
+            throw new IllegalArgumentException("script, scope and scheduler are required");
+        }
+        new DreamLangExecutor(scope).executeAsync(parse(script), scheduler);
+    }
+
+    /** Return value used by a host method to suspend the current AST. */
+    public static PauseRequest pause(long delayMs) {
+        return new PauseRequest(Math.max(0L, delayMs));
+    }
+
+    /** Host method marker for a script-backed function call. */
+    public static ScriptCallRequest call(String script, Scope scope) {
+        if (script == null || scope == null) {
+            throw new IllegalArgumentException("script and scope are required");
+        }
+        return new ScriptCallRequest(script, scope);
+    }
+
+    public static final class PauseRequest {
+        private final long delayMs;
+        private PauseRequest(long delayMs) { this.delayMs = delayMs; }
+        public long delayMs() { return delayMs; }
+    }
+
+    public static final class ScriptCallRequest {
+        private final String script;
+        private final Scope scope;
+        private ScriptCallRequest(String script, Scope scope) {
+            this.script = script;
+            this.scope = scope;
+        }
+        public String script() { return script; }
+        public Scope scope() { return scope; }
+    }
+
+
+    private static final ThreadLocal<Scope> CURRENT_SCOPE = new ThreadLocal<>();
+
+    /** Scope visible to a host method while the current AST expression runs. */
+    public static Scope currentScope() {
+        return CURRENT_SCOPE.get();
+    }
+
+    static Scope enterScope(Scope scope) {
+        Scope previous = CURRENT_SCOPE.get();
+        CURRENT_SCOPE.set(scope);
+        return previous;
+    }
+
+    static void leaveScope(Scope previous) {
+        if (previous == null) CURRENT_SCOPE.remove();
+        else CURRENT_SCOPE.set(previous);
+    }
     /** 只求值表达式（布局公式/条件表达式用）。 */
     public static Object evaluate(String expression, Scope scope) {
         DreamLangParser.ProgramContext tree = parse(expression);

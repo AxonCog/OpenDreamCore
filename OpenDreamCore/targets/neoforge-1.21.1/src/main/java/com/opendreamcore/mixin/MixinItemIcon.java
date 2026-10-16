@@ -1,7 +1,7 @@
 package com.opendreamcore.mixin;
 
+import com.opendreamcore.client.model.GenItemModelRenderer;
 import com.opendreamcore.client.render.GuiBlitCompat;
-import com.opendreamcore.client.CompatRender;
 import com.opendreamcore.client.resources.LooseResourceLoader;
 import com.opendreamcore.client.visual.VisualItemSkins;
 import net.minecraft.client.gui.GuiGraphics;
@@ -30,20 +30,33 @@ public abstract class MixinItemIcon {
             return;
         }
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        String tex = VisualItemSkins.textureFor(id, stack.getHoverName().getString());
-        if (tex == null) {
+        VisualItemSkins.Selection selected = VisualItemSkins.select(id, stack);
+        if (selected == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) {
+                ci.cancel();
+            }
             return;
         }
+        String tex = selected.texture();
         var si = LooseResourceLoader.sheetOf(tex);
         if (si == null) {
+            if (GenItemModelRenderer.tryGui((Object) this, stack, x, y)) {
+                ci.cancel();
+            }
             return;
         }
+        int size = VisualItemSkins.guiSize(selected);
+        int dx = x + (16 - size) / 2;
+        int dy = y + (16 - size) / 2;
+        int frame = VisualItemSkins.frame(selected, si);
         GuiGraphics g = (GuiGraphics) (Object) this;
-        // 图标固定 16x16，跟原版一格对齐；UV 全幅（gif 切当前帧）
-        GuiBlitCompat.blit(g, si.rl(), x, y, 16, 16,
-                si.frame() * si.frameW(), 0, si.frameW(), si.frameH(),
-                si.frameW() * si.frames(), si.frameH());
-        ci.cancel();
+        try {
+            GuiBlitCompat.blit(g, si.rl(), dx, dy, size, size,
+                    frame * si.frameW(), 0, si.frameW(), si.frameH(),
+                    si.frameW() * si.frames(), si.frameH());
+            ci.cancel();
+        } catch (Throwable ignored) {
+        }
     }
     // 容器槽位三参重载（seed）：TrMenu 等菜单的图标从这条路出（1.21.1 实机实证）。
     @Inject(method = "renderItem(Lnet/minecraft/world/item/ItemStack;III)V",

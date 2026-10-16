@@ -15,16 +15,52 @@ import java.util.Map;
  */
 public final class AnimationIR {
 
+    /** 循环语义四值（bedrock/geckolib 对齐）：once 播一次夹尾；loop 回绕；hold 播完停在末帧；default 同 once。 */
+    public static final String LOOP_ONCE = "once";
+    public static final String LOOP_LOOP = "loop";
+    public static final String LOOP_HOLD = "hold";
+    public static final String LOOP_DEFAULT = "default";
+
     public final String name;
     public final double length;
-    public final boolean loop;
+    /** 循环语义（LOOP_* 之一；loop=true 的旧构造映射为 LOOP_LOOP）。 */
+    public final String loopMode;
+    /** 时间反向播放（void = length-void，萌芽等价）。 */
+    public boolean reverse;
+
+    /** 播放速率倍率（倍速包用；1 = 原速，AnimPlayer 按 clock.tick(dt*speed) 生效）。 */
+    public double speed = 1.0;
+
+    /** 打断语义：true = 播放本动画时立即打断当前动作（无过渡，不接管底座）。 */
+    public boolean overridePrevious;
     /** 骨骼名 → 轨道组。 */
     public final Map<String, BoneAnim> bones = new LinkedHashMap<String, BoneAnim>();
 
     public AnimationIR(String name, double length, boolean loop) {
+        this(name, length, loop ? LOOP_LOOP : LOOP_ONCE);
+    }
+
+    public AnimationIR(String name, double length, String loopMode) {
         this.name = name;
         this.length = length;
-        this.loop = loop;
+        this.loopMode = normalizeLoop(loopMode);
+    }
+
+    private static String normalizeLoop(String m) {
+        if (m == null) {
+            return LOOP_ONCE;
+        }
+        switch (m.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "loop":
+                return LOOP_LOOP;
+            case "hold":
+            case "hold_on_last_frame":
+                return LOOP_HOLD;
+            case "default":
+                return LOOP_DEFAULT;
+            default:
+                return LOOP_ONCE;
+        }
     }
 
     /** 单骨骼的三通道轨道（缺通道 = 不动）。 */
@@ -50,9 +86,20 @@ public final class AnimationIR {
         public final double[] value;
         /** linear / step / bezier（数据点在 dataPoints）。 */
         public String interp = "linear";
+        /** 段缓动（bedrock easing 名称，作用于本帧到达插值的 u；空=线性）。 */
+        public String easing;
+        /** easing 幅度参数（back/elastic 用；可空）。 */
+        public double[] easingArgs;
         /** bezier 控制点（前/后，各 xyz，可空）。 */
         public double[] bezierIn;
         public double[] bezierOut;
+        /** Bedrock 进入关键帧前的 pre 值；该时刻及之后使用 value（post）。 */
+        public double[] preValue;
+        public String[] preExpr;
+        public String preEasing;
+        public double[] preEasingArgs;
+        /** Bedrock lerp_mode；空时保留通用 interp 的到达插值约定。 */
+        public String lerpMode;
         /** molang 表达式（每通道一个，可空串表示无）。 */
         public final String[] expr = new String[3];
 

@@ -1,8 +1,9 @@
 pluginManagement {
     repositories {
+        maven { url = 'https://maven.aliyun.com/repository/gradle-plugin' }
         gradlePluginPortal()
         maven { url = 'https://maven.neoforged.net/releases' }
     }
 }
 
-rootProject.name = 'opendreamcore-neoforge-1.21.8'
+rootProject.name = 'opendreamcore-neoforge-1.21.11'

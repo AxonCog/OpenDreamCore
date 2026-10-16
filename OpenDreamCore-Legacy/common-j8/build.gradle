@@ -28,8 +28,8 @@ java {
 }
 
 repositories {
-    mavenCentral()
     maven { url 'https://maven.aliyun.com/repository/public' }
+    mavenCentral()
 }
 
 // 测试源码直接用共享树 common/src/test（纯逻辑层零 MC 依赖，common-j8 是它的 JUnit 宿主）
@@ -48,6 +48,7 @@ dependencies {
     api 'com.google.code.gson:gson:2.10.1'
     api 'org.yaml:snakeyaml:2.2'
     api 'org.antlr:antlr4-runtime:4.13.1'
+    api 'org.tukaani:xz:1.9'
     annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
     compileOnly 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
     // 共享树 common/src/test 的 JUnit 宿主：console-standalone 一个 jar 全包

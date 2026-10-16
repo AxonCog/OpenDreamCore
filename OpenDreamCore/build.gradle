@@ -1,6 +1,28 @@
 // OpenDreamCore 根工程：编排各 target 的独立 Gradle 构建。
-// common/ 共享源码树 + targets/<loader>-<mc> 独立工程。
 
+
+def isWindows = System.getProperty('os.name').toLowerCase().contains('win')
+def wrapperCommand = { File wrapper ->
+    isWindows ? ['cmd', '/c', wrapper.absolutePath] : [wrapper.absolutePath]
+}
+def javaHomeFor = { int version ->
+    providers.gradleProperty("java${version}Home").orElse(providers.environmentVariable("JAVA${version}_HOME")).orNull
+}
+
+def javaHomeForTarget = { String targetName ->
+    def javaVersion = targetName.endsWith('-1.20.1') ? 17 : targetName.endsWith('-26.1.2') ? 25 : 21
+    javaHomeFor(javaVersion)
+}
+
+tasks.register('testCommon', Exec) {
+    group = 'verification'
+    description = 'Runs the shared common module test suite.'
+    workingDir rootDir
+    def wrapper = file("${rootDir}/gradlew" + (isWindows ? '.bat' : ''))
+    def javaHome = javaHomeFor(21)
+    if (javaHome) { environment 'JAVA_HOME', javaHome }
+    commandLine(wrapperCommand(wrapper) + ['-p', 'common', 'test', '--console', 'plain', '--no-daemon'])
+}
 def targetBuilds = [
         'neoforge-1.21.1': [directory: 'targets/neoforge-1.21.1', task: 'buildNeoForge1211'],
         'fabric-1.21.1':   [directory: 'targets/fabric-1.21.1',   task: 'buildFabric1211'],
@@ -14,10 +36,8 @@ def targetBuilds = [
         'neoforge-1.21.11':[directory: 'targets/neoforge-1.21.11',task: 'buildNeoForge1211x'],
         'neoforge-26.1.2': [directory: 'targets/neoforge-26.1.2', task: 'buildNeoForge2612'],
         'fabric-26.1.2':   [directory: 'targets/fabric-26.1.2',   task: 'buildFabric2612'],
-        'forge-1.6.4':     [directory: 'targets/forge-1.6.4',     task: 'buildForge164'],
 ]
 
-// 只对已初始化（存在 build.gradle）的 target 注册构建任务
 def activeTargets = targetBuilds.findAll { name, tb -> file("${tb.directory}/build.gradle").exists() }
 
 activeTargets.each { targetName, tb ->
@@ -25,12 +45,13 @@ activeTargets.each { targetName, tb ->
         group = 'build'
         description = "Builds ${targetName} in its independent Gradle project."
         workingDir rootDir
-        // target 自带 wrapper 优先（新版本 target 的 loom/shadow 要求更高 Gradle，
-        // 根 wrapper 8.8 带不动 fabric-1.21.8+/26.1.2），无则回退根 wrapper
-        def ownWrapper = file("${rootDir}/${tb.directory}/gradlew.bat")
-        def gradlewPath = (ownWrapper.exists() ? ownWrapper.absolutePath
-                : "${rootDir.absolutePath}\\gradlew.bat").toString()
-        commandLine 'cmd', '/c', gradlewPath, '-p', tb.directory.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
+        mustRunAfter tasks.named('testCommon')
+        def ownWrapper = file("${rootDir}/${tb.directory}/gradlew" + (isWindows ? '.bat' : ''))
+        def fallback = file("${rootDir}/gradlew" + (isWindows ? '.bat' : ''))
+        def wrapper = ownWrapper.exists() ? ownWrapper : fallback
+        def javaHome = javaHomeForTarget(targetName)
+        if (javaHome) { environment 'JAVA_HOME', javaHome }
+        commandLine(wrapperCommand(wrapper) + ['-p', tb.directory, 'build', '--console', 'plain', '--no-daemon'])
     }
 }
 
@@ -45,6 +66,7 @@ if (selectedTarget != null && !activeTargets.containsKey(selectedTarget)) {
 tasks.register('build') {
     group = 'build'
     description = 'Builds the selected target (defaults to the first active one); use -Ptarget=xxx or -PallTargets=true.'
+    dependsOn tasks.named('testCommon')
     def effectiveTarget = selectedTarget ?: activeTargets.keySet().first()
     dependsOn tasks.named(activeTargets[effectiveTarget].task)
     if (buildAllTargets.get()) {
@@ -77,11 +99,6 @@ tasks.register('listTargetsPlain') {
 }
 
 // collectAll：把三端收集目录（client / legacy / server）的当前版本产物汇入 output/all。
-// 为什么必须存在：各 target 的 collectOutput 只写到 output/client，插件写 output/server，
-// 而 output/all 是真正发布给外部的面。这一层以前只有 dev/collect-all.sh 在做，
-// 而那个脚本没挂在任何构建任务上——于是“构建成功”与“发布面更新”是两件互不相干的事，
-// 忘了跑脚本，output/all 就永远停在上一批，外面看到的还是旧包。
-// 现在收进 Gradle：collectAll 成为流水线里的一环，build（全量时）后自动跑。
 tasks.register('collectAll') {
     group = 'build'
     description = 'Aggregates current-version jars from output/client, output/legacy and output/server into output/all.'
@@ -97,58 +114,41 @@ tasks.register('collectAll') {
             def srcDir = file("../output/${part}")
             if (!srcDir.exists()) { return }
             srcDir.listFiles()?.findAll { f ->
-                f.name.endsWith(".jar") && f.name.contains("-${modVersion}.jar")
+                f.name.endsWith('.jar') && f.name.contains("-${modVersion}.jar")
             }?.each { f ->
                 copy { from f; into allDir }
                 copied++
             }
         }
-        // 发布面只允许当前版本：陈留会让外面拿到旧包
         allDir.listFiles()?.findAll { f ->
             f.name.endsWith('.jar') && !f.name.contains("-${modVersion}.jar")
-        }?.each { stale ->
-            stale.delete()
-            println "removed stale ${stale.name}"
-        }
+        }?.each { stale -> stale.delete(); println "removed stale ${stale.name}" }
         println "collectAll: 汇总 ${copied} 个 → ${allDir.absolutePath}"
     }
 }
 
-// buildFull：全量构建流水线 —— 编全部现代 target + 插件，然后自动汇总到 output/all。
-// 与 build 的分工：build 是单 target（-Ptarget=…）；要发布一律用 buildFull。
-tasks.register('buildFull') {
-    group = 'build'
-    description = 'Builds every active target plus the plugin, then aggregates into output/all.'
-    dependsOn activeTargets.values().collect { tasks.named(it.task) }
-    dependsOn tasks.named('buildPlugin')
-    finalizedBy tasks.named('collectAll')
-}
-
 // verifyMatrix：逐 target 跑 compileJava，输出绿/红汇总（提交前门禁）
-// 用法：gradlew.bat verifyMatrix                       （全矩阵，任一红则任务失败）
-//       gradlew.bat verifyMatrix -PmatrixContinue=true （汇总但不失败，用于漂移盘点）
 tasks.register('verifyMatrix') {
     group = 'verification'
     description = "Runs compileJava in every active target and prints a green/red summary."
+    dependsOn tasks.named('testCommon')
     doLast {
         def continueOnFail = providers.gradleProperty('matrixContinue').map { it.toBoolean() }.orElse(false)
         def results = [:]
         activeTargets.each { name, tb ->
             def logFile = file("${rootDir}/../_verify_${name}.log")
             if (logFile.exists()) { logFile.delete() }
-            // target 自带 wrapper（如 fabric-1.21.8 的 Gradle 8.14）优先于根 wrapper
-            def ownWrapper = file("${rootDir}/${tb.directory}/gradlew.bat")
-            def gradlewPath = (ownWrapper.exists() ? ownWrapper.absolutePath
-                    : "${rootDir.absolutePath}\\gradlew.bat").toString()
-            def pb = new ProcessBuilder(['cmd', '/c', gradlewPath,
-                                         '-p', tb.directory.replace('/', '\\').toString(),
-                                         'compileJava', '--console', 'plain', '--no-daemon'])
+            def ownWrapper = file("${rootDir}/${tb.directory}/gradlew" + (isWindows ? '.bat' : ''))
+            def fallback = file("${rootDir}/gradlew" + (isWindows ? '.bat' : ''))
+            def wrapper = ownWrapper.exists() ? ownWrapper : fallback
+            def pb = new ProcessBuilder(wrapperCommand(wrapper) + ['-p', tb.directory, 'compileJava', '--console', 'plain', '--no-daemon'])
+            def javaHome = javaHomeForTarget(name)
+            if (javaHome) { pb.environment().put('JAVA_HOME', javaHome) }
             pb.directory(rootDir)
             pb.redirectErrorStream(true)
             def proc = pb.start()
-            // 先排空并落盘子进程输出（读到 EOF 即进程结束，避免缓冲区塞满死锁）
             proc.inputStream.eachLine { line -> logFile.append(line + '\n') }
-            results[name] = (proc.exitValue() == 0)
+            results[name] = (proc.waitFor() == 0)
         }
         println '---- compile matrix ----'
         def failed = []
@@ -157,50 +157,64 @@ tasks.register('verifyMatrix') {
             if (!ok) failed << name
         }
         println "------------------------ ${results.values().count(true)}/${results.size()} green"
-        if (failed && !continueOnFail) {
-            throw new GradleException("compile matrix RED: ${failed.join(', ')}")
-        }
+        if (failed && !continueOnFail) throw new GradleException("compile matrix RED: ${failed.join(', ')}")
     }
 }
 
 def outputDir = file('../output/server')
-
-// 各 target 自己的 build.gradle 里有 collectOutput（finalizedBy build），产物进 ../output/client。
-// 根 collectOutput 只负责收集插件 fat jar（插件不在 target 列表里），产物进 ../output/server。
 tasks.register('collectOutput') {
     group = 'build'
     description = 'Copy the plugin fat jar into ../output/server.'
     doLast {
         outputDir.mkdirs()
         def modVersion = providers.gradleProperty('mod_version').orElse('').get()
-        if (!modVersion) {
-            throw new GradleException('mod_version 未在 gradle.properties 中定义，无法确定要收集的插件 fat jar 版本')
-        }
+        if (!modVersion) throw new GradleException('mod_version 未在 gradle.properties 中定义，无法确定要收集的插件 fat jar 版本')
         def expectedJar = "OpenDreamCore-Plugin-${modVersion}.jar"
-        // A5 修复：只收集当前版本的插件 fat jar，不再把历史版本一并搬进 output/server
-        file('../OpenDreamCore-Plugin/plugin/build/libs').listFiles()?.each { f ->
-            if (f.name == expectedJar) {
-                copy { from f; into outputDir }
-                println "collected ${f.name} -> ${outputDir.absolutePath}"
-            }
-        }
-        // 清理 output/server 里已有的陈旧版本 jar，避免陈旧产物长期混入收集目录
-        outputDir.listFiles()?.findAll { it.name ==~ /OpenDreamCore-Plugin-.*\.jar/ && it.name != expectedJar }?.each { stale ->
-            stale.delete()
-            println "removed stale ${stale.name} from ${outputDir.absolutePath}"
-        }
-        println "output -> ${outputDir.absolutePath}: ${outputDir.listFiles()?.findAll { it.name.endsWith('.jar') }?.collect { it.name }}"
+        def source = file("../OpenDreamCore-Plugin/plugin/build/libs/${expectedJar}")
+        if (!source.exists()) throw new GradleException("缺少插件产物 ${source}")
+        copy { from source; into outputDir }
+        outputDir.listFiles()?.findAll { it.name ==~ /OpenDreamCore-Plugin-.*\.jar/ && it.name != expectedJar }?.each { it.delete() }
     }
 }
-tasks.named('build').configure { finalizedBy tasks.named('collectOutput') }
 
 tasks.register('buildPlugin', Exec) {
     group = 'build'
     description = 'Builds the Paper plugin (fat jar) in OpenDreamCore-Plugin.'
+    mustRunAfter tasks.named('testCommon')
     workingDir file('../OpenDreamCore-Plugin')
-    commandLine 'cmd', '/c', "${rootDir.absolutePath}\\..\\OpenDreamCore-Plugin\\gradlew.bat", 'build', '--offline', '-x', 'test', '--console', 'plain', '--no-daemon'
+    def pluginWrapper = file("${rootDir}/../OpenDreamCore-Plugin/gradlew" + (isWindows ? '.bat' : ''))
+    def java21 = javaHomeFor(21)
+    if (java21) { environment 'JAVA_HOME', java21 }
+    commandLine(wrapperCommand(pluginWrapper) + ['build', '--console', 'plain', '--no-daemon'])
 }
-tasks.named('buildPlugin').configure { finalizedBy tasks.named('collectOutput') }
+
+tasks.register('buildLegacy', Exec) {
+    group = 'build'
+    description = 'Builds the active legacy targets and collects their current-version jars.'
+    mustRunAfter tasks.named('testCommon')
+    workingDir file('../OpenDreamCore-Legacy')
+    def legacyWrapper = file("${rootDir}/../OpenDreamCore-Legacy/gradlew" + (isWindows ? '.bat' : ''))
+    def java17 = javaHomeFor(17)
+    if (java17) { environment 'JAVA_HOME', java17 }
+    def jvmArguments = [8, 17].collectMany { version ->
+        def home = javaHomeFor(version)
+        home ? ["-Pjava${version}Home=${home}".toString()] : []
+    }
+    commandLine(wrapperCommand(legacyWrapper) + ['build', '--console', 'plain', '--no-daemon'] + jvmArguments)
+}
+
+tasks.named('collectOutput').configure { mustRunAfter tasks.named('buildPlugin') }
+tasks.named('collectAll').configure {
+    mustRunAfter activeTargets.values().collect { tasks.named(it.task) }
+    mustRunAfter tasks.named('buildPlugin'), tasks.named('buildLegacy'), tasks.named('collectOutput')
+}
+tasks.register('buildFull') {
+    group = 'build'
+    description = 'Builds every active modern and legacy target and the plugin, then verifies output/all.'
+    dependsOn tasks.named('testCommon')
+    dependsOn activeTargets.values().collect { tasks.named(it.task) }
+    dependsOn tasks.named('buildPlugin'), tasks.named('buildLegacy'), tasks.named('collectOutput'), tasks.named('collectAll')
+}
 
 // verifyArtifacts：收集目录完整性门禁。
 // output/all 是发布面，少一个 jar 就意味着某个版本漏发。这类漏发在本项目里真实发生过：
@@ -224,12 +238,13 @@ tasks.register('verifyArtifacts') {
         // all 里却还躺着上一批」这种更隐蔽的漏。来源缺失时跳过新鲜度比对（对方的
         // build/libs 可能已被单独清理），仅保留在不在的判定。
         def entries = []
-        targetBuilds.keySet().findAll { it != 'forge-1.6.4' }.each { t ->
+        activeTargets.keySet().each { t ->
             def parts = t.split('-')
             def name = "OpenDreamCore-${parts[0]}-${parts[1]}-${modVersion}.jar".toString()
             entries << [name: name, src: file("targets/${t}/build/libs/${name}")]
         }
-        ['1.6.4', '1.7.10', '1.12.2', '1.16.5'].each { v ->
+        // Legacy 当前维护范围只收集 1.7.10、1.12.2、1.16.5，与根工程收集策略一致。
+        ['1.7.10', '1.12.2', '1.16.5'].each { v ->
             def name = "OpenDreamCore-Legacy-forge-${v}-${modVersion}.jar".toString()
             entries << [name: name, src: file("../OpenDreamCore-Legacy/targets/forge-${v}/build/libs/${name}")]
         }
@@ -263,4 +278,8 @@ tasks.register('verifyArtifacts') {
             throw new GradleException("收集目录有 ${stale.size} 个比为来源更旧（说明收集未覆盖）: ${stale.join(', ')}")
         }
     }
+}
+// 完整发布流程必须在汇总完成后经过产物门禁；verifyArtifacts 自身依赖 collectAll，保持普通 build/collectAll 语义不变。
+tasks.named('buildFull').configure {
+    dependsOn tasks.named('verifyArtifacts')
 }

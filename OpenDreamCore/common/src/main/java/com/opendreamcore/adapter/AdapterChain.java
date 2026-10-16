@@ -12,30 +12,29 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Logger;
 
 /**
- * 方言适配器链——热拔插的「排插」。
+ * 适配器链。
  *
- * 一个外来文件要进门的时候，链子按优先级从高到低挨个问：
- * 「这文件你熟吗？」第一个答「熟！」的把人领走（accepts → translate），
- * 翻出来的规则直接进 ODC 规则库（id 挂 name/ 前缀，防止跟别的方言撞车）。
- * 要是全链都摇头，那就原样放着吧——不认识的东西不乱猜，这是规矩。
+ * 外部格式的规则文件进来时按 priority 从高到低逐个过 accepts()，
+ * 第一个认领的做 translate，产物进 ODC 规则库（id 挂 name/ 前缀防撞车）。
+ * 全部不认领则保留原文件不动，不做猜测性转换。
  *
- * 谁都能往排插上插：
- *   1) 内置：adapter/dreamcore/ 的大能，链头常驻；
- *   2) 附属插件：AdapterChain.register(...) 即插即用，reload 也不拔；
- *   3) 服主脚本：extensions/adapters/*.yml 跟脚本声明配对，/odc reload 时
- *      clearScripted() 清旧插头 → 扩展装载器重新插一遍，热拔热插。
+ * 注册途径：
+ *   1) 内置：adapter/dragoncore/，链头常驻；
+ *   2) 附属插件：AdapterChain.register(...)，reload 不清；
+ *   3) 服主脚本：extensions/adapters/*.yml 声明，/odc reload 时
+ *      clearScripted() 清旧项后由扩展装载器重新注册。
  */
 public final class AdapterChain {
 
     private static final Logger LOGGER = Logger.getLogger(AdapterChain.class.getName());
 
-    /** 链上适配器（按 priority 升序排队的快照）。 */
+    /** 链上适配器（按 priority 升序）。 */
     private static final CopyOnWriteArrayList<Adapter> CHAIN = new CopyOnWriteArrayList<>();
 
     /** 名字索引：防重名，重名的让新人上位。 */
     private static final ConcurrentHashMap<String, Adapter> BY_NAME = new ConcurrentHashMap<>();
 
-    // 静态初始化：内置适配器先进链（其他都是运行时加塞）
+    // 静态初始化：内置适配器先注册（其余运行时注册）
     static {
         AdapterChain.register(new DragonCoreAdapter());
     }
@@ -43,7 +42,7 @@ public final class AdapterChain {
     private AdapterChain() {
     }
 
-    /** 插队（注册）：priority 小的排前面先被问；同名旧插头让位。 */
+    /** 注册：priority 小的排前面；同名旧适配器被顶掉。 */
     public static void register(Adapter adapter) {
         if (adapter == null || adapter.name() == null || adapter.name().trim().isEmpty()) {
             return;
@@ -54,11 +53,11 @@ public final class AdapterChain {
         }
         CHAIN.add(adapter);
         CHAIN.sort(Comparator.comparingInt(AdapterChain::priorityOf));
-        LOGGER.info(() -> "[OpenDreamCore][adapter] 适配器已插进链子 " + adapter.name()
-                + "（链上共 " + CHAIN.size() + " 个）");
+        LOGGER.info(() -> "[OpenDreamCore][adapter] 适配器已注册 " + adapter.name()
+                + "（当前共 " + CHAIN.size() + " 个）");
     }
 
-    /** 拔插头：按名字注销（扩展重载时旧版让位用）。 */
+    /** 按名字注销（扩展重载时旧版让位用）。 */
     public static void unregister(String name) {
         Adapter old = BY_NAME.remove(name);
         if (old != null) {
@@ -76,7 +75,7 @@ public final class AdapterChain {
         }
     }
 
-    /** 排插快照（列表/调试用）。 */
+    /** 当前适配器列表（列表/调试用）。 */
     public static List<Adapter> all() {
         return Collections.unmodifiableList(new ArrayList<>(CHAIN));
     }
@@ -152,7 +151,7 @@ public final class AdapterChain {
         return a instanceof Prioritized p ? p.priority() : Integer.MAX_VALUE;
     }
 
-    /** 可选接口：想插队排前面的适配器，P 越小越靠前（内置方言用小数字占位）。 */
+    /** 可选接口：返回更小的 priority 排到前面（内置适配器用小数字占位）。 */
     public interface Prioritized {
         int priority();
     }

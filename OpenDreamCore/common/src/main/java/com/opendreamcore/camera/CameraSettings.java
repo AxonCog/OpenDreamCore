@@ -4,7 +4,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 运镜设置（M1.4）：**怎么接管相机**的策略。
+ * 运镜设置：控制相机接管策略。
  *
  * <p>它不属于任何一条规则（规则管「拍什么」，这里管「用哪条路拍」），所以放在
  * {@code visual/Camera.yml} 的保留键 {@link CameraStore#SETTINGS_KEY} 之下——同文件、
@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * <pre>
  * 运镜设置:
- *   detached: true            # M1.4 直接驱动原版相机；false 则退回 M1.2 的临时实体路线
+ *   detached: true            # 直接驱动原版相机；false 则使用临时实体路线
  *   yield: true               # 相机已被别的模组接管（cameraEntity 不是玩家）时让位
  *   yield_with_shader: false  # 装了光影（Iris/OptiFine）时是否也让位
  *   priority: 10              # 接管优先级（让位决策与诊断都用它）
@@ -29,7 +29,7 @@ public final class CameraSettings {
     private static final boolean DEF_YIELD_SHADER = false;
     private static final int DEF_PRIORITY = 10;
 
-    /** true = 走 M1.4 的 detached 直接驱动；false = 走 M1.2 的临时实体。 */
+    /** true = 直接驱动相机；false = 使用临时实体。 */
     public final boolean detached;
     /** 相机已被别的模组接管时是否让位（不抢）。 */
     public final boolean yieldToOthers;

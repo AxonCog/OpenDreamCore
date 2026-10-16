@@ -16,10 +16,12 @@
     "MixinCursor",
     "FontSetSourceMixin",
     "WorldRenderPipelinesMixin",
+    "WorldRenderPipelinesInit",
     "WorldRenderTypeMixin",
     "OdcCameraMixin",
     "OdcFovMixin",
-    "OdcEntityModelMixin"
+    "OdcEntityModelMixin",
+    "OdcPlayerModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

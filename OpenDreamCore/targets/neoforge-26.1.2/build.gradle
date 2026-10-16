@@ -11,6 +11,7 @@ plugins {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
 }
 
@@ -35,10 +36,13 @@ java {
     }
 }
 
-// NFRT 的 recompile 步骤用进程内 JavaCompiler：必须跑在 JDK 25 正式版上
-// （MC 26.1.2 源码使用 ScopedValue——JDK 25 EA 中仍是预览 API，GA 已定稿无需 --enable-preview）。
+// NFRT's recompile step needs a Java 25 executable; derive it from Gradle's
+// configured toolchain instead of relying on a developer-specific installation.
+def java25Launcher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(25)
+}
 tasks.withType(net.neoforged.nfrtgradle.CreateMinecraftArtifacts).configureEach {
-    toolsJavaExecutable.set('C:/Users/24965/.jdks/jdk-25.0.4.1+1/bin/java.exe')
+    toolsJavaExecutable.set(java25Launcher.map { it.executablePath.asFile })
 }
 
 configurations.compileClasspath {
@@ -109,7 +113,7 @@ tasks.register('prepareModel2612', Sync) {
     into "$buildDir/generated/model-26.1.2"
 }
 
-tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift', 'prepareItemIconSubmit' }
+tasks.named('compileJava').configure { dependsOn 'prepareCommonSources', 'prepareClientSources', 'remapDrift', 'prepareItemIconSubmit' , 'preparePlayerAnim'}
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
@@ -139,6 +143,7 @@ dependencies {
     // mixinextras @WrapMethod（neoforge 自带运行期 mixinextras 0.5.3，编译期只声明注解）
     compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
     implementation 'org.antlr:antlr4-runtime:4.13.1'
+    implementation 'org.tukaani:xz:1.9'
     compileOnly 'org.yaml:snakeyaml:2.2'
     compileOnly 'com.google.code.gson:gson:2.10.1'
 }
@@ -148,6 +153,7 @@ configurations {
 }
 dependencies {
     shadeOnly 'org.antlr:antlr4-runtime:4.13.1'
+    shadeOnly 'org.tukaani:xz:1.9'
     shadeOnly 'org.yaml:snakeyaml:2.2'
     // 加密材质包支持（AES zip）：PackInstaller 经反射调用，运行时可选强化
     shadeOnly 'net.lingala.zip4j:zip4j:2.11.5'
@@ -313,3 +319,10 @@ tasks.named('prepareClientSources') { outputs.upToDateWhen { false } }
 tasks.named('prepareGlyph1215Plus') { outputs.upToDateWhen { false } }
 tasks.named('prepareWorldRender1215Plus') { outputs.upToDateWhen { false } }
 tasks.named('compileJava').configure { dependsOn 'remapDrift' }
+
+// playeranim/playeranim-26.1.2/ 玩家动画（setupAnim TAIL 叠加六部件姿态）
+tasks.register('preparePlayerAnim', Sync) {
+    from('../../gensrc/playeranim-26.1.2/src/main/java')
+    into "$buildDir/generated/playeranim-playeranim-26.1.2"
+}
+sourceSets.main.java.srcDir "$buildDir/generated/playeranim-playeranim-26.1.2"

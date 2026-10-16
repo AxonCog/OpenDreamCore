@@ -13,12 +13,13 @@ java {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
 }
 
-// 懒解析：这份 jar 由另一个构建烘出（见本文件末 bakeSharedLayer），配置期可能还不存在；
-// 用 files { ... } 让它在「用到时」重新列目录，配合 bakeSharedLayer 的先后顺序才不会拿到空集合。
-def commonJ8 = files({ fileTree(dir: '../../OpenDreamCore-Legacy/common-j8/build/libs', include: 'opendreamcore-common-j8-*.jar').files })
+// The baked jar must match this build's release version; never select an older wildcard jar.
+def commonVersion = providers.gradleProperty('mod_version').orElse('0.2.1').get()
+def commonJ8 = files("../../OpenDreamCore-Legacy/common-j8/build/libs/opendreamcore-common-j8-${commonVersion}.jar")
 
 dependencies {
     // 成品 jar 用 api 露出去：plugin/nms 模块通过 project(':core') 直接拿到类

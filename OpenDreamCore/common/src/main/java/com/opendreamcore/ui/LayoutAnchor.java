@@ -1,7 +1,7 @@
 package com.opendreamcore.ui;
 
 /**
- * 布局锚点（坐标系热拔插的又一个插头）——"元素挂在哪"由谁说了算。
+ * 布局锚点——决定"元素挂在哪"。
  *
  * 内置九宫格（LayoutAnchors 里注册）：center / top_* / bottom_* / center_*。
  * 附属想发明新锚法（黄金分割、靠某元素边、屏幕某百分比……）？实现本接口注册，

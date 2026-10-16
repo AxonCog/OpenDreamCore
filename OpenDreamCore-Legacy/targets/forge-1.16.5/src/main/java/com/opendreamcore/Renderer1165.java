@@ -8,6 +8,9 @@ import com.opendreamcore.client.render.LegacyRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.vector.Quaternion;
 import net.minecraft.util.math.vector.Vector3f;
@@ -108,6 +111,46 @@ public final class Renderer1165 implements LegacyRenderer {
                 .color((argb >>> 16) & 0xFF, (argb >>> 8) & 0xFF, argb & 0xFF,
                         (argb >>> 24) & 0xFF)
                 .endVertex();
+    }
+
+    @Override
+    public java.util.List<com.opendreamcore.client.spi.EntitySource.Snapshot> nearbyLiving(
+            double camX, double camY, double camZ, double maxDist) {
+        java.util.List<com.opendreamcore.client.spi.EntitySource.Snapshot> out =
+                new java.util.ArrayList<com.opendreamcore.client.spi.EntitySource.Snapshot>();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            return out;
+        }
+        double maxSq = maxDist * maxDist;
+        for (Entity entity : mc.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity)) {
+                continue;
+            }
+            LivingEntity living = (LivingEntity) entity;
+            if (!living.isAlive() || living.getHealth() <= 0.0F) {
+                continue;
+            }
+            double dx = living.getX() - camX;
+            double dy = living.getY() - camY;
+            double dz = living.getZ() - camZ;
+            if (dx * dx + dy * dy + dz * dz > maxSq) {
+                continue;
+            }
+            com.opendreamcore.client.spi.EntitySource.Snapshot snapshot =
+                    new com.opendreamcore.client.spi.EntitySource.Snapshot();
+            snapshot.x = living.getX();
+            snapshot.y = living.getY();
+            snapshot.z = living.getZ();
+            snapshot.height = living.getBbHeight();
+            snapshot.health = living.getHealth();
+            snapshot.maxHealth = living.getMaxHealth();
+            snapshot.name = living.getName() == null ? "" : living.getName().getString();
+            net.minecraft.util.ResourceLocation type = ForgeRegistries.ENTITIES.getKey(living.getType());
+            snapshot.typeId = type == null ? "" : type.toString();
+            out.add(snapshot);
+        }
+        return out;
     }
 
     @Override

@@ -7,7 +7,7 @@ package com.opendreamcore.model.bake;
  * UV 已归一到 0..1。代际渲染器（gensrc/model-*）只负责把这两个数组写进各自的 VertexConsumer。
  */
 public final class BakedModel {
-    /** 贴图标签（embedded:<名> / texture:<名>；代际层换算成各自的 RL/动态贴图）。 */
+    /** 贴图标签（内嵌纹理为 ModelAssetStore 分配的模型 namespace；代际层换算成各自的 RL/动态贴图）。 */
     public final String texture;
     /** 四边形顶点数据（4×8 float/quad）。 */
     public final float[] quads;

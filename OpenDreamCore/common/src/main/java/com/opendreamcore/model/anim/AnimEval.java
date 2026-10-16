@@ -35,136 +35,237 @@ public final class AnimEval {
     private AnimEval() {
     }
 
-    /** 采样整只动画：骨骼名 → 姿态写入 out（out 会先清空再逐骨骼填）。 */
+    /** 采样整只动画：骨骼名 → 姿态写入 out（复用 out 里已有 Pose；骨骼消失时回收键）。 */
     public static void sample(AnimationIR anim, double time, MolangEval.Variables vars,
                               java.util.Map<String, Pose> out) {
-        out.clear();
         if (anim == null) {
+            out.clear();
             return;
         }
-        final double eff = effectiveTime(anim, time);
-        MolangEval.Variables v = wrapAnimTime(vars, eff);
-        for (java.util.Map.Entry<String, AnimationIR.BoneAnim> e : anim.bones.entrySet()) {
-            AnimationIR.BoneAnim ba = e.getValue();
-            if (ba == null || (ba.pos == null && ba.rot == null && ba.scale == null)) {
-                continue;
+        Workspace ws = workspace();
+        ws.timeVars.bind(vars, effectiveTime(anim, time));
+        try {
+            final double eff = ws.timeVars.time;
+            for (java.util.Map.Entry<String, AnimationIR.BoneAnim> e : anim.bones.entrySet()) {
+                AnimationIR.BoneAnim ba = e.getValue();
+                if (ba == null || (isEmpty(ba.pos) && isEmpty(ba.rot) && isEmpty(ba.scale))) {
+                    continue;
+                }
+                Pose p = out.get(e.getKey());
+                if (p == null) {
+                    p = new Pose();
+                    out.put(e.getKey(), p);
+                }
+                p.reset();
+                if (!isEmpty(ba.rot)) {
+                    double[] r = sampleTrack(ba.rot, eff, ws.timeVars, ws);
+                    p.rot[0] = r[0]; p.rot[1] = r[1]; p.rot[2] = r[2];
+                }
+                if (!isEmpty(ba.pos)) {
+                    double[] v = sampleTrack(ba.pos, eff, ws.timeVars, ws);
+                    p.pos[0] = v[0]; p.pos[1] = v[1]; p.pos[2] = v[2];
+                }
+                if (!isEmpty(ba.scale)) {
+                    double[] s = sampleTrack(ba.scale, eff, ws.timeVars, ws);
+                    p.scale[0] = s[0]; p.scale[1] = s[1]; p.scale[2] = s[2];
+                }
             }
-            Pose p = new Pose();
-            if (ba.rot != null) {
-                double[] r = sampleTrack(ba.rot, eff, v);
-                p.rot[0] = r[0];
-                p.rot[1] = r[1];
-                p.rot[2] = r[2];
+            out.keySet().retainAll(anim.bones.keySet());
+            java.util.Iterator<java.util.Map.Entry<String, Pose>> it = out.entrySet().iterator();
+            while (it.hasNext()) {
+                AnimationIR.BoneAnim ba = anim.bones.get(it.next().getKey());
+                if (ba == null || (isEmpty(ba.pos) && isEmpty(ba.rot) && isEmpty(ba.scale))) {
+                    it.remove();
+                }
             }
-            if (ba.pos != null) {
-                double[] t = sampleTrack(ba.pos, eff, v);
-                p.pos[0] = t[0];
-                p.pos[1] = t[1];
-                p.pos[2] = t[2];
-            }
-            if (ba.scale != null) {
-                double[] s = sampleTrack(ba.scale, eff, v);
-                p.scale[0] = s[0];
-                p.scale[1] = s[1];
-                p.scale[2] = s[2];
-            }
-            out.put(e.getKey(), p);
+        } finally {
+            releaseWorkspace(ws);
         }
     }
 
-    /** loop 回绕 / 非 loop 夹取。 */
+    private static boolean isEmpty(AnimationIR.Track track) {
+        return track == null || track.keys.isEmpty();
+    }
+
+    /** 时间语义：once/default 夹在 [0,length]；loop 回绕；hold 播完后停在末帧；reverse 先翻转时间轴。 */
     public static double effectiveTime(AnimationIR anim, double time) {
         if (anim.length <= 0) {
             return Math.max(0, time);
         }
-        if (anim.loop) {
-            double t = time % anim.length;
-            return t < 0 ? t + anim.length : t;
+        double t;
+        String mode = anim.loopMode;
+        if (AnimationIR.LOOP_LOOP.equals(mode)) {
+            t = time % anim.length;
+            if (t < 0) {
+                t += anim.length;
+            }
+        } else {
+            t = Math.min(Math.max(time, 0), anim.length);
         }
-        return Math.min(Math.max(time, 0), anim.length);
+        if (anim.reverse && anim.length > 0) {
+            t = anim.length - t;
+        }
+        return t;
     }
 
-    /** 三分量采样；无关键帧返回全 0（scale 通道调用方自行按 1 起步——这里 rot/pos/scale 统一 0，scale 由 sample 处理）。 */
+    /** 每线程工作区：避免静态共享数组在并发/嵌套求值时互相覆盖。 */
+    private static final ThreadLocal<Workspace> WORKSPACE = new ThreadLocal<Workspace>();
+
     static double[] sampleTrack(AnimationIR.Track track, double t, MolangEval.Variables vars) {
+        Workspace ws = workspace();
+        try {
+            return sampleTrack(track, t, vars, ws);
+        } finally {
+            releaseWorkspace(ws);
+        }
+    }
+
+    private static double[] sampleTrack(AnimationIR.Track track, double t,
+                                        MolangEval.Variables vars, Workspace ws) {
         java.util.List<AnimationIR.Keyframe> keys = track.keys;
         if (keys.isEmpty()) {
-            return new double[3];
+            ws.out[0] = ws.out[1] = ws.out[2] = 0;
+            return ws.out;
         }
         AnimationIR.Keyframe first = keys.get(0);
         AnimationIR.Keyframe last = keys.get(keys.size() - 1);
         if (t <= first.time) {
-            return val(first, vars);
+            return t < first.time ? preInto(first, vars, ws.out) : valInto(first, vars, ws.out);
         }
         if (t >= last.time) {
-            return val(last, vars);
+            return valInto(last, vars, ws.out);
         }
         for (int i = 0; i < keys.size() - 1; i++) {
             AnimationIR.Keyframe a = keys.get(i);
             AnimationIR.Keyframe b = keys.get(i + 1);
-            if (t >= a.time && t <= b.time) {
+            if (t == b.time) {
+                return valInto(b, vars, ws.out);
+            }
+            if (t >= a.time && t < b.time) {
                 double span = b.time - a.time;
                 double u = span <= 0 ? 1 : (t - a.time) / span;
                 String interp = b.interp == null ? "linear" : b.interp;
-                if ("step".equals(interp)) {
-                    return val(a, vars);
+                if ("step".equalsIgnoreCase(interp)) {
+                    return valInto(a, vars, ws.out);
                 }
-                if ("bezier".equals(interp)) {
-                    return bezier(a, b, u, vars);
+                String easing = b.preValue != null ? b.preEasing : b.easing;
+                double[] easingArgs = b.preValue != null ? b.preEasingArgs : b.easingArgs;
+                if (easing != null && !easing.isEmpty()) {
+                    u = Easing.apply(easing, u, easingArgs);
                 }
-                return lerp3(val(a, vars), val(b, vars), u);
+                if ("bezier".equalsIgnoreCase(interp)) {
+                    return bezierInto(a, b, u, vars, ws);
+                }
+                valInto(a, vars, ws.va);
+                preInto(b, vars, ws.vb);
+                if ("catmullrom".equalsIgnoreCase(interp)
+                        || "catmull_rom".equalsIgnoreCase(interp)
+                        || "smooth".equalsIgnoreCase(interp)) {
+                    AnimationIR.Keyframe before = i > 0 ? keys.get(i - 1) : a;
+                    AnimationIR.Keyframe after = i + 2 < keys.size() ? keys.get(i + 2) : b;
+                    valInto(before, vars, ws.vc);
+                    preInto(after, vars, ws.vd);
+                    double u2 = u * u;
+                    double u3 = u2 * u;
+                    for (int k = 0; k < 3; k++) {
+                        ws.out[k] = 0.5 * (2 * ws.va[k]
+                                + (-ws.vc[k] + ws.vb[k]) * u
+                                + (2 * ws.vc[k] - 5 * ws.va[k] + 4 * ws.vb[k] - ws.vd[k]) * u2
+                                + (-ws.vc[k] + 3 * ws.va[k] - 3 * ws.vb[k] + ws.vd[k]) * u3);
+                    }
+                } else {
+                    for (int k = 0; k < 3; k++) {
+                        ws.out[k] = ws.va[k] + (ws.vb[k] - ws.va[k]) * u;
+                    }
+                }
+                return ws.out;
             }
         }
-        return val(last, vars);
+        return valInto(last, vars, ws.out);
     }
 
-    /** 逐分量线性。 */
-    static double[] lerp3(double[] a, double[] b, double u) {
-        return new double[]{
-                a[0] + (b[0] - a[0]) * u,
-                a[1] + (b[1] - a[1]) * u,
-                a[2] + (b[2] - a[2]) * u};
-    }
-
-    /** 三次贝塞尔（控制点绝对坐标；空控制点回退端点 → 退化为 linear）。 */
-    static double[] bezier(AnimationIR.Keyframe a, AnimationIR.Keyframe b, double u,
-                           MolangEval.Variables vars) {
-        double[] p0 = val(a, vars);
-        double[] p3 = val(b, vars);
+    /** 三次贝塞尔写入工作区（控制点为绝对坐标）。 */
+    private static double[] bezierInto(AnimationIR.Keyframe a, AnimationIR.Keyframe b,
+                                       double u, MolangEval.Variables vars, Workspace ws) {
+        valInto(a, vars, ws.va);
+        preInto(b, vars, ws.vb);
+        double[] p0 = ws.va;
+        double[] p3 = ws.vb;
         double[] p1 = a.bezierOut != null ? a.bezierOut : p0;
         double[] p2 = b.bezierIn != null ? b.bezierIn : p3;
-        double[] out = new double[3];
+        double iu = 1 - u;
         for (int i = 0; i < 3; i++) {
-            double iu = 1 - u;
-            out[i] = iu * iu * iu * p0[i] + 3 * iu * iu * u * p1[i]
+            ws.out[i] = iu * iu * iu * p0[i] + 3 * iu * iu * u * p1[i]
                     + 3 * iu * u * u * p2[i] + u * u * u * p3[i];
         }
-        return out;
+        return ws.out;
     }
 
-    /** 关键帧分量值：表达式优先（失败回 0，同 molang 宽容语义）。 */
-    static double[] val(AnimationIR.Keyframe kf, MolangEval.Variables vars) {
-        double[] out = new double[3];
+    /** 关键帧表达式和常量写入指定数组。 */
+    private static double[] valInto(AnimationIR.Keyframe kf, MolangEval.Variables vars, double[] dst) {
+        return valInto(kf.value, kf.expr, vars, dst);
+    }
+
+    private static double[] preInto(AnimationIR.Keyframe kf, MolangEval.Variables vars, double[] dst) {
+        return kf.preValue == null ? valInto(kf, vars, dst)
+                : valInto(kf.preValue, kf.preExpr, vars, dst);
+    }
+
+    private static double[] valInto(double[] value, String[] expr, MolangEval.Variables vars, double[] dst) {
         for (int i = 0; i < 3; i++) {
-            String expr = kf.expr[i];
-            if (expr != null && !expr.isEmpty()) {
-                out[i] = MOLANG.eval(expr, vars);
-            } else {
-                out[i] = kf.value[i];
-            }
+            String e = expr == null ? null : expr[i];
+            dst[i] = e != null && !e.isEmpty() ? MOLANG.eval(e, vars) : value[i];
         }
-        return out;
+        return dst;
     }
 
-    /** 注入 query.anim_time（调用方同名变量被采样时间覆盖）。 */
-    static MolangEval.Variables wrapAnimTime(final MolangEval.Variables vars, final double animTime) {
-        return new MolangEval.Variables() {
-            @Override
-            public double get(String name) {
-                if ("query.anim_time".equals(name)) {
-                    return animTime;
-                }
-                return vars == null ? 0 : vars.get(name);
+    private static Workspace workspace() {
+        Workspace ws = WORKSPACE.get();
+        if (ws == null) {
+            ws = new Workspace();
+            WORKSPACE.set(ws);
+        }
+        while (ws.busy) {
+            if (ws.next == null) {
+                ws.next = new Workspace(); // 每线程每个嵌套深度只分配一次。
             }
-        };
+            ws = ws.next;
+        }
+        ws.busy = true;
+        return ws;
     }
+
+    private static void releaseWorkspace(Workspace ws) {
+        ws.busy = false;
+    }
+
+    private static final class Workspace {
+        final double[] out = new double[3];
+        final double[] va = new double[3];
+        final double[] vb = new double[3];
+        final double[] vc = new double[3];
+        final double[] vd = new double[3];
+        final TimeVars timeVars = new TimeVars();
+        boolean busy;
+        Workspace next;
+    }
+
+    private static final class TimeVars implements MolangEval.Variables {
+        MolangEval.Variables base;
+        double time;
+
+        void bind(MolangEval.Variables b, double t) {
+            base = b;
+            time = t;
+        }
+
+        @Override
+        public double get(String name) {
+            if ("query.anim_time".equals(name)) {
+                return time;
+            }
+            return base != null ? base.get(name) : 0;
+        }
+    }
+
 }

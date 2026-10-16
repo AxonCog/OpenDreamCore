@@ -64,7 +64,7 @@ public final class JarAddonLoader implements Closeable {
 
     /**
      * 整组重建：先摘除本加载器装过的全部句柄，再关旧子加载器，重扫。
-     * 目录被删/为空 = 全部卸载（热拔插的「拔」）。
+     * 目录被删/为空 = 全部卸载。
      */
     public synchronized List<AddonRegistry.Handle> reload() {
         for (AddonRegistry.Handle h : scan()) {

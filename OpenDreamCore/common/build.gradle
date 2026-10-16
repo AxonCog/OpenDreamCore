@@ -25,11 +25,14 @@ if (System.getProperty('os.name').toLowerCase().contains('windows')) {
 }
 
 repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
 }
 
 dependencies {
     api 'com.google.code.gson:gson:2.10.1'
+    // XZ 解压（公共领域，BMD v2 载荷用）
+    api 'org.tukaani:xz:1.9'
     api 'org.yaml:snakeyaml:2.2'
     api 'org.antlr:antlr4-runtime:4.13.1'
 

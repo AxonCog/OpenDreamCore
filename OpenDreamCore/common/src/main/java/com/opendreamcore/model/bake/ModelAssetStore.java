@@ -39,13 +39,24 @@ public final class ModelAssetStore {
 
     /** 模型 id → 烘焙产物（一个模型可能按材质拆多条）。 */
     private final Map<String, List<BakedModel>> models = new LinkedHashMap<String, List<BakedModel>>();
+    /** 模型 id → 骨骼化产物（与 models 同键；无骨骼/拍平无差异时也生成）。 */
+    private final Map<String, BakedRig> rigs = new LinkedHashMap<String, BakedRig>();
+    /** 模型 id → 内嵌动画（bbmodel 内嵌；bedrock json 动画另入）。 */
+    private final Map<String, List<com.opendreamcore.model.ir.AnimationIR>> anims =
+            new LinkedHashMap<String, List<com.opendreamcore.model.ir.AnimationIR>>();
     /** 贴图标签 → PNG 字节（内嵌解码产物或 assets/texture 文件）。 */
-    private final Map<String, byte[]> textures = new HashMap<String, byte[]>();
+    final Map<String, byte[]> textures = new HashMap<String, byte[]>();
     private TextureSink sink;
     private Path root;
     private java.util.List<Path> roots = new java.util.ArrayList<Path>();
     private int loadedModels;
     private int loadedTextures;
+    private volatile long revision;
+
+    /** 资源重载版本；渲染器据此释放旧 GPU 贴图，下一次使用时重新注册。 */
+    public long revision() {
+        return revision;
+    }
 
     private ModelAssetStore() {
     }
@@ -73,9 +84,15 @@ public final class ModelAssetStore {
         root = roots.isEmpty() ? null : roots.get(0);
         models.clear();
         textures.clear();
+        rigs.clear();
+        anims.clear();
+        formats.clear();
+        animPool.clear();
+        animPoolLoaded = false;
         missingIds.clear();
         loadedModels = 0;
         loadedTextures = 0;
+        revision++;
     }
 
     public synchronized void load(Path assetsRoot) {
@@ -91,9 +108,15 @@ public final class ModelAssetStore {
     public synchronized void reload() {
         models.clear();
         textures.clear();
+        rigs.clear();
+        anims.clear();
+        formats.clear();
+        animPool.clear();
+        animPoolLoaded = false;
         missingIds.clear();
         loadedModels = 0;
         loadedTextures = 0;
+        revision++;
     }
 
     /**
@@ -104,13 +127,10 @@ public final class ModelAssetStore {
      * 找不到返回 null（调用方跳过该实体，缺席即安全）。
      */
     public synchronized java.util.List<BakedModel> byModelId(String idRaw) {
-        if (idRaw == null) {
+        if (idRaw == null || idRaw.trim().isEmpty()) {
             return null;
         }
         String id = idRaw.trim();
-        if (id.isEmpty()) {
-            return null;
-        }
         java.util.List<BakedModel> hit = models.get(id);
         if (hit != null) {
             return hit;
@@ -118,19 +138,50 @@ public final class ModelAssetStore {
         if (missingIds.contains(id)) {
             return null;
         }
-        byte[] raw = resolveBytes(id, true);
+        byte[] raw = resolveRaw(id, idRaw);
         if (raw == null) {
             missingIds.add(id);
             ModelLog.warn("模型没找到（按名字直接找，已缓存不再重复找）: " + idRaw + " 根=" + roots);
             return null;
         }
+        return decodeAndBake(id, idRaw, raw);
+    }
+
+    /** 三级找字节：本地路径 → zip 引用 → 资源云兜底。 */
+    private byte[] resolveRaw(String id, String idRaw) {
+        byte[] raw = resolveBytes(id, true);
+        if (raw == null) {
+            raw = resolveZipRef(id);
+        }
+        if (raw == null && cloudResolver != null) {
+            // 资源云兜底：服务端同步下来的非图文件（模型/动画）不落盘，
+            // client 侧启动时把读取器挂进来（common 不能反向依赖 client）
+            try {
+                raw = cloudResolver.apply(idRaw);
+            } catch (Exception ignored) {
+            }
+        }
+        return raw;
+    }
+
+    /** 解码 → 内嵌资源登记 → 烘焙入库。 */
+    private java.util.List<BakedModel> decodeAndBake(String id, String idRaw, byte[] raw) {
         try {
             String name = id.replace('\\', '/');
             int slash = name.lastIndexOf('/');
             if (slash >= 0) {
                 name = name.substring(slash + 1);
             }
-            DecodeResult r = FormatCodecs.decode(name, new String(raw, StandardCharsets.UTF_8));
+            DecodeResult r;
+            if (raw.length > 4 && raw[0] == 'P' && raw[1] == 'K') {
+                r = ZipBundleReader.load(this, name, raw, id);
+            } else {
+                // 统一入口：文本格式（bbmodel/geo/obj/smd）按扩展名走文本路，
+                // 二进制（bmd/ysm）直接吃字节
+                r = FormatCodecs.decodeBytes(name, raw);
+            }
+            formats.put(id, r.model.meta.sourceFormat == null ? "unknown" : r.model.meta.sourceFormat);
+            namespaceEmbeddedMaterials(r, id);
             loadEmbedded(r, id);
             bakeAndPut(id, r);
             java.util.List<BakedModel> baked = models.get(id);
@@ -141,6 +192,7 @@ public final class ModelAssetStore {
             }
             return baked;
         } catch (Exception e) {
+            missingIds.add(id);
             ModelLog.warn("模型解码失败 " + idRaw + ": " + e);
             return null;
         }
@@ -151,7 +203,45 @@ public final class ModelAssetStore {
         return models.keySet();
     }
 
-    /** 贴图按名字直接取（同样是探路径，不扫描）。 */
+    /** 模型 id → 来源格式（meta.sourceFormat；列表列展示用）。 */
+    public synchronized String formatOf(String id) {
+        return formats.get(id);
+    }
+
+    private final Map<String, String> formats = new LinkedHashMap<String, String>();
+
+    /** 资源云兜底读取器（client 启动时注入；common 不反向依赖 client）。 */
+    public static volatile java.util.function.Function<String, byte[]> cloudResolver;
+
+    /**
+     * zip 混合包：引用可以是 {@code 包.zip}（取包内首个模型条目）
+     * 或 {@code 包.zip/内部路径/模型.smd}。返回包字节并把内部路径拼到 id 后。
+     */
+    private byte[] resolveZipRef(String ref) {
+        String norm = AssetRefs.normalizeRef(ref);
+        int cut = norm.toLowerCase(java.util.Locale.ROOT).indexOf(".zip/");
+        String zipRef;
+        String inner;
+        if (cut >= 0) {
+            zipRef = norm.substring(0, cut + 4);
+            inner = norm.substring(cut + 5).replace('\\', '/');
+        } else if (norm.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) {
+            zipRef = norm;
+            inner = null;
+        } else {
+            return null;
+        }
+        byte[] zip = resolveBytes(zipRef, false);
+        if (zip == null || zip.length < 4 || zip[0] != 'P' || zip[1] != 'K') {
+            return null;
+        }
+        pendingZipInner.set(inner);
+        return zip;
+    }
+
+    private static final ThreadLocal<String> pendingZipInner = ZipBundleReader.PENDING_INNER;
+
+
     public synchronized byte[] texture(String label) {
         if (label == null) {
             return null;
@@ -177,26 +267,16 @@ public final class ModelAssetStore {
 
     // ---------------------------------------------------------------- 直接解析（按名字探路径，不做目录扫描）
 
-    private static final String[] MODEL_EXT = {".bbmodel", ".geo.json", ".obj"};
-
-    /** 常见子目录（限定集合，不是扫描）：名字写 models/x 或 x 都能落到同一个文件。 */
-    private static final String[] SUB_DIRS = {
-            "", "models/", "model/", "mobs/", "entity/", "blocks/", "items/",
-            "assets/", "assets/model/", "assets/models/",
-            "assets/opendreamcore/models/", "assets/opendreamcore/model/",
-            "opendreamcore/models/", "opendreamcore/model/",
-    };
-
     /** 探路径取字节：model=true 时缺省补扩展名。 */
     private byte[] resolveBytes(String ref, boolean model) {
-        String norm = normalizeRef(ref);
+        String norm = AssetRefs.normalizeRef(ref);
         if (norm.isEmpty()) {
             return null;
         }
         java.util.List<String> rels = new java.util.ArrayList<String>();
         rels.add(norm);
-        if (model && !hasKnownExt(norm)) {
-            for (String ext : MODEL_EXT) {
+        if (model && !AssetRefs.hasKnownExt(norm)) {
+            for (String ext : AssetRefs.MODEL_EXT) {
                 rels.add(norm + ext);
             }
         } else if (!model && !norm.toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
@@ -211,7 +291,7 @@ public final class ModelAssetStore {
             if (base == null || !Files.isDirectory(base)) {
                 continue;
             }
-            for (String sub : SUB_DIRS) {
+            for (String sub : AssetRefs.SUB_DIRS) {
                 for (String rel : rels) {
                     Path f = base.resolve(sub + rel);
                     if (Files.isRegularFile(f)) {
@@ -227,37 +307,40 @@ public final class ModelAssetStore {
         return null;
     }
 
-    private static String normalizeRef(String ref) {
-        String r = ref.trim().replace('\\', '/');
-        while (r.startsWith("./")) {
-            r = r.substring(2);
-        }
-        while (r.startsWith("/")) {
-            r = r.substring(1);
-        }
-        return r;
-    }
-
-    private static boolean hasKnownExt(String ref) {
-        String lower = ref.toLowerCase(java.util.Locale.ROOT);
-        return lower.endsWith(".bbmodel") || lower.endsWith(".geo.json") || lower.endsWith(".obj")
-                || lower.endsWith(".png");
-    }
-
-    /** 内嵌贴图解码：label = embedded:<名>（与材质引用一致），登记 PNG 字节。 */
+    /** 内嵌贴图解码：每个模型使用独立 namespace，登记 PNG 字节及已绑定的纹理 sink。 */
     private void loadEmbedded(DecodeResult r, String modelId) {
         for (int i = 0; i < r.embeddedTextures.size(); i++) {
             DecodeResult.EmbeddedTexture t = r.embeddedTextures.get(i);
-            textures.put("embedded:" + t.name, t.data);
+            String key = embeddedKey(modelId, t.name);
+            textures.put(key, t.data);
             loadedTextures++;
+            if (sink != null) {
+                sink.register(key, t.data);
+            }
         }
+    }
+
+    /** 内嵌贴图引用不能以裸文件名跨模型共享；只迁移本 DecodeResult 的材质引用。 */
+    private static void namespaceEmbeddedMaterials(DecodeResult r, String modelId) {
+        for (int i = 0; i < r.model.materials.size(); i++) {
+            com.opendreamcore.model.ir.ModelIR.Material material = r.model.materials.get(i);
+            String texture = material.texture;
+            if (texture != null && texture.startsWith("embedded:")) {
+                material.texture = embeddedKey(modelId, texture.substring("embedded:".length()));
+            }
+        }
+    }
+
+    private static String embeddedKey(String modelId, String name) {
+        // 长度分隔避免带 namespace 的模型 id 与贴图名中的 ':' 形成同一个键。
+        return "embedded:" + modelId.length() + ":" + modelId + ":" + name;
     }
 
     private void bakeAndPut(String id, DecodeResult r) {
         // 逐材质归一 UV：每条 BakedModel 用其贴图的像素尺寸
         List<BakedModel> baked = QuadBaker.bake(r.model);
         for (BakedModel b : baked) {
-            int[] dim = pngSize(textures.get(b.texture));
+            int[] dim = pngSize(texture(b.texture));
             if (dim == null) {
                 dim = new int[]{(int) r.model.meta.textureWidth, (int) r.model.meta.textureHeight};
             }
@@ -266,6 +349,134 @@ public final class ModelAssetStore {
             }
         }
         models.put(id, baked);
+        // 骨骼化产物：每个 part 使用自身贴图像素尺寸，不能由首张贴图污染
+        BakedRig rig = RigBaker.rig(r.model);
+        for (BakedRig.Bone bone : rig.bones) {
+            for (BakedRig.Part p : bone.parts) {
+                int[] dim = pngSize(texture(p.texture));
+                if (dim == null) {
+                    dim = new int[]{(int) r.model.meta.textureWidth, (int) r.model.meta.textureHeight};
+                }
+                if (dim[0] > 0 && dim[1] > 0) {
+                    scaleUv(p.quads, dim[0], dim[1]);
+                    scaleUv(p.tris, dim[0], dim[1]);
+                }
+            }
+        }
+        rigs.put(id, rig);
+        anims.put(id, new java.util.ArrayList<com.opendreamcore.model.ir.AnimationIR>(r.animations));
+    }
+
+    /** 全局动画池（名字 → IR）：bbmodel 内嵌 + animations/*.json 独立文件。 */
+    final Map<String, com.opendreamcore.model.ir.AnimationIR> animPool =
+            new LinkedHashMap<String, com.opendreamcore.model.ir.AnimationIR>();
+    private boolean animPoolLoaded;
+
+    /** 按动画名取 IR（懒建池；找不到回 null）。 */
+    public synchronized com.opendreamcore.model.ir.AnimationIR animByName(String name) {
+        ensureAnimPool();
+        return name == null ? null : animPool.get(name);
+    }
+
+    public synchronized boolean animPoolEmpty() {
+        ensureAnimPool();
+        return animPool.isEmpty();
+    }
+
+    /** Animation 库并入：同名以 Animation 库为准（后并入者覆盖）。 */
+    public synchronized void importAnims(Map<String, com.opendreamcore.model.ir.AnimationIR> extra) {
+        if (extra == null || extra.isEmpty()) {
+            return;
+        }
+        ensureAnimPool();
+        animPool.putAll(extra);
+    }
+
+    void ensureAnimPool() {
+        if (animPoolLoaded) {
+            return;
+        }
+        animPoolLoaded = true;
+        for (java.util.List<com.opendreamcore.model.ir.AnimationIR> list : anims.values()) {
+            for (com.opendreamcore.model.ir.AnimationIR a : list) {
+                animPool.put(a.name, a);
+            }
+        }
+        // 独立动画文件：animations/*.json（geo.json 是模型不碰）+ *.bmd（多骨架组即帧动画）
+        for (Path root : roots) {
+            if (root == null || !java.nio.file.Files.isDirectory(root)) {
+                continue;
+            }
+            try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(root)) {
+                walk.filter(p -> {
+                    String n = p.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                    return (n.endsWith(".json") && !n.endsWith(".geo.json")) || n.endsWith(".bmd");
+                }).forEach(this::loadAnimFile);
+            } catch (Exception e) {
+                ModelLog.warn("动画文件扫描失败 " + root + ": " + e);
+            }
+        }
+    }
+
+    private void loadAnimFile(Path p) {
+        try {
+            String fn = p.getFileName().toString();
+            if (fn.toLowerCase(java.util.Locale.ROOT).endsWith(".bmd")) {
+                // 独立 BMD 动画：多骨架组才产 IR；单组的模型文件在这不重复入库
+                byte[] data = java.nio.file.Files.readAllBytes(p);
+                com.opendreamcore.model.format.bmd.BmdCodec codec =
+                        new com.opendreamcore.model.format.bmd.BmdCodec();
+                codec.setAnimName(fn.substring(0, fn.length() - 4));
+                com.opendreamcore.model.format.DecodeResult r =
+                        codec.decode(data);
+                for (com.opendreamcore.model.ir.AnimationIR a : r.animations) {
+                    animPool.put(a.name, a);
+                }
+                return;
+            }
+            String text = new String(java.nio.file.Files.readAllBytes(p),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            for (com.opendreamcore.model.ir.AnimationIR a
+                    : com.opendreamcore.model.format.anim.BedrockAnimCodec.parse(text)) {
+                animPool.put(a.name, a);
+            }
+        } catch (Exception e) {
+            ModelLog.warn("动画文件解析失败 " + p.getFileName() + " -> " + e);
+        }
+    }
+
+    /** 骨骼化产物（与 byModelId 同键；无则 null）。 */
+    public synchronized BakedRig rigOf(String idRaw) {
+        if (idRaw == null) {
+            return null;
+        }
+        return rigs.get(resolvedId(idRaw));
+    }
+
+    /** 内嵌动画（与 byModelId 同键；无则空表）。 */
+    public synchronized java.util.List<com.opendreamcore.model.ir.AnimationIR> animsOf(String idRaw) {
+        java.util.List<com.opendreamcore.model.ir.AnimationIR> out =
+                new java.util.ArrayList<com.opendreamcore.model.ir.AnimationIR>();
+        if (idRaw != null) {
+            java.util.List<com.opendreamcore.model.ir.AnimationIR> hit = anims.get(resolvedId(idRaw));
+            if (hit != null) {
+                out.addAll(hit);
+            }
+        }
+        return out;
+    }
+
+    private synchronized String resolvedId(String idRaw) {
+        String id = idRaw.trim();
+        if (rigs.containsKey(id)) {
+            return id;
+        }
+        for (Map.Entry<String, BakedRig> e : rigs.entrySet()) {
+            if (e.getKey().endsWith(id)) {
+                return e.getKey();
+            }
+        }
+        return id;
     }
 
     private void normalize(BakedModel b, int w, int h) {

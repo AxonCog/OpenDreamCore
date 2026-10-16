@@ -1,6 +1,7 @@
 package com.opendreamcore.adapter.dreamcore.methods;
 
 import com.opendreamcore.adapter.dreamcore.LegacyMethods;
+import com.opendreamcore.script.engine.DreamLangExecutor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,8 +102,19 @@ public final class CoreArrayLegacy {
             for (Object x : src) if (String.valueOf(x).contains(keyword)) out.add(x);
             return out;
         });
-        LegacyMethods.register("map", a -> list(a, 0));
-        LegacyMethods.register("for_each", a -> null);
-        LegacyMethods.register("for_each_simple", a -> null);
+        LegacyMethods.register("map", CoreArrayLegacy::mapWithCallable);
+        LegacyMethods.register("for_each", CoreArrayLegacy::mapWithCallable);
+        LegacyMethods.register("for_each_simple", CoreArrayLegacy::mapWithCallable);
+    }
+
+    /** Legacy aliases use the same list/callback contract as Array.map. */
+    static Object mapWithCallable(Object[] a) {
+        Object source = arg(a, 0);
+        if (!(source instanceof List<?> l)) return new ArrayList<>();
+        Object fn = arg(a, 1);
+        if (!(fn instanceof DreamLangExecutor.Callable c)) return new ArrayList<>(l);
+        List<Object> out = new ArrayList<>(l.size());
+        for (Object item : l) out.add(c.call(new Object[]{item}));
+        return out;
     }
 }

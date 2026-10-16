@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
- * 视口策略注册表（坐标系热拔插的排插）。
+ * 视口策略注册表。
  *
  * 内置 9 个：letterbox（居中留边） + anchor 八向（等比缩放 + 贴边，裁非锚定侧）。
  * 附属想整自定义坐标系：register 一个 {@link ViewportStrategy}，页面 design.fit 写你的名字。
